@@ -149,7 +149,7 @@ function apiSignup(user) {
         .then(function(res) { return res.json(); })
         .then(function(data) {
             if (!data.success) throw new Error(data.message || "Signup failed");
-            if (data.token) setAuthToken(data.token);
+            // No token is issued on signup — OTP verification must complete first.
             return data;
         });
 }
@@ -163,17 +163,18 @@ function apiLogin(creds) {
         .then(function(res) { return res.json(); })
         .then(function(data) {
             if (!data.success) throw new Error(data.message || "Login failed");
-            if (data.token) setAuthToken(data.token);
             return data;
         });
 }
 
-function apiSendOTP(email) {
+// Send an OTP. For "login" purpose the backend validates email + password first.
+function apiSendOtpRequest(email, password, purpose) {
     return fetch(API.base + "/users/send-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email })
-    }).then(function(res) { return res.json(); });
+        body: JSON.stringify({ email: email, password: password, purpose: purpose || "login" })
+    })
+        .then(function(res) { return res.json(); });
 }
 
 function apiVerifyOTP(email, otp) {
@@ -185,6 +186,20 @@ function apiVerifyOTP(email, otp) {
         .then(function(res) { return res.json(); })
         .then(function(data) {
             if (!data.success) throw new Error(data.message || "OTP verification failed");
+            if (data.token) setAuthToken(data.token);
+            return data;
+        });
+}
+
+function apiGoogleLogin(email, name) {
+    return fetch(API.base + "/users/google-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email, name: name })
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Google login failed");
             if (data.token) setAuthToken(data.token);
             return data;
         });

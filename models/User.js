@@ -12,8 +12,12 @@ const userSchema = new mongoose.Schema(
         phone: { type: String, trim: true },
         password: { type: String },
         role: { type: String, enum: ["customer", "admin"], default: "customer" },
-        otp: { type: String },
+        // OTP email-verification state. Only the SHA-256 hash is stored,
+        // never the plain OTP.
+        otpHash: { type: String },
         otpExpiry: { type: Date },
+        otpAttempts: { type: Number, default: 0 },
+        otpResendAt: { type: Date },
         googleId: { type: String },
         isAdmin: { type: Boolean, default: false }
     },

@@ -31,61 +31,93 @@
             </p>
 
 
-            <form id="loginForm">
+            <!-- STEP 1: Email + Password -->
+            <div id="loginStep1">
 
-                <label for="loginEmail">
-                    Email
-                </label>
+                <form id="loginForm">
 
-                <input
-                    type="email"
-                    id="loginEmail"
-                    placeholder="Enter your email"
-                    required
-                >
+                    <label for="loginEmail">
+                        Email
+                    </label>
 
-
-                <label for="loginPassword">
-                    Password
-                </label>
-
-                <input
-                    type="password"
-                    id="loginPassword"
-                    placeholder="Enter your password"
-                >
-
-                <label class="otp-label">
-                    Or login with OTP
-                </label>
-
-                <div class="otp-box">
                     <input
-                        type="text"
-                        id="otpCode"
-                        placeholder="Enter OTP"
-                        maxlength="6"
-                    >
+                        type="email"
+                        id="loginEmail"
+                        placeholder="Enter your email"
+                        required
+                    />
+
+
+                    <label for="loginPassword">
+                        Password
+                    </label>
+
+                    <input
+                        type="password"
+                        id="loginPassword"
+                        placeholder="Enter your password"
+                    />
+
                     <button
-                        type="button"
-                        class="otp-send"
-                        id="sendOtpBtn"
-                        onclick="handleSendOtp()"
+                        type="submit"
+                        class="auth-btn"
                     >
-                        Get OTP
+                        Send OTP
                     </button>
-                </div>
+
+                </form>
+
+            </div>
+
+
+            <!-- STEP 2: OTP verification -->
+            <div id="loginStep2" style="display:none;">
+
+                <p class="coupon-message" aria-live="polite">
+                    Enter the 6-digit OTP sent to <b id="otpSentToEmail"></b>
+                </p>
+
+                <label for="otpCode">
+                    OTP Code
+                </label>
+
+                <input
+                    type="text"
+                    id="otpCode"
+                    placeholder="Enter 6-digit OTP"
+                    maxlength="6"
+                    inputmode="numeric"
+                    autocomplete="one-time-code"
+                />
+
                 <div id="otpMessage" class="coupon-message"></div>
 
+                <div id="otpCountdown" class="coupon-message"></div>
 
                 <button
-                    type="submit"
+                    type="button"
                     class="auth-btn"
+                    id="verifyOtpBtn"
+                    onclick="handleVerifyOtp()"
                 >
-                    Login
+                    Verify OTP
                 </button>
 
-            </form>
+                <button
+                    type="button"
+                    class="auth-btn google-btn"
+                    id="resendOtpBtn"
+                    onclick="handleResendOtp()"
+                >
+                    Resend OTP
+                </button>
+
+                <p class="auth-bottom">
+                    <a href="#" id="backToCredentials" onclick="handleOtpBack()">Change email / password</a>
+                </p>
+
+            </div>
+
 
             <div class="auth-divider">
                 <span>or</span>

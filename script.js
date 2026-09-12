@@ -2339,16 +2339,18 @@ function bindSignupForm() {
 
         var user = { name: name, phone: phone, email: email, password: password };
 
-        // Try backend signup (accounts live in MongoDB via /users/signup)
+        // Try backend signup (accounts live in MongoDB via /users/signup).
+        // No session is issued here: the account must be unlocked by the emailed OTP.
         apiSignup(user)
             .then(function() {
-                // Signup response already carries a JWT -> auto-login the customer.
-                writeStorageValue("freshMartLoggedIn", "true");
-                writeStorageValue("freshMartUser", JSON.stringify({ name: name, email: email, phone: phone }));
-                showToast("Account created successfully!", "success");
-                redirectAfterLoginCheck(safeRedirectDestination("index.html"));
+                showToast("Account created! Enter the OTP sent to your email.", "success");
+                pendingOtpPurpose = "signup";
+                setTimeout(function() {
+                    window.location.href = "login.html?verify=" + encodeURIComponent(email);
+                }, 1200);
             })
             .catch(function(err) {
+                var msg = (err && err.message) ? String(err.message) : "";
                 var existingUser = readStorageValue("freshMartUser");
                 if (existingUser) {
                     try {
@@ -2359,8 +2361,10 @@ function bindSignupForm() {
                         }
                     } catch (error) {}
                 }
-                // Offline / backend down: keep the profile (never the password) locally
-                writeStorageValue("freshMartUser", JSON.stringify({ name: name, email: email, phone: phone }));
+                if (/already exists/i.test(msg)) {
+                    showToast("An account with this email already exists.", "error");
+                    return;
+                }
                 showToast("Could not reach the server. Please try again in a moment.", "error");
             });
     });
@@ -2375,82 +2379,181 @@ function bindLoginForm() {
     if (!loginForm || loginForm.dataset.bound === "true") return;
     loginForm.dataset.bound = "true";
 
+    // The credential step's "Send OTP" button triggers the two-step flow.
     loginForm.addEventListener("submit", function(event) {
         event.preventDefault();
-
-        var email = document.getElementById("loginEmail").value.trim();
-        var password = document.getElementById("loginPassword").value;
-        var otp = document.getElementById("otpCode") ? document.getElementById("otpCode").value.trim() : "";
-
-        // If OTP entered, verify via OTP flow
-        if (otp) {
-            apiVerifyOTP(email, otp)
-                .then(function(data) {
-                    var user = data.data || {};
-                    writeStorageValue("freshMartLoggedIn", "true");
-                    writeStorageValue("freshMartUser", JSON.stringify({ name: user.name, email: user.email, phone: user.phone }));
-                    if (user.isAdmin || user.role === "admin") {
-                        showToast("Admin login successful!", "success");
-                        redirectAfterLoginCheck("admin.html");
-                    } else {
-                        showToast("Login successful!", "success");
-                        redirectAfterLoginCheck(safeRedirectDestination("index.html"));
-                    }
-                })
-                .catch(function(err) {
-                    showToast(err.message || "Invalid OTP.", "error");
-                });
-            return;
-        }
-
-        // Otherwise password login
-        apiLogin({ email: email, password: password })
-            .then(function(data) {
-                var user = data.data || {};
-                writeStorageValue("freshMartLoggedIn", "true");
-                writeStorageValue("freshMartUser", JSON.stringify({ name: user.name, email: user.email, phone: user.phone }));
-                if (user.isAdmin || user.role === "admin") {
-                    showToast("Admin login successful!", "success");
-                    redirectAfterLoginCheck("admin.html");
-                } else {
-                    showToast("Login successful!", "success");
-                    redirectAfterLoginCheck(safeRedirectDestination("index.html"));
-                }
-            })
-            .catch(function(err) {
-                // Password is never stored locally, so online login is the source of truth.
-                var msg = err && err.message ? String(err.message) : "Login failed";
-                if (/fetch|network|Failed to/i.test(msg)) {
-                    showToast("Could not reach the server. Please try again.", "error");
-                } else {
-                    showToast(msg, "error");
-                }
-            });
+        handleSendOtp();
     });
+
+    // Signup hand-off: login.html?verify=<email> jumps straight to the OTP step.
+    var locationSearch = (window.location && window.location.search) ? window.location.search : "";
+    var m = locationSearch.match(/[?&]verify=([^&]+)/);
+    if (m && m[1]) {
+        try {
+            var pendingEmail = decodeURIComponent(m[1]);
+            var emailEl = document.getElementById("loginEmail");
+            if (emailEl) emailEl.value = pendingEmail;
+            var passEl = document.getElementById("loginPassword");
+            if (passEl) passEl.value = "";
+            pendingOtpPurpose = "signup";
+            showOtpStep(pendingEmail);
+        } catch (e) {}
+    }
 }
 
 // ===============================
-// OTP LOGIN
+// OTP LOGIN (email + password + emailed OTP)
 // ===============================
 
+var pendingOtpEmail = "";
+var pendingOtpPurpose = "login";   // "login" | "signup"
+var pendingLoginPassword = "";     // kept in memory only — never localStorage
+var otpResendTs = 0;
+var otpExpireTs = 0;
+var otpCountdownTimer = null;
+
+function nowMs() { return new Date().getTime(); }
+
+function showOtpStep(email) {
+    pendingOtpEmail = String(email || "").trim();
+    var sentTo = document.getElementById("otpSentToEmail");
+    if (sentTo) sentTo.textContent = pendingOtpEmail;
+    var step1 = document.getElementById("loginStep1");
+    var step2 = document.getElementById("loginStep2");
+    if (step1) step1.style.display = "none";
+    if (step2) step2.style.display = "block";
+    var code = document.getElementById("otpCode");
+    if (code) code.value = "";
+    var msgEl = document.getElementById("otpMessage");
+    if (msgEl) msgEl.textContent = "";
+    otpExpireTs = nowMs() + 5 * 60 * 1000;
+    otpResendTs = nowMs();
+    startOtpTimers();
+}
+
+function startOtpTimers() {
+    if (otpCountdownTimer) clearInterval(otpCountdownTimer);
+    updateOtpTimers();
+    otpCountdownTimer = setInterval(updateOtpTimers, 1000);
+}
+
+function updateOtpTimers() {
+    var expLeft = Math.max(0, Math.floor((otpExpireTs - nowMs()) / 1000));
+    var resendLeft = Math.max(0, Math.floor((otpResendTs + 60 * 1000 - nowMs()) / 1000));
+
+    var verifyBtn = document.getElementById("verifyOtpBtn");
+    var resendBtn = document.getElementById("resendOtpBtn");
+    var cdEl = document.getElementById("otpCountdown");
+
+    if (expLeft > 0) {
+        var mins = Math.floor(expLeft / 60);
+        var secs = String(expLeft % 60).padStart(2, "0");
+        if (cdEl) cdEl.textContent = "⏳ Code expires in " + mins + ":" + secs;
+        if (verifyBtn) verifyBtn.disabled = false;
+    } else {
+        if (cdEl) cdEl.textContent = "⏰ Code expired. Please request a new one.";
+        if (verifyBtn) verifyBtn.disabled = true;
+    }
+
+    if (resendBtn) {
+        if (resendLeft > 0) {
+            resendBtn.disabled = true;
+            resendBtn.textContent = "Resend OTP (" + resendLeft + "s)";
+        } else {
+            resendBtn.disabled = false;
+            resendBtn.textContent = "Resend OTP";
+        }
+    }
+}
+
+function requestOtp(email, password, purpose) {
+    if (otpResendTs && nowMs() - otpResendTs < 60000) {
+        var wait = Math.ceil((60000 - (nowMs() - otpResendTs)) / 1000);
+        showToast("Please wait " + wait + "s before requesting another OTP.", "error");
+        return;
+    }
+    showToast("Sending OTP...", "info");
+    apiSendOtpRequest(email, password, purpose).then(function(data) {
+        if (!data.success) {
+            showToast(data.message || "Unable to send OTP.", "error");
+            return;
+        }
+        // Keep the password only in memory for the 60s resend window.
+        pendingLoginPassword = (purpose === "login") ? String(password || "") : "";
+        showToast("OTP sent to your email.", "success");
+        showOtpStep(email);
+    }).catch(function() {
+        showToast("Could not reach the server. Please try again.", "error");
+    });
+}
+
+// Step 1 "Send OTP": email + password -> backend checks credentials -> OTP email.
 function handleSendOtp() {
     var emailEl = document.getElementById("loginEmail");
-    var email = emailEl ? emailEl.value.trim() : "";
-    var messageEl = document.getElementById("otpMessage");
+    var passEl = document.getElementById("loginPassword");
+    var email = emailEl ? String(emailEl.value || "").trim() : "";
+    var password = passEl ? String(passEl.value || "") : "";
 
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        showToast("Please enter a valid email address.", "error");
+        return;
+    }
+    if (!password) {
+        showToast("Please enter your password.", "error");
+        return;
+    }
+    pendingOtpPurpose = "login";
+    requestOtp(email, password, "login");
+}
+
+// Step 2 "Verify OTP": only success issues the authenticated session.
+function handleVerifyOtp() {
+    var codeEl = document.getElementById("otpCode");
+    var otp = codeEl ? String(codeEl.value || "").trim() : "";
+    var email = pendingOtpEmail || (document.getElementById("loginEmail") ? document.getElementById("loginEmail").value.trim() : "");
+
+    if (!/^\d{6}$/.test(otp)) {
+        showToast("Enter the 6-digit code sent to your email.", "error");
+        return;
+    }
     if (!email) {
-        showToast("Please enter your email first.", "error");
+        showToast("Missing email address.", "error");
         return;
     }
 
-    apiSendOTP(email).then(function(data) {
-        if (messageEl) messageEl.textContent = data.devOTP
-            ? "✅ OTP sent! (Demo code: " + data.devOTP + ")"
-            : "✅ OTP sent to your email. (Check server console for demo OTP)";
-        if (!data.success) showToast(data.message || "Failed to send OTP", "error");
-    }).catch(function() {
-        showToast("Backend not available. Password login can be used offline.", "error");
+    apiVerifyOTP(email, otp).then(function(data) {
+        var user = data.data || {};
+        writeStorageValue("freshMartLoggedIn", "true");
+        writeStorageValue("freshMartUser", JSON.stringify({ name: user.name, email: user.email, phone: user.phone }));
+        if (user.isAdmin || user.role === "admin") {
+            showToast("Admin login successful!", "success");
+            redirectAfterLoginCheck("admin.html");
+        } else {
+            showToast("Login successful!", "success");
+            redirectAfterLoginCheck(safeRedirectDestination("index.html"));
+        }
+    }).catch(function(err) {
+        showToast((err && err.message) ? err.message : "Invalid or expired OTP.", "error");
     });
+}
+
+// Step 2 "Resend OTP": falls back to the signup hand-off when no password exists.
+function handleResendOtp() {
+    var email = pendingOtpEmail || (document.getElementById("loginEmail") ? document.getElementById("loginEmail").value.trim() : "");
+    if (!email) return;
+    var purpose = pendingOtpPurpose === "signup" ? "signup" : "login";
+    var password = (purpose === "login")
+        ? (pendingLoginPassword || (document.getElementById("loginPassword") ? String(document.getElementById("loginPassword").value || "") : ""))
+        : "";
+    requestOtp(email, password, purpose);
+}
+
+function handleOtpBack() {
+    if (otpCountdownTimer) clearInterval(otpCountdownTimer);
+    var step1 = document.getElementById("loginStep1");
+    var step2 = document.getElementById("loginStep2");
+    if (step1) step1.style.display = "block";
+    if (step2) step2.style.display = "none";
 }
 
 // ===============================
@@ -2462,10 +2565,11 @@ function handleGoogleLogin() {
     var email = prompt("Enter Google email for demo sign-in:");
     if (!email) return;
 
-    apiLogin({ email: email, password: "google-demo-" + email })
-        .then(function() {
+    apiGoogleLogin(email, email.split("@")[0])
+        .then(function(data) {
+            var user = data.data || {};
             writeStorageValue("freshMartLoggedIn", "true");
-            writeStorageValue("freshMartUser", JSON.stringify({ name: email.split("@")[0], email: email }));
+            writeStorageValue("freshMartUser", JSON.stringify({ name: user.name || email.split("@")[0], email: email, phone: user.phone }));
             showToast("Google login successful!", "success");
             redirectAfterLoginCheck(safeRedirectDestination("index.html"));
         })
