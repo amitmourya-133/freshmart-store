@@ -58,14 +58,25 @@ exports.getCart = async (req, res) => {
 exports.setCart = async (req, res) => {
     try {
         const items = normalizeItems(req.body.items || []);
+        const ids = items.map(it => it.product);
+        const products = await Product.find({ _id: { $in: ids } });
+        const byId = new Map(products.map(p => [String(p._id), p]));
+
         for (const it of items) {
-            const p = await Product.findById(it.product);
+            const p = byId.get(String(it.product));
             if (!p || p.active === false) {
                 return res.status(400).json({
                     success: false,
                     message: (p ? p.name : it.product) + " is no longer available"
                 });
             }
+            if (p.stock <= 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: p.name + " is out of stock"
+                });
+            }
+            it.quantity = Math.min(it.quantity, p.stock);
         }
 
         let cart = await Cart.findOne({ user: req.user._id });

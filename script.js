@@ -1,11 +1,14 @@
 // ===============================
 // PRODUCTS DATA
+// Source of truth: GET /api/products (MongoDB Atlas).
+// This local list is only the OFFLINE FALLBACK — at runtime it is
+// replaced by the catalog fetched from the backend (see ensureCatalogReady).
 // ===============================
 
-const products = [
+let products = [
     // VEGETABLES
     { name: "Fresh Tomato", price: 60, unit: "kg", category: "Vegetables", emoji: "🍅", gradient: "linear-gradient(135deg, #ff6b6b, #ee5a24)", description: "Fresh farm-picked tomatoes, juicy and ripe. Perfect for curries, salads, chutneys and sauces.", nutrition: "Rich in Vitamin C, Potassium, Folate and Vitamin K. Low in calories.", tips: "Store at room temperature until ripe. Refrigerate after ripening to last longer.", origin: "Nashik, Maharashtra" },
-    { name: "Potato", price: 30, unit: "kg", category: "Vegetables", emoji: "🥔", gradient: "linear-gradient(135deg, #d4a574, #c0956c)", description: "Premium quality potatoes, perfect for boiling, frying, baking or making delicious aloo dishes.", nutrition: "Good source of Carbohydrates, Vitamin B6, Potassium and Fiber.", tips: "Store in a cool, dark and dry place. Keep away from onions as they release gases.", origin: "Agra, UP" },
+    { name: "Potato", price: 1, unit: "kg", category: "Vegetables", emoji: "🥔", gradient: "linear-gradient(135deg, #d4a574, #c0956c)", description: "Premium quality potatoes, perfect for boiling, frying, baking or making delicious aloo dishes.", nutrition: "Good source of Carbohydrates, Vitamin B6, Potassium and Fiber.", tips: "Store in a cool, dark and dry place. Keep away from onions as they release gases.", origin: "Agra, UP" },
     { name: "Onion", price: 60, unit: "kg", category: "Vegetables", emoji: "🧅", gradient: "linear-gradient(135deg, #f0c27f, #d4a056)", description: "Fresh onions with strong flavor. Essential for Indian cooking, salads and pickles.", nutrition: "Rich in Vitamin C, B6, Potassium and antioxidants like Quercetin.", tips: "Store in a cool, dry and ventilated place. Can last several weeks.", origin: "Nashik, Maharashtra" },
     { name: "Carrot", price: 40, unit: "kg", category: "Vegetables", emoji: "🥕", gradient: "linear-gradient(135deg, #ff9a44, #fc6076)", description: "Sweet and crunchy carrots, ideal for salads, juices, halwa and curries.", nutrition: "Excellent source of Beta-carotene, Vitamin A, Fiber and Potassium.", tips: "Remove green tops before storing. Keep in refrigerator in a plastic bag.", origin: "Bangalore, Karnataka" },
     { name: "Cauliflower", price: 100, unit: "kg", category: "Vegetables", emoji: "🥦", gradient: "linear-gradient(135deg, #a8e063, #56ab2f)", description: "Fresh white cauliflower with tight florets. Great for gobi manchurian, paratha and curry.", nutrition: "High in Vitamin C, Vitamin K, Fiber and Folate.", tips: "Store unwashed in refrigerator. Use within a week for best freshness.", origin: "Pune, Maharashtra" },
@@ -125,6 +128,57 @@ function loadProductIdMap() {
     }).catch(function() {
         productIdMap = {};
         return productIdMap;
+    });
+}
+
+// ===============================
+// DB-DRIVEN CATALOG
+// Loads the catalog from GET /api/products once and replaces the global
+// `products` array with the MongoDB documents (all 56 items).
+// ===============================
+
+var catalogReady = false;
+
+function populateCatalog(list) {
+    if (!Array.isArray(list) || !list.length) return;
+    products.length = 0;
+    list.forEach(function(p) {
+        products.push({
+            _id: p._id,
+            name: p.name,
+            price: p.price,
+            unit: p.unit,
+            category: p.category,
+            emoji: p.emoji,
+            gradient: p.gradient,
+            description: p.description,
+            nutrition: p.nutrition,
+            tips: p.tips,
+            origin: p.origin,
+            stock: p.stock,
+            rating: p.rating,
+            ratingCount: p.ratingCount
+        });
+    });
+}
+
+// Ensures the catalog is loaded from the backend before page rendering.
+// Falls back to the local fallback list when the backend is unreachable,
+// so the store keeps working offline (same as before, still 56 products).
+function ensureCatalogReady(callback) {
+    if (catalogReady) {
+        if (callback) callback();
+        return;
+    }
+    fetchProducts().then(function(list) {
+        populateCatalog(list);
+        var map = {};
+        (list || []).forEach(function(p) {
+            if (p._id && p.name) map[p.name] = p._id;
+        });
+        productIdMap = map;
+        catalogReady = true;
+        if (callback) callback();
     });
 }
 
@@ -275,6 +329,100 @@ function redirectAfterLoginCheck(url) {
 }
 
 // ===============================
+// AUTH GATE / CUSTOMER ENTRY FLOW
+// ===============================
+
+// Pages that a customer may only see after signing in.
+var AUTH_PROTECTED_PAGES = ["home", "checkout", "orders"];
+
+function isProtectedPage(page) {
+    return AUTH_PROTECTED_PAGES.indexOf(page) !== -1;
+}
+
+// Build the login URL and remember where the user wanted to go (= redirect back later).
+function authLoginPage() {
+    var current = (window.location && window.location.href) ? window.location.href : "";
+    var file = String(current).split(/[?#]/)[0].split("/").pop();
+    if (file && file !== "login.html" && file !== "signup.html") {
+        try { storeAuthRedirect(file); } catch (e) {}
+    }
+    return "login.html";
+}
+
+// Validate the stored JWT against the backend. Rejects on 401-equivalent replies.
+function verifySession() {
+    var token = getAuthToken();
+    if (!token) return Promise.reject(new Error("Not authorized"));
+    return apiGetMe();
+}
+
+// Guard for protected pages. Returns false when a redirect is already happening.
+function gateProtectedPage() {
+    var page = document.body ? document.body.dataset.page : "";
+    if (!isProtectedPage(page)) return true;
+
+    // No token at all -> straight to Login / Create Account.
+    if (!getAuthToken()) {
+        window.location.replace(authLoginPage());
+        return false;
+    }
+
+    // Token exists: verify it against the backend while the page renders.
+    // Invalid / expired tokens bounce back to the login page.
+    if (document.body) document.body.style.visibility = "hidden";
+    verifySession().then(function() {
+        writeStorageValue("freshMartLoggedIn", "true");
+        if (document.body) document.body.style.visibility = "";
+    }).catch(function(err) {
+        var msg = err && err.message ? String(err.message) : "";
+        if (msg.indexOf("Not authorized") !== -1 || msg.indexOf("not authorized") !== -1 ||
+            msg.indexOf("User not found") !== -1 || msg.indexOf("401") !== -1) {
+            clearAuthState();
+            window.location.replace(authLoginPage());
+            return;
+        }
+        // Backend unreachable: keep the trusted local session (offline mode).
+        if (document.body) document.body.style.visibility = "";
+    });
+    return true;
+}
+
+// Logout: wipe the whole session and go back to the auth entry page.
+function handleLogout() {
+    clearAuthState();
+    showToast("Logged out successfully.", "success");
+    setTimeout(function() {
+        window.location.href = "login.html";
+    }, 400);
+}
+
+// Swap the header auth buttons between "Create Account / Login" and "Hi <name> / Logout".
+function updateAuthHeader() {
+    var area = document.getElementById("authArea");
+    if (!area) return;
+
+    var name = getAuthUserName();
+    if (isLoggedIn() && name) {
+        var safeName = String(name).replace(/[&<>"']/g, function(ch) {
+            return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
+        });
+        area.innerHTML = '<button type="button" class="secondary-btn auth-name-btn" title="' + safeName + '">👤 ' + safeName + '</button>' +
+            '<button type="button" class="secondary-btn" onclick="handleLogout()">Logout</button>';
+    } else {
+        area.innerHTML = '<button type="button" class="secondary-btn" onclick="window.location.href=\'signup.html\'">Create Account</button>' +
+            '<button type="button" class="secondary-btn" onclick="window.location.href=\'login.html\'">Login</button>';
+    }
+}
+
+// Guard used by the in-page "Proceed To Checkout" action.
+function requireAuthForCheckout() {
+    if (isLoggedIn()) return true;
+    storeAuthRedirect("checkout.html");
+    window.location.href = "login.html";
+    return false;
+}
+
+// ===============================
 // STORAGE HELPERS
 // ===============================
 
@@ -347,19 +495,29 @@ function showToast(message, type) {
 
 function addToCart(name, price, unit) {
     var product = products.find(function(p) { return p.name === name; });
+    if (product && Number(product.stock) <= 0) {
+        showToast(name + " is currently out of stock.", "error");
+        return;
+    }
     var u = unit || (product ? product.unit : "kg");
     var opt = getActiveOption(name, u);
     var scaled = Math.round(price * opt.mult * 100) / 100;
+    var productId = (product && product._id) ? product._id : null;
     var existingProduct = cart.find(function(item) { return item.name === name; });
 
     if (existingProduct) {
+        if (product && Number(product.stock) < (existingProduct.quantity + 1)) {
+            showToast("Only " + product.stock + " units of " + name + " available.", "error");
+            return;
+        }
         existingProduct.quantity++;
         existingProduct.price = scaled;
         existingProduct.qtyLabel = opt.label;
         existingProduct.mult = opt.mult;
         existingProduct.unit = u;
+        existingProduct.productId = productId;
     } else {
-        cart.push({ name: name, price: scaled, quantity: 1, qtyLabel: opt.label, mult: opt.mult, unit: u });
+        cart.push({ name: name, price: scaled, quantity: 1, qtyLabel: opt.label, mult: opt.mult, unit: u, productId: productId });
     }
 
     saveCart();
@@ -426,6 +584,14 @@ function updateCart() {
 
 function increaseQuantity(index) {
     if (!cart[index]) return;
+    var item = cart[index];
+    if (item.productId) {
+        var product = products.find(function(p) { return p._id === item.productId; });
+        if (product && Number(product.stock) <= item.quantity) {
+            showToast("Only " + product.stock + " units of " + item.name + " available.", "error");
+            return;
+        }
+    }
     cart[index].quantity++;
     saveCart();
     updateCart();
@@ -948,6 +1114,14 @@ var PRODUCT_IMAGE_FILES = {
 };
 
 function getProductImage(name) {
+    // Admin image override (Product.image in MongoDB) wins, if set.
+    if (Array.isArray(products)) {
+        for (var i = 0; i < products.length; i++) {
+            if (products[i].name === name && products[i].image) {
+                return products[i].image.indexOf("images/") === 0 ? products[i].image : "images/" + products[i].image;
+            }
+        }
+    }
     return PRODUCT_IMAGE_FILES[name] || "";
 }
 
@@ -1086,7 +1260,7 @@ function updateAllCartControls() {
 // QUANTITY / WEIGHT SELECTORS
 // ===============================
 
-var MIN_ORDER_AMOUNT = 250;
+var MIN_ORDER_AMOUNT = 1;
 var qtySelections = {};
 
 function getQtyOptions(unit) {
@@ -1271,6 +1445,15 @@ function submitReview() {
     showToast("Thanks for your review! ⭐", "success");
     document.getElementById("reviewComment").value = "";
     document.getElementById("reviewName").value = "";
+
+    // Also persist to MongoDB when the backend is up (fire-and-forget so the
+    // store keeps working offline). These DB reviews are manageable from admin.
+    var prod = products[id];
+    if (prod && prod._id && typeof apiAddReview === "function") {
+        apiAddReview(prod._id, { rating: rating, comment: comment, userName: userName || "Anonymous" })
+            .catch(function() {});
+    }
+
     loadProductDetail();
 }
 
@@ -1329,12 +1512,23 @@ function detailQtyChange(delta) {
 function addDetailToCart(name, price, unit) {
     var opt = getActiveOption(name, unit || "kg");
     var scaled = Math.round(price * opt.mult * 100) / 100;
+    var product = products.find(function(p) { return p.name === name; });
+    if (product && Number(product.stock) <= 0) {
+        showToast(name + " is currently out of stock.", "error");
+        return;
+    }
+    var productId = (product && product._id) ? product._id : null;
     for (var i = 0; i < detailQtyValue; i++) {
         var existingProduct = cart.find(function(item) { return item.name === name; });
         if (existingProduct) {
+            if (product && Number(product.stock) < (existingProduct.quantity + 1)) {
+                showToast("Only " + product.stock + " units of " + name + " available.", "error");
+                return;
+            }
             existingProduct.quantity++;
+            existingProduct.productId = productId;
         } else {
-            cart.push({ name: name, price: scaled, quantity: 1, qtyLabel: opt.label, mult: opt.mult, unit: unit });
+            cart.push({ name: name, price: scaled, quantity: 1, qtyLabel: opt.label, mult: opt.mult, unit: unit, productId: productId });
         }
     }
     saveCart();
@@ -1434,6 +1628,8 @@ function restartBannerAuto() {
 // ===============================
 
 function proceedToCheckout() {
+    if (typeof requireAuthForCheckout === "function" && !requireAuthForCheckout()) return;
+
     if (!cart || cart.length === 0) {
         var savedCart = localStorage.getItem("freshMartCart");
         if (savedCart) {
@@ -1468,11 +1664,33 @@ function getCartSubtotal() {
     return sum;
 }
 
+// Re-sync cart prices (and productId) from the current backend catalog, so a
+// stale local cart never charges the customer today's old price at checkout.
+function refreshCartPrices() {
+    ensureCatalogReady(function() {
+        cart.forEach(function(item) {
+            var product = products.find(function(p) { return p.name === item.name; });
+            if (product && product._id) {
+                item.productId = product._id;
+                var mult = getMultForWeight(item.qtyLabel, item.unit || product.unit);
+                item.price = Math.round((Number(product.price) || 0) * mult * 100) / 100;
+                item.unit = product.unit;
+            }
+        });
+        saveCart();
+    });
+}
+
 // ===============================
 // LOAD CHECKOUT
 // ===============================
 
 function loadCheckout() {
+    refreshCartPrices();
+    renderCheckout();
+}
+
+function renderCheckout() {
     var checkoutItems = document.getElementById("checkoutItems");
     if (!checkoutItems) return;
 
@@ -1617,6 +1835,8 @@ function buildOrderObject() {
     var phone = document.getElementById("customerPhone").value.trim();
     var address = document.getElementById("customerAddress").value.trim();
     var city = document.getElementById("customerCity").value.trim();
+    var stateEl = document.getElementById("customerState");
+    var state = stateEl ? stateEl.value.trim() : "";
     var pincode = document.getElementById("customerPincode").value.trim();
 
     var orderNumber = "FM" + Date.now().toString().slice(-6);
@@ -1625,28 +1845,41 @@ function buildOrderObject() {
 
     return {
         orderNumber: orderNumber,
-        customer: { name: name, phone: phone, address: address, city: city, pincode: pincode },
+        customer: { name: name, phone: phone, address: address, city: city, state: state || undefined, pincode: pincode },
         items: JSON.parse(JSON.stringify(cart)),
         subtotal: subtotal,
         total: subtotal + delivery,
         paymentMethod: getCurrentPaymentMethod(),
         onlineMethod: getSelectedOnlineMethod(),
-        deliverySlot: getDeliverySlot()
+        deliverySlot: getDeliverySlot(),
+        clientRef: "web-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10)
     };
 }
 
-// Show QR code payment modal for online orders
-function showQrPaymentModal(order) {
-    var amount = order.total;
-    var upiId = "freshmart@upi"; // store UPI ID - change this
-
-    // UPI deep link for QR (works with GPay/PhonePe/Paytm scanning)
-    var upiLink = "upi://pay?pa=" + upiId +
-        "&pn=FreshMart%20Store" +
-        "&am=" + amount +
+// Build a dynamic UPI deep link so UPI apps open with the exact amount pre-filled.
+// Amount is always the server-validated order total (never user-typed).
+function buildUpiLink(amount, orderNumber) {
+    var amt = Math.round((Number(amount) || 0) * 100) / 100;
+    if (!(amt > 0)) return null;
+    var upiId = "amit728@nyes";
+    return "upi://pay?pa=" + encodeURIComponent(upiId) +
+        "&pn=" + encodeURIComponent("FreshMart Store") +
+        "&am=" + encodeURIComponent(String(amt)) +
         "&cu=INR" +
-        "&tn=" + order.orderNumber;
-    var qrUrl = "https://api.qrserver.com/v1/create-qr-code/?size=250x250&bgcolor=ffffff&color=159447&data=" + encodeURIComponent(upiLink);
+        "&tn=" + encodeURIComponent(orderNumber || ("FM" + Date.now().toString().slice(-6)));
+}
+
+// Show QR code payment modal for online orders.
+// quote = server-validated {subtotal, delivery, total} from /api/orders/quote.
+function showQrPaymentModal(order, quote) {
+    // Payment amount is the server-validated total; client total is only a fallback
+    var amount = (quote && quote.total > 0) ? quote.total : order.total;
+    var upiId = "amit728@nyes";
+
+    // Dynamic UPI deep link with the exact amount (pre-fills the amount in UPI apps)
+    var upiLink = buildUpiLink(amount, order.orderNumber);
+    // Static QR image (Amit's UPI QR - amit728@nyes), kept as fallback.
+    var qrUrl = "images/payment-qr.jpeg";
 
     var methodLabel = order.onlineMethod === "card" ? "Credit/Debit Card"
         : order.onlineMethod === "netbanking" ? "Net Banking"
@@ -1662,7 +1895,8 @@ function showQrPaymentModal(order) {
             '<button class="qr-close" onclick="closeQrModal()">✕</button>' +
             '<h3>' + (order.onlineMethod === "card" ? "💳" : order.onlineMethod === "netbanking" ? "🏛️" : order.onlineMethod === "wallet" ? "👛" : "📱") + ' ' + methodLabel + ' Payment</h3>' +
             '<p class="qr-amount">Amount to pay: <strong>₹' + amount + '</strong></p>' +
-            '<p class="qr-instruction">Scan this QR code with any UPI app and pay, then click "I have paid".</p>' +
+            '<a class="qr-pay-btn" href="' + upiLink + '" target="_blank" rel="noopener">📲 Pay ₹' + amount + ' via UPI</a>' +
+            '<p class="qr-instruction">Amount ₹' + amount + ' is auto-filled in your UPI app. Tap "Pay via UPI" above, or scan this QR in any UPI app, then click "I have paid".</p>' +
             '<div class="qr-code-wrap">' +
                 '<img src="' + qrUrl + '" alt="QR Code" onerror="this.style.display=\'none\';document.getElementById(\'qrFallback\').style.display=\'block\';" />' +
                 '<div id="qrFallback" style="display:none;">' +
@@ -1671,6 +1905,10 @@ function showQrPaymentModal(order) {
                 '</div>' +
             '</div>' +
             '<p class="qr-amount">Order ID: <strong>' + order.orderNumber + '</strong></p>' +
+            '<div class="qr-txn">' +
+                '<label for="qrTxnRef">UPI / Txn Reference (optional — helps verify your payment faster)</label>' +
+                '<input type="text" id="qrTxnRef" maxlength="60" placeholder="e.g. 406814226889 or your UPI App Ref ID" />' +
+            '</div>' +
             '<button class="paid-btn" onclick="confirmPaidPayment()">✅ I have paid</button>' +
             '<button class="pay-cancel-btn" onclick="closeQrModal()">Cancel Payment</button>' +
         '</div>';
@@ -1682,6 +1920,7 @@ function closeQrModal() {
     var modal = document.getElementById("qrModal");
     if (modal) modal.remove();
     pendingOrderConfirmed = false;
+    reenablePlaceOrder();
 }
 
 // ===============================
@@ -1733,15 +1972,21 @@ function placeOrder() {
             if (config && config.configured) {
                 return placeOnlineOrder(order);
             }
-            // Demo mode (no Razorpay keys) -> keep the existing QR fallback
+            // Demo mode (no Razorpay keys) -> validate the total server-side first,
+            // then show the QR modal with the exact validated amount pre-filled
             pendingOrder = order;
             pendingOrderConfirmed = false;
-            showQrPaymentModal(order);
+            getOrderQuote(order.items).then(function(quote) {
+                showQrPaymentModal(order, quote);
+            }).catch(function(err) {
+                reenablePlaceOrder();
+                showToast((err && err.message) ? err.message : "Could not calculate the order total. Please try again.", "error");
+            });
         }).catch(function() {
-            // Backend unavailable -> use the QR demo flow
+            // Backend unavailable -> use the QR demo flow with the client total
             pendingOrder = order;
             pendingOrderConfirmed = false;
-            showQrPaymentModal(order);
+            showQrPaymentModal(order, null);
         });
         return;
     }
@@ -1793,16 +2038,17 @@ function placeOnlineOrder(order) {
             return openRazorpayCheckout(savedOrder, rzpOrder, keyId);
         }
 
-        // Server is up but Razorpay isn't configured -> QR demo fallback
+        // Server is up but Razorpay isn't configured -> QR demo fallback.
+        // Server order (res.data) carries the validated total for the payment amount.
         reenablePlaceOrder();
         pendingOrderConfirmed = false;
-        showQrPaymentModal(order);
+        showQrPaymentModal(order, res.data);
     }).catch(function(err) {
         reenablePlaceOrder();
         showToast((err && err.message) ? err.message : "Could not initialise payment.", "error");
         // Offline fallback so the checkout still works via the QR demo flow
         pendingOrderConfirmed = false;
-        showQrPaymentModal(order);
+        showQrPaymentModal(order, null);
     });
 }
 
@@ -1851,11 +2097,13 @@ function openRazorpayCheckout(savedOrder, rzpOrder, keyId) {
                         razorpay_order_id: response.razorpay_order_id,
                         razorpay_payment_id: response.razorpay_payment_id,
                         razorpay_signature: response.razorpay_signature
-                    }).then(function() {
+                    }).then(function(verifiedOrder) {
                         var order = pendingOrder || savedOrder;
                         order.orderNumber = savedOrder.orderNumber;
-                        order.payment = "Razorpay - " + onlineMethodLabel();
-                        finishOrderUI(order, true);
+                        order.trackingId = verifiedOrder.trackingId || savedOrder.trackingId;
+                        order.payment = verifiedOrder.payment || ("Razorpay - " + onlineMethodLabel());
+                        order.paymentStatus = verifiedOrder.paymentStatus || (verifiedOrder.paid ? "PAID" : "PENDING");
+                        finishOrderUI(order, true, order.paymentStatus);
                         resolve();
                     }).catch(function(err) {
                         showToast((err && err.message) ? err.message : "Payment verification failed.", "error");
@@ -1885,35 +2133,38 @@ function openRazorpayCheckout(savedOrder, rzpOrder, keyId) {
         showToast("Could not load the payment gateway. Please try again.", "error");
         reenablePlaceOrder();
         pendingOrderConfirmed = false;
-        showQrPaymentModal(pendingOrder);
+        showQrPaymentModal(pendingOrder, null);
     });
 }
 
-// Called when user clicks "I have paid"
+// Called when user clicks "I have paid". The payment is recorded as MANUAL and
+// stays PENDING until an admin verifies the UPI transfer — never treated as paid.
 function confirmPaidPayment() {
     if (!pendingOrder) return;
 
     var order = pendingOrder;
-    order.payment = "Razorpay - " + (order.onlineMethod === "card" ? "Card"
-        : order.onlineMethod === "netbanking" ? "Net Banking"
-        : order.onlineMethod === "wallet" ? "Wallet"
-        : "UPI");
-    order.paid = true;
+    order.payment = "UPI (QR) - Manual";
+    order.paymentMode = "manual";
+    order.paid = false;
+    var refEl = document.getElementById("qrTxnRef");
+    order.paymentReference = (refEl && refEl.value) ? String(refEl.value).trim() : "";
 
     closeQrModal();
     finalizeOrder(order, true);
 }
 
-// Save order (backend or localStorage) and show receipt
+// Save order via backend (server computes totals + payment status) and show receipt.
+// COD is marked paid on the server; online-manual stays PENDING for
+// admin verification. Failures surface as errors instead of fake local success.
 function finalizeOrder(order, isOnline) {
-    // Attach names/price to items if no productId
+    // Attach names/price to items; resolve productId from cart or the catalog map
     order.items = order.items.map(function(item) {
         return {
             name: item.name,
             price: item.price,
             quantity: item.quantity || 1,
             weight: item.qtyLabel || null,
-            productId: item.productId || null
+            productId: cartItemProductId(item)
         };
     });
 
@@ -1926,18 +2177,22 @@ function finalizeOrder(order, isOnline) {
         subtotal: order.subtotal,
         delivery: order.delivery,
         total: order.total,
-        paid: isOnline === true,
+        paid: false, // the server decides COD-paid vs manual-pending vs razorpay
         deliverySlot: order.deliverySlot || getDeliverySlot()
     };
+    if (order.paymentMode) payload.paymentMode = order.paymentMode;
+    if (order.paymentReference) payload.paymentReference = order.paymentReference;
+    if (order.clientRef) payload.clientRef = order.clientRef;
 
-    // Try backend first; fallback to localStorage
-    submitOrder(payload).then(function(savedOrder) {
+    createOrderBackend(payload).then(function(res) {
+        var savedOrder = res.data || {};
         order.orderNumber = savedOrder.orderNumber || order.orderNumber;
-        finishOrderUI(order, isOnline);
-    }).catch(function() {
-        var local = saveOrderLocallyExtra(payload);
-        order.orderNumber = local.orderNumber;
-        finishOrderUI(order, isOnline);
+        order.trackingId = savedOrder.trackingId;
+        order._id = savedOrder._id;
+        order.paymentStatus = savedOrder.paymentStatus || (isOnline ? "PENDING" : "PAID");
+        finishOrderUI(order, isOnline, order.paymentStatus);
+    }).catch(function(err) {
+        showToast((err && err.message) ? err.message : "Could not save your order. Please try again.", "error");
     });
 }
 
@@ -1964,18 +2219,27 @@ function saveOrderLocallyExtra(payload) {
     return saved;
 }
 
-function finishOrderUI(order, isOnline) {
+function finishOrderUI(order, isOnline, paymentStatus) {
     var orderNumberElement = document.getElementById("orderNumber");
-    if (orderNumberElement) orderNumberElement.innerText = "Order ID: #" + order.orderNumber;
+    if (orderNumberElement) {
+        orderNumberElement.innerText = "Order ID: #" + order.orderNumber +
+            (order.trackingId ? "  •  Track ID: " + order.trackingId : "");
+    }
 
     var successMessage = document.getElementById("successMessage");
     if (successMessage) successMessage.style.display = "block";
 
     var receiptLine = document.getElementById("successReceipt");
     if (receiptLine) {
-        receiptLine.innerText = isOnline
-            ? "Payment: " + order.payment + " • Paid ✓"
-            : "Payment: Cash on Delivery";
+        if (isOnline) {
+            if (paymentStatus === "PAID") {
+                receiptLine.innerText = "Payment: " + (order.payment || "Online") + " • Paid ✓";
+            } else {
+                receiptLine.innerText = "Payment: " + (order.payment || "Online Payment") + " • Awaiting confirmation (your order will be confirmed once the UPI transfer is verified).";
+            }
+        } else {
+            receiptLine.innerText = "Payment: Cash on Delivery";
+        }
     }
 
     cart = [];
@@ -1995,26 +2259,49 @@ function finishOrderUI(order, isOnline) {
 function initializePage() {
     initDarkMode();
     loadWishlist();
+    updateAuthHeader();
 
     var page = document.body.dataset.page;
 
-    if (page === "home") {
-        initHomePage();
-    } else if (page === "checkout") {
-        loadCart();
-        loadCheckout();
-    } else if (page === "orders") {
-        loadCart();
-        loadOrders();
-    } else if (page === "detail") {
-        loadCart();
-        loadProductDetail();
-    } else {
-        loadCart();
+    // AUTH ENTRY GATE — protected pages are checked before any page work.
+    if (!gateProtectedPage()) return;
+
+    // Auth pages: an already-signed-in user should not see Login / Create Account.
+    if (page === "login" || page === "signup") {
+        if (getAuthToken()) {
+            window.location.replace("index.html");
+            return;
+        }
     }
 
-    // For logged-in users, adopt the DB cart (merges with local-only items)
-    loadCartFromServer();
+    function runPage() {
+        if (page === "home") {
+            initHomePage();
+        } else if (page === "checkout") {
+            loadCart();
+            loadCheckout();
+        } else if (page === "orders") {
+            loadCart();
+            loadOrders();
+        } else if (page === "detail") {
+            loadCart();
+            loadProductDetail();
+        } else {
+            loadCart();
+        }
+
+        // For logged-in users, adopt the DB cart (merges with local-only items)
+        loadCartFromServer();
+    }
+
+    // Render everything from the MongoDB catalog (GET /api/products).
+    // When the backend is down, falls back to the bundled 56-item list.
+    ensureCatalogReady(function() {
+        initPriceRange();
+        renderProducts();
+        renderRecentlyViewed();
+        runPage();
+    });
 
     bindSignupForm();
     bindLoginForm();
@@ -2052,15 +2339,14 @@ function bindSignupForm() {
 
         var user = { name: name, phone: phone, email: email, password: password };
 
-        // Try backend signup, fallback to localStorage
+        // Try backend signup (accounts live in MongoDB via /users/signup)
         apiSignup(user)
             .then(function() {
-                // Backend created the account; store locally too for cross-checking
-                writeStorageValue("freshMartUser", JSON.stringify(user));
+                // Signup response already carries a JWT -> auto-login the customer.
+                writeStorageValue("freshMartLoggedIn", "true");
+                writeStorageValue("freshMartUser", JSON.stringify({ name: name, email: email, phone: phone }));
                 showToast("Account created successfully!", "success");
-                setTimeout(function() {
-                    window.location.href = "login.html";
-                }, 1000);
+                redirectAfterLoginCheck(safeRedirectDestination("index.html"));
             })
             .catch(function(err) {
                 var existingUser = readStorageValue("freshMartUser");
@@ -2073,12 +2359,9 @@ function bindSignupForm() {
                         }
                     } catch (error) {}
                 }
-                // If backend is offline, save locally (offline mode)
-                writeStorageValue("freshMartUser", JSON.stringify(user));
-                showToast("Account created successfully! (offline mode)", "success");
-                setTimeout(function() {
-                    window.location.href = "login.html";
-                }, 1000);
+                // Offline / backend down: keep the profile (never the password) locally
+                writeStorageValue("freshMartUser", JSON.stringify({ name: name, email: email, phone: phone }));
+                showToast("Could not reach the server. Please try again in a moment.", "error");
             });
     });
 }
@@ -2111,7 +2394,7 @@ function bindLoginForm() {
                         redirectAfterLoginCheck("admin.html");
                     } else {
                         showToast("Login successful!", "success");
-                        redirectAfterLoginCheck("index.html");
+                        redirectAfterLoginCheck(safeRedirectDestination("index.html"));
                     }
                 })
                 .catch(function(err) {
@@ -2131,27 +2414,16 @@ function bindLoginForm() {
                     redirectAfterLoginCheck("admin.html");
                 } else {
                     showToast("Login successful!", "success");
-                    redirectAfterLoginCheck("index.html");
+                    redirectAfterLoginCheck(safeRedirectDestination("index.html"));
                 }
             })
-            .catch(function() {
-                // Fallback to localStorage login (offline mode)
-                var savedUser = readStorageValue("freshMartUser");
-                if (!savedUser) {
-                    showToast("No account found. Please create an account first.", "error");
-                    return;
-                }
-                try {
-                    var user = JSON.parse(savedUser);
-                    if (email === user.email && password === user.password) {
-                        writeStorageValue("freshMartLoggedIn", "true");
-                        showToast("Login successful! (offline)", "success");
-                        setTimeout(function() { window.location.href = "index.html"; }, 1000);
-                    } else {
-                        showToast("Invalid email or password.", "error");
-                    }
-                } catch (error) {
-                    showToast("User data is invalid. Please create a new account.", "error");
+            .catch(function(err) {
+                // Password is never stored locally, so online login is the source of truth.
+                var msg = err && err.message ? String(err.message) : "Login failed";
+                if (/fetch|network|Failed to/i.test(msg)) {
+                    showToast("Could not reach the server. Please try again.", "error");
+                } else {
+                    showToast(msg, "error");
                 }
             });
     });
@@ -2195,7 +2467,7 @@ function handleGoogleLogin() {
             writeStorageValue("freshMartLoggedIn", "true");
             writeStorageValue("freshMartUser", JSON.stringify({ name: email.split("@")[0], email: email }));
             showToast("Google login successful!", "success");
-            redirectAfterLoginCheck("index.html");
+            redirectAfterLoginCheck(safeRedirectDestination("index.html"));
         })
         .catch(function(err) {
             showToast(err.message || "Google login failed. Try email/password.", "error");
@@ -2210,63 +2482,134 @@ function loadOrders() {
     var ordersContainer = document.getElementById("ordersContainer");
     if (!ordersContainer) return;
 
-    var savedOrders = localStorage.getItem("freshMartOrders");
-
-    if (!savedOrders) {
-        ordersContainer.innerHTML = '<div class="empty-orders"><div class="empty-orders-icon">📦</div><h2>No Orders Yet</h2><p>You haven\'t placed any orders yet.</p><button type="button" onclick="window.location.href=\'index.html\'">Start Shopping</button></div>';
-        return;
-    }
-
-    var orders = [];
+    var localOrders = [];
     try {
-        orders = JSON.parse(savedOrders);
-        if (!Array.isArray(orders)) orders = [];
-    } catch (error) {
-        ordersContainer.innerHTML = '<div class="empty-orders"><h2>Order data is invalid</h2></div>';
+        var so = localStorage.getItem("freshMartOrders");
+        if (so) {
+            localOrders = JSON.parse(so);
+            if (!Array.isArray(localOrders)) localOrders = [];
+        }
+    } catch (e) { localOrders = []; }
+
+    if (typeof isLoggedIn !== "function" || !isLoggedIn()) {
+        var guestHTML = '<div class="empty-orders"><div class="empty-orders-icon">🔐</div><h2>Log in to see your orders</h2><p>Your account orders are synced from the server. Guest orders below are only saved on this device.</p><button type="button" onclick="window.location.href=\'login.html\'">Log In</button></div>';
+        ordersContainer.innerHTML = guestHTML + renderOrdersListHTML(localOrders, true);
         return;
     }
 
-    if (orders.length === 0) {
-        ordersContainer.innerHTML = '<div class="empty-orders"><div class="empty-orders-icon">📦</div><h2>No Orders Yet</h2><p>You haven\'t placed any orders yet.</p></div>';
-        return;
+    ordersContainer.innerHTML = '<div class="empty-orders"><div class="empty-orders-icon">⏳</div><h2>Loading your orders...</h2></div>';
+
+    fetchMyOrders().then(function(orders) {
+        ordersContainer.innerHTML = renderOrdersListHTML(orders || [], false);
+    }).catch(function() {
+        ordersContainer.innerHTML = '<div class="empty-orders"><div class="empty-orders-icon">⚠️</div><h2>Could not reach the server</h2><p>Showing orders saved on this device only.</p></div>' + renderOrdersListHTML(localOrders, true);
+    });
+}
+
+function paymentStatusBadge(paymentStatus, paid, mode) {
+    var s = paymentStatus || (paid ? "PAID" : "PENDING");
+    var map = {
+        PAID: { label: "Paid ✓", cls: "pay-paid" },
+        PENDING: { label: "Payment pending", cls: "pay-pending" },
+        FAILED: { label: "Payment failed", cls: "pay-failed" },
+        CANCELLED: { label: "Not charged", cls: "pay-cancelled" },
+        REFUNDED: { label: "Refunded", cls: "pay-refunded" },
+        PENDING_REFUND: { label: "Refund in progress", cls: "pay-pending" }
+    };
+    var m = map[s] || { label: s, cls: "pay-pending" };
+    return '<span class="pay-badge ' + m.cls + '">' + m.label + '</span>';
+}
+
+function formatOrderDate(iso) {
+    if (!iso) return "";
+    try { return new Date(iso).toLocaleString(); } catch (e) { return ""; }
+}
+
+function renderOrdersListHTML(orders, offline) {
+    if (!orders || orders.length === 0) {
+        return '<div class="empty-orders"><div class="empty-orders-icon">📦</div><h2>No Orders Yet</h2><p>You haven\'t placed any orders yet.</p><button type="button" onclick="window.location.href=\'index.html\'">Start Shopping</button></div>';
     }
 
     var ordersHTML = "";
-
-    orders.forEach(function(order, orderIndex) {
+    orders.forEach(function(order) {
         var subtotal = 0;
         var productsHTML = "";
+        var items = order.items || [];
 
-        if (order.items && order.items.length > 0) {
-            order.items.forEach(function(item) {
-                var price = Number(item.price) || 0;
-                var quantity = Number(item.quantity) || 0;
-                var itemTotal = price * quantity;
-                subtotal += itemTotal;
-                var itemName = item.name + (item.weight ? " (" + item.weight + ")" : "");
-                productsHTML += '<div class="order-product"><span>' + itemName + ' × ' + quantity + '</span><strong>₹' + itemTotal + '</strong></div>';
-            });
-        } else {
-            productsHTML = '<p>No products found.</p>';
-        }
+        items.forEach(function(item) {
+            var price = Number(item.price) || Number(item.basePrice) || 0;
+            var quantity = Number(item.quantity) || 1;
+            var itemTotal = Math.round(price * quantity * 100) / 100;
+            subtotal += itemTotal;
+            var name = item.name || item.productName || "Product";
+            var weight = item.weight ? " (" + item.weight + ")" : "";
+            productsHTML += '<div class="order-product"><span>' + name + weight + ' × ' + quantity + '</span><strong>₹' + itemTotal + '</strong></div>';
+        });
 
-        // Prefer stored values from orders if available
-        var delivery, total;
-        if (order.total !== undefined && order.subtotal !== undefined) {
-            subtotal = Number(order.subtotal);
-            delivery = order.delivery !== undefined ? Number(order.delivery) : (subtotal >= 500 ? 0 : 20);
-            total = Number(order.total);
-        } else {
-            delivery = subtotal >= 500 ? 0 : 20;
-            total = subtotal + delivery;
-        }
+        var delivery = order.delivery !== undefined ? Number(order.delivery) : (Number(order.subtotal) >= 500 ? 0 : 20);
+        var total = Number(order.total) || (Number(order.subtotal || subtotal) + delivery);
 
-        var customer = order.customer || {};
+        var cancellable = !offline && order._id && !order.isLocal &&
+            (order.status === "Placed" || order.status === "Confirmed");
+        var cancelBtn = cancellable
+            ? '<button type="button" class="cancel-order-btn" onclick="cancelOrderById(\'' + order._id + '\')">Cancel Order</button>'
+            : "";
 
-        var paymentLine = '<p><strong>Payment:</strong> ' + (order.payment || "Cash On Delivery") + '</p>';
+        var trackLine = order.trackingId ? '<p><strong>Track ID:</strong> ' + order.trackingId + '</p>' : "";
 
-        ordersHTML += '<div class="order-card"><div class="order-header"><div><div class="order-id">Order ' + (orderIndex + 1) + '</div><strong>#' + (order.orderNumber || "N/A") + '</strong><br><small>' + (order.date || "") + '</small></div><div class="order-status">Order Placed</div></div><h3>Products</h3><div style="margin-top:10px;">' + productsHTML + '</div><div class="summary-row"><span>Subtotal</span><strong>₹' + subtotal + '</strong></div>' + '<div class="summary-row"><span>Delivery</span><strong>₹' + delivery + '</strong></div><div class="order-total">Total: ₹' + total + '</div><div class="detail-section"><h3>Customer Details</h3><p><strong>Name:</strong> ' + (customer.name || "N/A") + '</p><p><strong>Phone:</strong> ' + (customer.phone || "N/A") + '</p><p><strong>Address:</strong> ' + (customer.address || "N/A") + '</p><p><strong>City:</strong> ' + (customer.city || "N/A") + '</p><p><strong>Pincode:</strong> ' + (customer.pincode || "N/A") + '</p></div>' + paymentLine + '<button type="button" class="place-order-btn" style="margin-top:20px;" onclick="window.location.href=\'index.html\'">Continue Shopping</button></div>';
+        ordersHTML += '<div class="order-card"><div class="order-header"><div><div class="order-id">' + (order.orderNumber || "Order") + '</div>' + trackLine + '<small>' + formatOrderDate(order.createdAt || order.date) + '</small></div><div class="order-status">' + (order.status || "Placed") + '</div></div>' +
+            '<div class="order-pay-row">' + paymentStatusBadge(order.paymentStatus, order.paid, order.paymentMode) + (order.paymentMode === "manual" && order.paymentReference ? '<span class="pay-ref">UPI Ref: ' + order.paymentReference + '</span>' : "") + '</div>' +
+            '<h3>Products</h3><div style="margin-top:10px;">' + productsHTML + '</div>' +
+            '<div class="summary-row"><span>Subtotal</span><strong>₹' + Number(order.subtotal) + '</strong></div>' +
+            '<div class="summary-row"><span>Delivery</span><strong>₹' + delivery + '</strong></div>' +
+            '<div class="order-total">Total: ₹' + total + '</div>' +
+            '<div class="detail-section"><h3>Delivery Details</h3><p><strong>Name:</strong> ' + ((order.customer && order.customer.name) || "N/A") + '</p><p><strong>Phone:</strong> ' + ((order.customer && order.customer.phone) || "N/A") + '</p><p><strong>Address:</strong> ' + ((order.customer && order.customer.address) || "N/A") + '</p><p><strong>City:</strong> ' + ((order.customer && order.customer.city) || "N/A") + '</p><p><strong>Pincode:</strong> ' + ((order.customer && order.customer.pincode) || "N/A") + '</p></div>' +
+            '<p><strong>Payment:</strong> ' + (order.payment || "Cash On Delivery") + '</p>' + cancelBtn +
+            '<button type="button" class="place-order-btn" style="margin-top:20px;" onclick="window.location.href=\'index.html\'">Continue Shopping</button></div>';
     });
+    return ordersHTML;
+}
 
-    ordersContainer.innerHTML = ordersHTML;
+function cancelOrderById(id) {
+    if (!id) return;
+    if (!window.confirm("Cancel this order? Stock will be released and your payment (if any) refunded.")) return;
+    apiCancelOrder(id).then(function() {
+        showToast("Order cancelled.", "success");
+        loadOrders();
+    }).catch(function(err) {
+        showToast((err && err.message) ? err.message : "Could not cancel this order.", "error");
+    });
+}
+
+// Public tracking lookup using the backend's sanitized /track/:number
+function trackOrder() {
+    var inp = document.getElementById("trackInput");
+    var out = document.getElementById("trackResult");
+    if (!inp || !out) return;
+    var ref = String(inp.value || "").trim();
+    if (!ref) {
+        showToast("Please enter an Order or Track ID.", "error");
+        return;
+    }
+    out.innerHTML = '<p style="color:var(--text-secondary);">Searching...</p>';
+    apiTrackOrder(ref).then(function(data) {
+        var itemsHtml = (data.items || []).map(function(i) {
+            return '<div class="order-product"><span>' + i.name + ' × ' + i.quantity + '</span><strong>₹' + (i.price || 0) + '</strong></div>';
+        }).join("");
+        var timeline = (data.timeline || []).map(function(h) {
+            return '<li><strong>' + h.status + '</strong> <small>' + formatOrderDate(h.at) + '</small></li>';
+        }).join("");
+        out.innerHTML = '<div class="order-card">' +
+            '<div class="order-header"><div><div class="order-id">#' + (data.orderNumber || ref) + '</div>' +
+            (data.trackingId ? '<p><strong>Track ID:</strong> ' + data.trackingId + '</p>' : "") +
+            '<small>' + formatOrderDate(data.date) + '</small></div>' +
+            '<div class="order-status">' + (data.status || "—") + '</div></div>' +
+            '<div class="order-pay-row">' + paymentStatusBadge(data.paymentStatus) + '</div>' +
+            '<h3>Items</h3>' + itemsHtml +
+            '<div class="order-total">Total: ₹' + (data.total || 0) + '</div>' +
+            (timeline ? '<ul class="order-timeline">' + timeline + '</ul>' : "") +
+            '</div>';
+    }).catch(function(err) {
+        out.innerHTML = '<p style="color:#e74c3c;">' + ((err && err.message) || "Order not found. Check the ID and try again.") + '</p>';
+    });
 }

@@ -3,6 +3,7 @@
 // ===============================
 
 const User = require("../models/User");
+const Order = require("../models/Order");
 const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
 
@@ -118,12 +119,13 @@ exports.sendOTP = async (req, res) => {
             });
         }
 
-        // In development/demo, send OTP in response so you can test
+        // In development/demo, send OTP in response so you can test.
+        // NEVER expose the OTP in production.
+        const dev = (process.env.NODE_ENV !== "production");
         res.json({
             success: true,
             message: "OTP sent",
-            // Only for demo - remove in production!
-            devOTP: otp
+            ...(dev ? { devOTP: otp } : {})
         });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
@@ -191,41 +193,44 @@ exports.googleLogin = async (req, res) => {
     }
 };
 
-// CREATE ADMIN (first admin bootstrapping - dev only)
-exports.createAdmin = async (req, res) => {
+// LIST ALL USERS (admin only) - never expose passwords / otp
+exports.listUsers = async (req, res) => {
     try {
-        const { email, password, name, secretKey } = req.body;
-
-        // Require admin setup secret from env
-        if (process.env.ADMIN_SECRET && secretKey !== process.env.ADMIN_SECRET) {
-            return res.status(403).json({ success: false, message: "Invalid admin secret" });
+        const { search } = req.query;
+        let filter = {};
+        if (search) {
+            filter.$or = [
+                { name: { $regex: search, $options: "i" } },
+                { email: { $regex: search, $options: "i" } },
+                { phone: { $regex: search, $options: "i" } }
+            ];
         }
+        const users = await User.find(filter)
+            .select("name email phone role isAdmin createdAt")
+            .sort({ createdAt: -1 })
+            .limit(500);
 
-        // If no ADMIN_SECRET set, allow only if no admin exists yet
-        if (!process.env.ADMIN_SECRET) {
-            const adminExists = await User.findOne({ $or: [{ role: "admin" }, { isAdmin: true }] });
-            if (adminExists) {
-                return res.status(403).json({ success: false, message: "Admin already exists. Provide ADMIN_SECRET to create more." });
-            }
-        }
+        // Per-customer order counts so the admin Customer list shows order history
+        const orderAgg = await Order.aggregate([
+            { $match: { user: { $ne: null } } },
+            { $group: { _id: "$user", count: { $sum: 1 } } }
+        ]);
+        const countMap = {};
+        orderAgg.forEach(function (row) { countMap[String(row._id)] = row.count; });
 
-        let user = await User.findOne({ email: email.toLowerCase() });
-        if (user) {
-            user.role = "admin";
-            user.isAdmin = true;
-            if (password) user.password = password;
-            await user.save();
-        } else {
-            user = await User.create({
-                name: name || "Admin",
-                email,
-                password,
-                role: "admin",
-                isAdmin: true
-            });
-        }
-
-        res.status(201).json({ success: true, message: "Admin created", data: { email: user.email, role: user.role } });
+        const data = users.map(function (u) {
+            return {
+                _id: u._id,
+                name: u.name,
+                email: u.email,
+                phone: u.phone,
+                role: u.role,
+                isAdmin: u.isAdmin,
+                createdAt: u.createdAt,
+                orderCount: countMap[String(u._id)] || 0
+            };
+        });
+        res.json({ success: true, count: data.length, data: data });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }

@@ -10,7 +10,7 @@ const products = [
 
     // VEGETABLES
     { name: "Fresh Tomato", price: 60, unit: "kg", category: "Vegetables", emoji: "🍅", gradient: "linear-gradient(135deg, #ff6b6b, #ee5a24)", description: "Fresh farm-picked tomatoes, juicy and ripe. Perfect for curries, salads, chutneys and sauces.", nutrition: "Rich in Vitamin C, Potassium, Folate and Vitamin K. Low in calories.", tips: "Store at room temperature until ripe. Refrigerate after ripening to last longer.", origin: "Nashik, Maharashtra", stock: 50 },
-    { name: "Potato", price: 30, unit: "kg", category: "Vegetables", emoji: "🥔", gradient: "linear-gradient(135deg, #d4a574, #c0956c)", description: "Premium quality potatoes, perfect for boiling, frying, baking or making delicious aloo dishes.", nutrition: "Good source of Carbohydrates, Vitamin B6, Potassium and Fiber.", tips: "Store in a cool, dark and dry place. Keep away from onions as they release gases.", origin: "Agra, UP", stock: 100 },
+    { name: "Potato", price: 1, unit: "kg", category: "Vegetables", emoji: "🥔", gradient: "linear-gradient(135deg, #d4a574, #c0956c)", description: "Premium quality potatoes, perfect for boiling, frying, baking or making delicious aloo dishes.", nutrition: "Good source of Carbohydrates, Vitamin B6, Potassium and Fiber.", tips: "Store in a cool, dark and dry place. Keep away from onions as they release gases.", origin: "Agra, UP", stock: 100 },
     { name: "Onion", price: 60, unit: "kg", category: "Vegetables", emoji: "🧅", gradient: "linear-gradient(135deg, #f0c27f, #d4a056)", description: "Fresh onions with strong flavor. Essential for Indian cooking, salads and pickles.", nutrition: "Rich in Vitamin C, B6, Potassium and antioxidants like Quercetin.", tips: "Store in a cool, dry and ventilated place. Can last several weeks.", origin: "Nashik, Maharashtra", stock: 100 },
     { name: "Carrot", price: 40, unit: "kg", category: "Vegetables", emoji: "🥕", gradient: "linear-gradient(135deg, #ff9a44, #fc6076)", description: "Sweet and crunchy carrots, ideal for salads, juices, halwa and curries.", nutrition: "Excellent source of Beta-carotene, Vitamin A, Fiber and Potassium.", tips: "Remove green tops before storing. Keep in refrigerator in a plastic bag.", origin: "Bangalore, Karnataka", stock: 40 },
     { name: "Cauliflower", price: 100, unit: "kg", category: "Vegetables", emoji: "🥦", gradient: "linear-gradient(135deg, #a8e063, #56ab2f)", description: "Fresh white cauliflower with tight florets. Great for gobi manchurian, paratha and curry.", nutrition: "High in Vitamin C, Vitamin K, Fiber and Folate.", tips: "Store unwashed in refrigerator. Use within a week for best freshness.", origin: "Pune, Maharashtra", stock: 30 },
@@ -77,13 +77,18 @@ async function seed() {
         await mongoose.connect(URI);
         console.log("✅ MongoDB connected");
 
-        // Clear existing products
-        await Product.deleteMany({});
-        console.log("🗑️  Cleared existing products");
-
-        // Insert new products
-        const result = await Product.insertMany(products);
-        console.log(`✅ Seeded ${result.length} products`);
+        // Upsert products by name: never deletes existing data, never duplicates.
+        // Existing product fields (stock, rating, etc.) for matching names are refreshed
+        // from the catalog above without wiping the collection.
+        const ops = products.map((p) => ({
+            updateOne: {
+                filter: { name: p.name },
+                update: { $set: p },
+                upsert: true
+            }
+        }));
+        const result = await Product.bulkWrite(ops, { ordered: false });
+        console.log(`✅ Synced ${products.length} catalog items → ${result.upsertedCount} created, ${result.matchedCount} already existed, ${result.modifiedCount} updated`);
 
         mongoose.disconnect();
         console.log("🎉 Done!");

@@ -11,19 +11,28 @@ const {
     sendOTP,
     verifyOTP,
     googleLogin,
-    createAdmin
+    listUsers
 } = require("../controllers/userController");
-const { protect } = require("../middleware/auth");
+const { protect, admin } = require("../middleware/auth");
+const { rateLimit } = require("../utils/rateLimit");
+
+// Soft brute-force / OTP-spam guard
+const authLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 30 });
 
 // Public
-router.post("/signup", signup);
-router.post("/login", login);
-router.post("/send-otp", sendOTP);
-router.post("/verify-otp", verifyOTP);
-router.post("/google-login", googleLogin);
-router.post("/admin/setup", createAdmin);
+router.post("/signup", authLimiter, signup);
+router.post("/login", authLimiter, login);
+router.post("/send-otp", authLimiter, sendOTP);
+router.post("/verify-otp", authLimiter, verifyOTP);
+router.post("/google-login", authLimiter, googleLogin);
+// NOTE: No public admin-creation/setup endpoint exists.
+// Admins are created ONLY via the secure CLI: `npm run seed:admin`
+// (see seedAdmin.js — env-based credentials, never printed).
 
 // Protected
 router.get("/me", protect, getMe);
+
+// Admin only
+router.get("/admin/list", protect, admin, listUsers);
 
 module.exports = router;

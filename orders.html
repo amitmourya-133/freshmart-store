@@ -26,13 +26,7 @@
             >
                 🏠 Home
             </button>
-            <button
-                type="button"
-                class="secondary-btn"
-                onclick="window.location.href='login.html'"
-            >
-                Login
-            </button>
+            <div class="auth-area" id="authArea"></div>
             <button
                 type="button"
                 class="dark-mode-toggle"
@@ -50,6 +44,19 @@
     <section class="orders-page">
 
         <h1>📦 My Orders</h1>
+
+        <div class="track-box">
+            <h2>Track an order</h2>
+            <div class="track-row">
+                <input
+                    type="text"
+                    id="trackInput"
+                    placeholder="Enter Order ID or Track ID (e.g. FM710001 / FM-20260912-1A2B3C)"
+                >
+                <button type="button" class="place-order-btn" onclick="trackOrder()">Track</button>
+            </div>
+            <div id="trackResult" style="margin-top:12px;"></div>
+        </div>
 
         <div id="ordersContainer">
 

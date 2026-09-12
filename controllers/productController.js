@@ -3,6 +3,11 @@
 // ===============================
 
 const Product = require("../models/Product");
+const mongoose = require("mongoose");
+
+function isBadObjectId(id) {
+    return !mongoose.Types.ObjectId.isValid(String(id || ""));
+}
 
 // GET ALL PRODUCTS (public, only active)
 exports.getProducts = async (req, res) => {
@@ -28,6 +33,9 @@ exports.getProducts = async (req, res) => {
 // GET SINGLE PRODUCT
 exports.getProduct = async (req, res) => {
     try {
+        if (isBadObjectId(req.params.id)) {
+            return res.status(404).json({ success: false, message: "Product not found" });
+        }
         const product = await Product.findById(req.params.id);
         if (!product) {
             return res.status(404).json({ success: false, message: "Product not found" });
@@ -61,6 +69,9 @@ exports.createProduct = async (req, res) => {
 // UPDATE PRODUCT (admin)
 exports.updateProduct = async (req, res) => {
     try {
+        if (isBadObjectId(req.params.id)) {
+            return res.status(404).json({ success: false, message: "Product not found" });
+        }
         const product = await Product.findByIdAndUpdate(req.params.id, req.body, {
             new: true,
             runValidators: true
@@ -77,6 +88,9 @@ exports.updateProduct = async (req, res) => {
 // UPDATE STOCK ONLY (admin)
 exports.updateStock = async (req, res) => {
     try {
+        if (isBadObjectId(req.params.id)) {
+            return res.status(404).json({ success: false, message: "Product not found" });
+        }
         const { stock } = req.body;
         if (stock === undefined || stock < 0) {
             return res.status(400).json({ success: false, message: "Valid stock value required" });
@@ -96,6 +110,9 @@ exports.updateStock = async (req, res) => {
 // DELETE PRODUCT (admin)
 exports.deleteProduct = async (req, res) => {
     try {
+        if (isBadObjectId(req.params.id)) {
+            return res.status(404).json({ success: false, message: "Product not found" });
+        }
         const product = await Product.findById(req.params.id);
         if (!product) {
             return res.status(404).json({ success: false, message: "Product not found" });
@@ -109,9 +126,44 @@ exports.deleteProduct = async (req, res) => {
     }
 };
 
+// SET RATING (admin) - set the displayed rating / count directly
+exports.setRating = async (req, res) => {
+    try {
+        if (isBadObjectId(req.params.id)) {
+            return res.status(404).json({ success: false, message: "Product not found" });
+        }
+        const { rating, ratingCount } = req.body;
+        const product = await Product.findById(req.params.id);
+        if (!product) {
+            return res.status(404).json({ success: false, message: "Product not found" });
+        }
+        if (rating !== undefined) {
+            const r = Number(rating);
+            if (isNaN(r) || r < 0 || r > 5) {
+                return res.status(400).json({ success: false, message: "Rating must be 0-5" });
+            }
+            product.rating = r;
+        }
+        if (ratingCount !== undefined) {
+            const c = Number(ratingCount);
+            if (isNaN(c) || c < 0) {
+                return res.status(400).json({ success: false, message: "Rating count must be >= 0" });
+            }
+            product.ratingCount = c;
+        }
+        await product.save();
+        res.json({ success: true, data: product });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 // ADD RATING
 exports.addRating = async (req, res) => {
     try {
+        if (isBadObjectId(req.params.id)) {
+            return res.status(404).json({ success: false, message: "Product not found" });
+        }
         const { rating } = req.body;
         if (rating < 1 || rating > 5) {
             return res.status(400).json({ success: false, message: "Rating must be 1-5" });

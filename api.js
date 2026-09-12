@@ -85,6 +85,20 @@ function submitOrder(order) {
         });
 }
 
+// Get server-validated totals for the payment amount (no order is created)
+function getOrderQuote(items) {
+    return fetch(API.base + "/orders/quote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items })
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Could not calculate the order total");
+            return data.data;
+        });
+}
+
 // Create order on backend (returns full response, propagates errors)
 function createOrderBackend(order) {
     return fetch(API.base + "/orders", {
@@ -176,16 +190,136 @@ function apiVerifyOTP(email, otp) {
         });
 }
 
+// ---------- AUTH SESSION HELPERS (customer entry flow) ----------
+
+// Sanitized mirror of the logged-in customer (name/email/phone only — never a password)
+function getAuthUser() {
+    var raw = readStorageValue("freshMartUser", null);
+    if (!raw) return null;
+    try {
+        var u = JSON.parse(raw);
+        return u && typeof u === "object" ? u : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function getAuthUserName() {
+    var u = getAuthUser();
+    var name = u && (u.name || u.displayName) ? String(u.name || u.displayName) : "";
+    return name;
+}
+
+// Remember the requested page so the user is sent back there after login
+function storeAuthRedirect(url) {
+    if (!url) return;
+    writeStorageValue("freshMartRedirect", String(url));
+}
+
+// Read (and consume) the saved post-login destination
+function getAuthRedirect() {
+    var r = readStorageValue("freshMartRedirect", null);
+    localStorage.removeItem("freshMartRedirect");
+    return r;
+}
+
+// Follow-up pages a customer may return to after login (never login/signup/admin)
+function safeRedirectDestination(fallback) {
+    var r = getAuthRedirect();
+    if (r && /^(index|checkout|orders|product-detail|subscription)\.html/.test(r)) {
+        return r;
+    }
+    return fallback || "index.html";
+}
+
+// Remove every auth artifact from local storage (logout / expired token)
+function clearAuthState() {
+    try {
+        localStorage.removeItem("freshMartToken");
+        localStorage.removeItem("freshMartLoggedIn");
+        localStorage.removeItem("freshMartUser");
+        localStorage.removeItem("freshMartRedirect");
+    } catch (e) {}
+}
+
 // ---------- ADMIN ----------
-// Fetch all orders (admin)
-function fetchAdminOrders() {
-    return fetch(API.base + "/orders", {
+// Fetch all orders (admin) with optional filters: status, paymentStatus, search
+function fetchAdminOrders(filter) {
+    var url = API.base + "/orders";
+    var query = [];
+    if (filter && filter.status) query.push("status=" + encodeURIComponent(filter.status));
+    if (filter && filter.paymentStatus) query.push("paymentStatus=" + encodeURIComponent(filter.paymentStatus));
+    if (filter && filter.search) query.push("search=" + encodeURIComponent(filter.search));
+    if (query.length) url += "?" + query.join("&");
+    return fetch(url, {
         headers: getAuthHeaders()
     })
         .then(function(res) { return res.json(); })
         .then(function(data) {
             if (!data.success) throw new Error(data.message || "Failed");
             return data.data;
+        });
+}
+
+// Admin dashboard metrics (orders, customers, low stock, sales)
+function fetchAdminOverview() {
+    return fetch(API.base + "/orders/admin/overview", {
+        headers: getAuthHeaders()
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed");
+            return data.data;
+        });
+}
+
+// Admin verify / reject / refund marker for an order's payment
+function apiSetOrderPaymentStatus(id, paymentStatus, reference) {
+    return fetch(API.base + "/orders/" + id + "/payment-status", {
+        method: "PATCH",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ paymentStatus: paymentStatus, reference: reference })
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(res) {
+            if (!res.success) throw new Error(res.message || "Failed");
+            return res.data;
+        });
+}
+
+// ---------- CUSTOMER ORDERS ----------
+// Public tracking by Order ID or Track ID (returns sanitized data only)
+function apiTrackOrder(ref) {
+    return fetch(API.base + "/orders/track/" + encodeURIComponent(String(ref || "").trim()))
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Order not found");
+            return data.data;
+        });
+}
+
+// Live order history straight from the backend (never localStorage)
+function fetchMyOrders() {
+    return fetch(API.base + "/orders/my", {
+        headers: getAuthHeaders()
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed to load your orders");
+            return data.data;
+        });
+}
+
+// Customer-initiated cancellation (backend validates ownership + window)
+function apiCancelOrder(id) {
+    return fetch(API.base + "/orders/" + id + "/cancel", {
+        method: "POST",
+        headers: getAuthHeaders()
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(res) {
+            if (!res.success) throw new Error(res.message || "Cancel failed");
+            return res.data;
         });
 }
 
@@ -317,6 +451,75 @@ function apiClearCart() {
         .then(function(data) {
             if (!data.success) throw new Error(data.message || "Failed to clear cart");
             return data.data;
+        });
+}
+
+// ---------- USERS (admin) ----------
+// Get the currently logged-in user (verifies JWT backend-side)
+function apiGetMe() {
+    return fetch(API.base + "/users/me", {
+        headers: getAuthHeaders()
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Not authorized");
+            return data.data;
+        });
+}
+
+// List all registered customers (admin only)
+function fetchAdminCustomers(search) {
+    var url = API.base + "/users/admin/list";
+    if (search) url += "?search=" + encodeURIComponent(search);
+    return fetch(url, {
+        headers: getAuthHeaders()
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed to load users");
+            return data.data;
+        });
+}
+
+// ---------- REVIEWS ----------
+// Submit a review for a product (public backend endpoint; fire-and-forget from the store)
+function apiAddReview(productId, data) {
+    return fetch(API.base + "/products/" + productId + "/reviews", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data)
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(res) {
+            if (!res.success) throw new Error(res.message || "Failed to save review");
+            return res.data;
+        });
+}
+
+// List all reviews (admin only)
+function fetchAdminReviews(search) {
+    var url = API.base + "/reviews";
+    if (search) url += "?search=" + encodeURIComponent(search);
+    return fetch(url, {
+        headers: getAuthHeaders()
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed to load reviews");
+            return data.data;
+        });
+}
+
+// Delete a review (admin only)
+function apiDeleteReview(id) {
+    return fetch(API.base + "/reviews/" + id, {
+        method: "DELETE",
+        headers: getAuthHeaders()
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(res) {
+            if (!res.success) throw new Error(res.message || "Failed to delete review");
+            return res.data;
         });
 }
 

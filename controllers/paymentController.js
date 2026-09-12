@@ -91,7 +91,7 @@ exports.createPaymentOrder = async (req, res) => {
 // ===============================
 exports.verifyPayment = async (req, res) => {
     try {
-        const { razorpay_order_id, razorpay_payment_id, razorpay_signature, orderId } = req.body;
+        const { razorpay_order_id, razorpay_payment_id, razorpay_signature, orderId, paymentReference } = req.body;
 
         // Verify signature to ensure an authentic Razorpay payment
         const keySecret = process.env.RAZORPAY_KEY_SECRET;
@@ -104,13 +104,6 @@ exports.verifyPayment = async (req, res) => {
                 .update(body.toString())
                 .digest("hex");
             verified = expectedSignature === razorpay_signature;
-        } else if (!keySecret) {
-            // Demo mode auto-verify
-            verified = true;
-        }
-
-        if (!verified) {
-            return res.status(400).json({ success: false, message: "Payment verification failed" });
         }
 
         // Find order by our order id or razorpay order id
@@ -135,7 +128,31 @@ exports.verifyPayment = async (req, res) => {
             return res.status(400).json({ success: false, message: "Order is already paid" });
         }
 
+        if (!verified) {
+            if (!keySecret) {
+                // Demo mode WITHOUT Razorpay keys: record the confirmation for
+                // MANUAL verification. Demo payments are never treated as paid.
+                order.paid = false;
+                order.paymentStatus = "PENDING";
+                order.paymentMode = "manual";
+                order.paymentReference = (paymentReference && String(paymentReference).trim()) || null;
+                order.payment = "Razorpay - Manual verification";
+                await order.save();
+                return res.json({
+                    success: true,
+                    data: order,
+                    receipt: order.orderNumber,
+                    demo: true,
+                    message: "Demo payment recorded - awaiting admin verification"
+                });
+            }
+            return res.status(400).json({ success: false, message: "Payment verification failed" });
+        }
+
+        // Authentic Razorpay payment confirmed
         order.paid = true;
+        order.paymentStatus = "PAID";
+        order.paymentMode = order.paymentMode || "razorpay";
         order.paymentAt = new Date();
         order.razorpay.orderId = razorpay_order_id || order.razorpay.orderId;
         order.razorpay.paymentId = razorpay_payment_id || order.razorpay.paymentId;
@@ -186,6 +203,7 @@ exports.refundPayment = async (req, res) => {
         order.refund.amount = order.total;
         order.refund.status = refund.status || "processed";
         order.refund.initiatedAt = new Date();
+        order.paymentStatus = "REFUNDED";
         await order.save();
 
         res.json({ success: true, data: order, message: "Refund processed" });
@@ -235,6 +253,7 @@ exports.razorpayWebhook = async (req, res) => {
                 if (order) {
                     // Idempotent update
                     order.paid = true;
+                    order.paymentStatus = "PAID";
                     order.paymentAt = order.paymentAt || new Date();
                     if (paymentId) order.razorpay.paymentId = paymentId;
                     if (payment.method) order.razorpay.method = payment.method;
@@ -246,8 +265,9 @@ exports.razorpayWebhook = async (req, res) => {
             const rzpOrderId = payment && payment.order_id;
             if (rzpOrderId) {
                 const order = await Order.findOne({ "razorpay.orderId": rzpOrderId });
-                // Leave the order unpaid; payment stays flagged for manual review.
+                // Leave the order unpaid; payment flagged FAILED for manual review.
                 if (order && !order.paid) {
+                    order.paymentStatus = "FAILED";
                     order.razorpay.paymentId = (payment && payment.id) || order.razorpay.paymentId;
                     await order.save();
                 }
@@ -270,8 +290,11 @@ exports.getReceipt = async (req, res) => {
             return res.status(404).json({ success: false, message: "Order not found" });
         }
 
-        // Owner or admin only
-        if (order.user && req.user && order.user.toString() !== req.user._id.toString() && !req.user.isAdmin && req.user.role !== "admin") {
+        // Owner or admin only. Guest-created orders have no owner, so only an
+        // admin may view their receipt (otherwise any customer could read PII).
+        const isAdmin = req.user && (req.user.role === "admin" || req.user.isAdmin === true);
+        const isOwner = order.user && req.user && order.user.toString() === req.user._id.toString();
+        if (!isAdmin && !isOwner) {
             return res.status(403).json({ success: false, message: "Not authorized" });
         }
 

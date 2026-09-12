@@ -16,6 +16,7 @@ const orderRoutes = require("./routes/orderRoutes");
 const userRoutes = require("./routes/userRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const cartRoutes = require("./routes/cartRoutes");
+const reviewRoutes = require("./routes/reviewRoutes");
 
 const app = express();
 
@@ -44,6 +45,7 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/cart", cartRoutes);
+app.use("/api/reviews", reviewRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {
@@ -53,6 +55,27 @@ app.get("/api/health", (req, res) => {
 // ===============================
 // SERVE STATIC FILES (frontend)
 // ===============================
+
+// SERVED-ONLY FILES are the static frontend (html/js/css/images).
+// Everything server-side (config, secrets, backend source, dependencies)
+// must NEVER be downloadable from the browser. This guard runs BEFORE
+// express.static and blocks any request that targets such files.
+const SERVED_ONLY_EXT = [".html", ".js", ".css", ".png", ".jpg", ".jpeg", ".jfif", ".webp", ".gif", ".svg", ".ico", ".txt"];
+const NEVER_SERVE_PREFIX = [
+    "/.env", "/.git", "/node_modules", "/server.js", "/app.js", "/seed.js",
+    "/seedAdmin.js", "/package.json", "/package-lock.json", "/vercel.json",
+    "/controllers", "/models", "/routes", "/middleware", "/utils", "/api",
+    "/.vercel", "/\.db"
+];
+app.use("/", (req, res, next) => {
+    const p = req.path;
+    if (p === "/" || p === "") return next();
+    const ext = path.extname(p).toLowerCase();
+    if (NEVER_SERVE_PREFIX.some((prefix) => p.startsWith(prefix)) || (ext && !SERVED_ONLY_EXT.includes(ext))) {
+        return res.status(404).json({ success: false, message: "Not found" });
+    }
+    next();
+});
 
 app.use(express.static(path.join(__dirname, ".")));
 

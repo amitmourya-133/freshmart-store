@@ -38,12 +38,40 @@
         <div class="admin-tabs">
             <button class="admin-tab active" id="tabOrdersBtn" onclick="switchTab('orders')">📦 Orders</button>
             <button class="admin-tab" id="tabProductsBtn" onclick="switchTab('products')">🥬 Products</button>
+            <button class="admin-tab" id="tabCustomersBtn" onclick="switchTab('customers')">👥 Customers</button>
+            <button class="admin-tab" id="tabReviewsBtn" onclick="switchTab('reviews')">⭐ Reviews</button>
         </div>
 
         <div id="adminOrdersSection" class="admin-section">
 
             <div class="admin-section-head">
-                <h2>All Orders</h2>
+                <h2>Order Dashboard</h2>
+            </div>
+
+            <div id="adminOverview" class="admin-stats">
+                <p style="text-align:center;color:var(--text-secondary);padding:20px;">Loading overview...</p>
+            </div>
+
+            <div class="admin-filters">
+                <input type="text" id="adminOrderSearch" class="admin-search" placeholder="Search order no / tracking / customer / phone..." oninput="loadAdminOrders()">
+                <select id="adminOrderStatus" class="status-select" onchange="loadAdminOrders()">
+                    <option value="">All statuses</option>
+                    <option>Placed</option>
+                    <option>Confirmed</option>
+                    <option>Preparing</option>
+                    <option>Out for Delivery</option>
+                    <option>Delivered</option>
+                    <option>Cancelled</option>
+                </select>
+                <select id="adminOrderPayment" class="status-select" onchange="loadAdminOrders()">
+                    <option value="">All payments</option>
+                    <option value="PENDING">Payment Pending</option>
+                    <option value="PAID">Paid</option>
+                    <option value="FAILED">Payment Failed</option>
+                    <option value="CANCELLED">Not Charged</option>
+                    <option value="REFUNDED">Refunded</option>
+                    <option value="PENDING_REFUND">Refund In Progress</option>
+                </select>
             </div>
 
             <div id="adminOrdersList" class="admin-list">
@@ -70,7 +98,46 @@
 
         </div>
 
+        <div id="adminCustomersSection" class="admin-section" style="display:none;">
+
+            <div class="admin-section-head">
+                <h2>Registered Customers</h2>
+            </div>
+
+            <input type="text" id="adminCustomerSearch" class="admin-search" placeholder="Search customers (name / email / phone)..." oninput="loadAdminCustomers()">
+
+            <div id="adminCustomersList" class="admin-list">
+                <p style="text-align:center;color:var(--text-secondary);padding:40px;">Loading customers...</p>
+            </div>
+
+        </div>
+
+        <div id="adminReviewsSection" class="admin-section" style="display:none;">
+
+            <div class="admin-section-head">
+                <h2>Ratings & Reviews</h2>
+            </div>
+
+            <input type="text" id="adminReviewSearch" class="admin-search" placeholder="Search reviews (product / user)..." oninput="loadAdminReviews()">
+
+            <div id="adminReviewsList" class="admin-list">
+                <p style="text-align:center;color:var(--text-secondary);padding:40px;">Loading reviews...</p>
+            </div>
+
+        </div>
+
     </section>
+
+    <!-- Order Detail Modal -->
+    <div id="orderDetailModal" class="admin-modal" style="display:none;">
+        <div class="admin-modal-box admin-modal-wide">
+            <div class="admin-modal-head">
+                <h3 id="orderDetailTitle">Order Details</h3>
+                <button class="modal-close" onclick="closeOrderDetail()">✕</button>
+            </div>
+            <div id="orderDetailBody"></div>
+        </div>
+    </div>
 
 
     <!-- Add/Edit Product Modal -->
@@ -112,6 +179,16 @@
 
                 <label>Stock</label>
                 <input type="number" id="pfStock" min="0" required>
+
+                <label>Rating (0–5)</label>
+                <input type="number" id="pfRating" min="0" max="5" step="0.1" placeholder="e.g. 4.5">
+
+                <label>Rating Count</label>
+                <input type="number" id="pfRatingCount" min="0" step="1" placeholder="e.g. 42">
+
+                <label>Image file name (optional — must exist in /images)</label>
+                <input type="text" id="pfImage" placeholder="e.g. apple.png">
+                <div id="pfImagePreview" class="admin-img-preview-wrap"></div>
 
                 <label>Description</label>
                 <textarea id="pfDescription" rows="2"></textarea>
