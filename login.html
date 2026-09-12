@@ -65,6 +65,10 @@
                         Send OTP
                     </button>
 
+                    <p class="auth-bottom">
+                        <a href="#" onclick="startForgotPassword()">Forgot Password?</a>
+                    </p>
+
                 </form>
 
             </div>
@@ -115,6 +119,108 @@
                 <p class="auth-bottom">
                     <a href="#" id="backToCredentials" onclick="handleOtpBack()">Change email / password</a>
                 </p>
+
+            </div>
+
+
+            <!-- FORGOT PASSWORD FLOW -->
+            <div id="forgotSection" style="display:none;">
+
+                <!-- Forgot step 1: email -->
+                <div id="forgotStepEmail">
+                    <h2 style="margin:0 0 10px;">Forgot Password</h2>
+                    <p class="auth-subtitle" style="margin:0 0 12px;">
+                        Enter your registered email. We'll send a 6-digit OTP.
+                    </p>
+
+                    <label for="forgotEmail">Email</label>
+                    <input type="email" id="forgotEmail" placeholder="Enter your email" />
+
+                    <button
+                        type="button"
+                        class="auth-btn"
+                        onclick="handleSendResetOtp()"
+                    >
+                        Send OTP
+                    </button>
+
+                    <div id="forgotEmailMessage" class="coupon-message"></div>
+
+                    <p class="auth-bottom">
+                        <a href="#" onclick="handleForgotBack()">Back to Login</a>
+                    </p>
+                </div>
+
+                <!-- Forgot step 2: verify reset OTP -->
+                <div id="forgotStepOtp" style="display:none;">
+                    <h2 style="margin:0 0 10px;">Verify OTP</h2>
+                    <p class="auth-subtitle" style="margin:0 0 12px;">
+                        OTP sent to: <b id="resetSentToEmail"></b>
+                    </p>
+
+                    <label for="resetOtpCode">OTP Code</label>
+                    <input
+                        type="text"
+                        id="resetOtpCode"
+                        placeholder="Enter 6-digit OTP"
+                        maxlength="6"
+                        inputmode="numeric"
+                        autocomplete="one-time-code"
+                    />
+
+                    <div id="resetOtpMessage" class="coupon-message"></div>
+                    <div id="resetOtpCountdown" class="coupon-message"></div>
+
+                    <button
+                        type="button"
+                        class="auth-btn"
+                        id="verifyResetBtn"
+                        onclick="handleVerifyResetOtp()"
+                    >
+                        Verify OTP
+                    </button>
+
+                    <button
+                        type="button"
+                        class="auth-btn google-btn"
+                        id="resendResetBtn"
+                        onclick="handleResendResetOtp()"
+                    >
+                        Resend OTP
+                    </button>
+
+                    <p class="auth-bottom">
+                        <a href="#" onclick="handleForgotBack()">Back to Login</a>
+                    </p>
+                </div>
+
+                <!-- Forgot step 3: create new password -->
+                <div id="forgotStepNewPw" style="display:none;">
+                    <h2 style="margin:0 0 10px;">Create New Password</h2>
+                    <p class="auth-subtitle" style="margin:0 0 12px;">
+                        Enter your new password (min 8 characters).
+                    </p>
+
+                    <label for="resetPassword">New Password</label>
+                    <input type="password" id="resetPassword" placeholder="Enter new password" />
+
+                    <label for="resetConfirmPassword">Confirm New Password</label>
+                    <input type="password" id="resetConfirmPassword" placeholder="Confirm new password" />
+
+                    <div id="resetPasswordMessage" class="coupon-message"></div>
+
+                    <button
+                        type="button"
+                        class="auth-btn"
+                        onclick="handleResetPassword()"
+                    >
+                        Reset Password
+                    </button>
+
+                    <p class="auth-bottom">
+                        <a href="#" onclick="handleForgotBack()">Back to Login</a>
+                    </p>
+                </div>
 
             </div>
 

@@ -24,7 +24,7 @@ exports.protect = async (req, res, next) => {
 
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        req.user = await User.findById(decoded.id).select("-password -otpHash -otpExpiry -otpAttempts -otpResendAt");
+        req.user = await User.findById(decoded.id).select("-password -otpHash -otpExpiry -otpAttempts -otpResendAt -resetOtpHash -resetOtpExpiry -resetOtpAttempts -resetOtpResendAt -resetTokenHash -resetTokenExpiry");
         if (!req.user) {
             return res.status(401).json({
                 success: false,
@@ -55,7 +55,7 @@ exports.optionalProtect = async (req, res, next) => {
     }
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        req.user = await User.findById(decoded.id).select("-password -otpHash -otpExpiry -otpAttempts -otpResendAt");
+        req.user = await User.findById(decoded.id).select("-password -otpHash -otpExpiry -otpAttempts -otpResendAt -resetOtpHash -resetOtpExpiry -resetOtpAttempts -resetOtpResendAt -resetTokenHash -resetTokenExpiry");
     } catch (e) {
         // Tolerate invalid/expired tokens — the request stays anonymous
     }

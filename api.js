@@ -205,6 +205,37 @@ function apiGoogleLogin(email, name) {
         });
 }
 
+// ---------- FORGOT PASSWORD / RESET ----------
+
+// Always returns the generic anti-enumeration response from the server.
+function apiForgotPassword(email) {
+    return fetch(API.base + "/users/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email })
+    }).then(function(res) { return res.json(); });
+}
+
+// Verify the reset OTP. On success returns a short-lived single-use resetToken —
+// this never creates a login session.
+function apiVerifyResetOtp(email, otp) {
+    return fetch(API.base + "/users/verify-reset-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email, otp: otp })
+    }).then(function(res) { return res.json(); });
+}
+
+// Apply the new password using the verified reset token. No session is issued.
+function apiResetPassword(resetToken, newPassword, confirmPassword) {
+    return fetch(API.base + "/users/reset-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resetToken: resetToken, newPassword: newPassword, confirmPassword: confirmPassword })
+    })
+        .then(function(res) { return res.json(); });
+}
+
 // ---------- AUTH SESSION HELPERS (customer entry flow) ----------
 
 // Sanitized mirror of the logged-in customer (name/email/phone only — never a password)

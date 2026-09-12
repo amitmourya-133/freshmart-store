@@ -2550,10 +2550,228 @@ function handleResendOtp() {
 
 function handleOtpBack() {
     if (otpCountdownTimer) clearInterval(otpCountdownTimer);
+    if (resetTimerId) clearInterval(resetTimerId);
     var step1 = document.getElementById("loginStep1");
     var step2 = document.getElementById("loginStep2");
+    var forgot = document.getElementById("forgotSection");
     if (step1) step1.style.display = "block";
     if (step2) step2.style.display = "none";
+    if (forgot) forgot.style.display = "none";
+}
+
+// ===============================
+// FORGOT PASSWORD / RESET FLOW
+// Everything is kept in memory (no passwords / OTPs / reset tokens in storage).
+// ===============================
+
+var pendingResetEmail = "";
+var pendingResetToken = "";
+var resetOtpSentTs = 0;
+var resetOtpExpireTs = 0;
+var resetTimerId = null;
+
+function showLoginArea(areaId) {
+    var ids = ["loginStep1", "loginStep2", "forgotSection"];
+    ids.forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.style.display = (id === areaId) ? "block" : "none";
+    });
+    if (areaId === "forgotSection") {
+        ["forgotStepEmail", "forgotStepOtp", "forgotStepNewPw"].forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) el.style.display = (id === "forgotStepEmail") ? "block" : "none";
+        });
+    }
+}
+
+function startForgotPassword() {
+    showLoginArea("forgotSection");
+    var f = document.getElementById("forgotEmail");
+    if (f) f.value = "";
+    var msg = document.getElementById("forgotEmailMessage");
+    if (msg) msg.textContent = "";
+    pendingResetEmail = "";
+    pendingResetToken = "";
+    if (resetTimerId) clearInterval(resetTimerId);
+}
+
+function handleForgotBack() {
+    if (resetTimerId) clearInterval(resetTimerId);
+    if (otpCountdownTimer) clearInterval(otpCountdownTimer);
+    showLoginArea("loginStep1");
+    pendingResetEmail = "";
+    pendingResetToken = "";
+}
+
+function startResetOtpTimers() {
+    if (resetTimerId) clearInterval(resetTimerId);
+    updateResetOtpTimers();
+    resetTimerId = setInterval(updateResetOtpTimers, 1000);
+}
+
+function updateResetOtpTimers() {
+    var expLeft = Math.max(0, Math.floor((resetOtpExpireTs - nowMs()) / 1000));
+    var resendLeft = Math.max(0, Math.floor((resetOtpSentTs + 60 * 1000 - nowMs()) / 1000));
+
+    var verifyBtn = document.getElementById("verifyResetBtn");
+    var resendBtn = document.getElementById("resendResetBtn");
+    var cdEl = document.getElementById("resetOtpCountdown");
+
+    if (expLeft > 0) {
+        var mins = Math.floor(expLeft / 60);
+        var secs = String(expLeft % 60).padStart(2, "0");
+        if (cdEl) cdEl.textContent = "⏳ OTP expires in " + mins + ":" + secs;
+        if (verifyBtn) verifyBtn.disabled = false;
+    } else {
+        if (cdEl) cdEl.textContent = "⏰ Code expired. Please request a new one.";
+        if (verifyBtn) verifyBtn.disabled = true;
+    }
+
+    if (resendBtn) {
+        if (resendLeft > 0) {
+            resendBtn.disabled = true;
+            resendBtn.textContent = "Resend OTP (" + resendLeft + "s)";
+        } else {
+            resendBtn.disabled = false;
+            resendBtn.textContent = "Resend OTP";
+        }
+    }
+}
+
+// Forgot step 1: submit email. Server replies with the same generic message
+// for existing and unknown accounts (no account enumeration).
+function handleSendResetOtp() {
+    var f = document.getElementById("forgotEmail");
+    var email = f ? String(f.value || "").trim() : "";
+    var msgEl = document.getElementById("forgotEmailMessage");
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        if (msgEl) msgEl.textContent = "Please enter a valid email address.";
+        return;
+    }
+
+    pendingResetEmail = email;
+    if (msgEl) msgEl.textContent = "";
+
+    apiForgotPassword(email).then(function(data) {
+        // Always the generic response — mirror it exactly.
+        if (!data || data.success !== false) {
+            showToast(data && data.message ? data.message : "If an account exists for this email, a password reset OTP has been sent.", "info");
+        } else {
+            showToast((data && data.message) || "Please try again.", "error");
+        }
+
+        // Advance to the OTP step regardless (keeps the flow consistent for
+        // existing and unknown addresses).
+        var sentTo = document.getElementById("resetSentToEmail");
+        if (sentTo) sentTo.textContent = email;
+        var otpEl = document.getElementById("resetOtpCode");
+        if (otpEl) otpEl.value = "";
+        var msg = document.getElementById("resetOtpMessage");
+        if (msg) msg.textContent = "";
+        resetOtpExpireTs = nowMs() + 5 * 60 * 1000;
+        resetOtpSentTs = nowMs();
+        startResetOtpTimers();
+
+        var e = document.getElementById("forgotStepEmail");
+        var o = document.getElementById("forgotStepOtp");
+        if (e) e.style.display = "none";
+        if (o) o.style.display = "block";
+    }).catch(function() {
+        showToast("Could not reach the server. Please try again.", "error");
+    });
+}
+
+// Forgot step 2: verify the reset OTP -> grants a single-use reset token (memory only).
+function handleVerifyResetOtp() {
+    var codeEl = document.getElementById("resetOtpCode");
+    var otp = codeEl ? String(codeEl.value || "").trim() : "";
+
+    if (!/^\d{6}$/.test(otp)) {
+        showToast("Enter the 6-digit code sent to your email.", "error");
+        return;
+    }
+    if (!pendingResetEmail) {
+        showToast("Missing email address.", "error");
+        return;
+    }
+
+    apiVerifyResetOtp(pendingResetEmail, otp).then(function(data) {
+        if (!data.success || !data.resetToken) {
+            showToast(data.message || "Invalid or expired OTP.", "error");
+            return;
+        }
+        pendingResetToken = data.resetToken;
+        var otpStep = document.getElementById("forgotStepOtp");
+        var pwStep = document.getElementById("forgotStepNewPw");
+        if (otpStep) otpStep.style.display = "none";
+        if (pwStep) pwStep.style.display = "block";
+        if (resetTimerId) clearInterval(resetTimerId);
+    }).catch(function() {
+        showToast("Could not reach the server. Please try again.", "error");
+    });
+}
+
+// Forgot step 2 resend: repeats the same anti-enumeration request.
+function handleResendResetOtp() {
+    if (!pendingResetEmail) return;
+    if (resetOtpSentTs && nowMs() - resetOtpSentTs < 60000) {
+        var wait = Math.ceil((60000 - (nowMs() - resetOtpSentTs)) / 1000);
+        showToast("Please wait " + wait + "s before requesting another OTP.", "error");
+        return;
+    }
+    apiForgotPassword(pendingResetEmail).then(function(data) {
+        if (data && data.success === false) {
+            showToast(data.message || "Please try again.", "error");
+            return;
+        }
+        showToast(data && data.message ? data.message : "If an account exists for this email, a password reset OTP has been sent.", "info");
+        resetOtpExpireTs = nowMs() + 5 * 60 * 1000;
+        resetOtpSentTs = nowMs();
+        startResetOtpTimers();
+    }).catch(function() {
+        showToast("Could not reach the server. Please try again.", "error");
+    });
+}
+
+// Forgot step 3: apply the new password (never stored locally).
+function handleResetPassword() {
+    var pw = document.getElementById("resetPassword");
+    var cw = document.getElementById("resetConfirmPassword");
+    var val1 = pw ? pw.value : "";
+    var val2 = cw ? cw.value : "";
+    var msgEl = document.getElementById("resetPasswordMessage");
+
+    if (msgEl) msgEl.textContent = "";
+    if (String(val1).length < 8) {
+        if (msgEl) msgEl.textContent = "Password must be at least 8 characters.";
+        showToast("Password must be at least 8 characters.", "error");
+        return;
+    }
+    if (val1 !== val2) {
+        if (msgEl) msgEl.textContent = "Passwords do not match.";
+        showToast("Passwords do not match.", "error");
+        return;
+    }
+    if (!pendingResetToken) {
+        showToast("Your reset session has expired. Please start again.", "error");
+        return;
+    }
+
+    apiResetPassword(pendingResetToken, val1, val2).then(function(data) {
+        if (!data.success) {
+            showToast(data.message || "Could not reset the password.", "error");
+            return;
+        }
+        var emailEl = document.getElementById("loginEmail");
+        if (emailEl) emailEl.value = pendingResetEmail;
+        pendingResetToken = "";
+        pendingResetEmail = "";
+        showLoginArea("loginStep1");
+        showToast("Password reset successfully. Please log in with your new password.", "success");
+    }).catch(function() {
+        showToast("Could not reach the server. Please try again.", "error");
+    });
 }
 
 // ===============================

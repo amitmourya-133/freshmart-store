@@ -18,6 +18,14 @@ const userSchema = new mongoose.Schema(
         otpExpiry: { type: Date },
         otpAttempts: { type: Number, default: 0 },
         otpResendAt: { type: Date },
+        // Password-reset OTP (same hashed-only storage discipline as login OTP)
+        resetOtpHash: { type: String },
+        resetOtpExpiry: { type: Date },
+        resetOtpAttempts: { type: Number, default: 0 },
+        resetOtpResendAt: { type: Date },
+        // Short-lived single-use authorization granted AFTER a successful reset OTP verify
+        resetTokenHash: { type: String },
+        resetTokenExpiry: { type: Date },
         googleId: { type: String },
         isAdmin: { type: Boolean, default: false }
     },

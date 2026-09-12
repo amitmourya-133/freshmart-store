@@ -10,6 +10,9 @@ const {
     getMe,
     sendOTP,
     verifyOTP,
+    forgotPassword,
+    verifyResetOtp,
+    resetPassword,
     googleLogin,
     listUsers
 } = require("../controllers/userController");
@@ -24,6 +27,10 @@ router.post("/signup", authLimiter, signup);
 router.post("/login", authLimiter, login);
 router.post("/send-otp", authLimiter, sendOTP);
 router.post("/verify-otp", authLimiter, verifyOTP);
+// Password reset (anti-enumeration generic response; OTP + short-lived reset token only)
+router.post("/forgot-password", authLimiter, forgotPassword);
+router.post("/verify-reset-otp", authLimiter, verifyResetOtp);
+router.post("/reset-password", authLimiter, resetPassword);
 router.post("/google-login", authLimiter, googleLogin);
 // NOTE: No public admin-creation/setup endpoint exists.
 // Admins are created ONLY via the secure CLI: `npm run seed:admin`

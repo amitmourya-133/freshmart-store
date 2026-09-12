@@ -247,6 +247,203 @@ exports.verifyOTP = async (req, res) => {
     }
 };
 
+// ===============================
+// FORGOT PASSWORD / PASSWORD RESET
+// ===============================
+
+// Anti-enumeration: this exact message is returned whether or not the email
+// exists. Never reveal whether an account is registered.
+const FORGOT_GENERIC_MESSAGE = "If an account exists for this email, a password reset OTP has been sent.";
+
+// Issue a reset OTP for a user: hashed storage only, new code invalidates the old.
+async function issueResetOtp(user) {
+    const otp = generateOtp();
+    user.resetOtpHash = hashOtp(otp);
+    user.resetOtpExpiry = new Date(Date.now() + OTP_TTL_MS);
+    user.resetOtpAttempts = 0;
+    user.resetOtpResendAt = new Date();
+    await user.save();
+
+    const html = `
+        <div style="font-family:Arial,sans-serif;max-width:500px;margin:auto;padding:20px;border:1px solid #ddd;border-radius:10px;">
+            <h2 style="color:#159447;">🥬 FreshMart</h2>
+            <p>Use this code to reset your password:</p>
+            <div style="font-size:32px;font-weight:bold;color:#159447;background:#eaffef;padding:15px;text-align:center;border-radius:8px;letter-spacing:6px;">
+                ${otp}
+            </div>
+            <p>This code is valid for 5 minutes and can be used once.</p>
+            <p style="color:#888;font-size:12px;">If you did not request a password reset, you can ignore this email.</p>
+        </div>`;
+
+    const delivery = await emailService.sendMail({
+        to: user.email,
+        subject: "FreshMart - Password Reset OTP",
+        html: html
+    });
+    return delivery.sent;
+}
+
+// FORGOT PASSWORD — always answers with the generic anti-enumeration message.
+exports.forgotPassword = async (req, res) => {
+    try {
+        const { email } = req.body;
+        if (!email) {
+            return res.status(400).json({ success: false, message: "Email required" });
+        }
+
+        const user = await User.findOne({ email: email.toLowerCase() });
+
+        if (user) {
+            // 60-second resend cooldown: silently skip sending (identical generic reply).
+            if (user.resetOtpResendAt &&
+                Date.now() - new Date(user.resetOtpResendAt).getTime() < OTP_RESEND_COOLDOWN_MS) {
+                return res.json({ success: true, message: FORGOT_GENERIC_MESSAGE });
+            }
+            try {
+                await issueResetOtp(user);
+            } catch (e) {
+                // Never leak OTP / email internals; the generic answer stays identical.
+            }
+        }
+
+        res.json({ success: true, message: FORGOT_GENERIC_MESSAGE });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// VERIFY RESET OTP — on success grants a short-lived single-use reset token.
+// This endpoint NEVER creates a login session/JWT.
+exports.verifyResetOtp = async (req, res) => {
+    try {
+        const { email, otp } = req.body;
+        if (!email || !otp) {
+            return res.status(400).json({ success: false, message: "Email and OTP required" });
+        }
+
+        const user = await User.findOne({ email: email.toLowerCase() });
+        if (!user || !user.resetOtpHash) {
+            return res.status(400).json({ success: false, message: "Please request a password reset OTP first." });
+        }
+
+        if (isOtpExpired(user.resetOtpExpiry)) {
+            user.resetOtpHash = undefined;
+            user.resetOtpExpiry = undefined;
+            user.resetOtpAttempts = 0;
+            user.resetTokenHash = undefined;
+            user.resetTokenExpiry = undefined;
+            await user.save();
+            return res.status(400).json({ success: false, message: "OTP has expired. Please request a new one." });
+        }
+
+        if (user.resetOtpAttempts >= OTP_MAX_ATTEMPTS) {
+            user.resetOtpHash = undefined;
+            user.resetOtpExpiry = undefined;
+            user.resetOtpAttempts = 0;
+            await user.save();
+            return res.status(400).json({ success: false, message: "Too many failed attempts. Please request a new OTP." });
+        }
+
+        if (!otpMatches(otp, user.resetOtpHash)) {
+            user.resetOtpAttempts = (user.resetOtpAttempts || 0) + 1;
+            const burned = user.resetOtpAttempts >= OTP_MAX_ATTEMPTS;
+            if (burned) {
+                user.resetOtpHash = undefined;
+                user.resetOtpExpiry = undefined;
+                user.resetOtpAttempts = 0;
+            }
+            await user.save();
+            return res.status(400).json({
+                success: false,
+                message: burned ? "Too many failed attempts. Please request a new OTP." : "Invalid OTP"
+            });
+        }
+
+        // Correct OTP: burn the code immediately (single-use) and mint the reset token.
+        user.resetOtpHash = undefined;
+        user.resetOtpExpiry = undefined;
+        user.resetOtpAttempts = 0;
+
+        const resetToken = jwt.sign(
+            { uid: String(user._id), purpose: "password-reset" },
+            process.env.JWT_SECRET,
+            { expiresIn: "5m" }
+        );
+        user.resetTokenHash = hashOtp(resetToken);
+        user.resetTokenExpiry = new Date(Date.now() + 5 * 60 * 1000);
+
+        await user.save();
+
+        res.json({
+            success: true,
+            message: "OTP verified.",
+            resetToken: resetToken
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// RESET PASSWORD — only after a verified single-use reset token.
+// Hashes the new password through the User model and invalidates ALL reset state.
+// Does NOT create a session: the user must log in normally (email + password + OTP).
+exports.resetPassword = async (req, res) => {
+    try {
+        const { resetToken, newPassword, confirmPassword } = req.body;
+        if (!resetToken) {
+            return res.status(400).json({ success: false, message: "Reset token required." });
+        }
+        if (!newPassword) {
+            return res.status(400).json({ success: false, message: "New password required." });
+        }
+
+        let decoded;
+        try {
+            decoded = jwt.verify(resetToken, process.env.JWT_SECRET);
+        } catch (e) {
+            return res.status(400).json({ success: false, message: "Reset link expired. Please start again." });
+        }
+        if (!decoded || decoded.purpose !== "password-reset" || !decoded.uid) {
+            return res.status(400).json({ success: false, message: "Invalid reset token." });
+        }
+
+        const user = await User.findById(decoded.uid);
+        if (!user) {
+            return res.status(400).json({ success: false, message: "Account not found." });
+        }
+
+        // Single-use and short-lived: the stored token hash must match exactly.
+        const tokenValid = user.resetTokenHash &&
+            !isOtpExpired(user.resetTokenExpiry) &&
+            otpMatches(resetToken, user.resetTokenHash);
+        if (!tokenValid) {
+            return res.status(400).json({ success: false, message: "Reset link expired. Please start again." });
+        }
+
+        if (String(newPassword).length < 8) {
+            return res.status(400).json({ success: false, message: "Password must be at least 8 characters." });
+        }
+        if (confirmPassword !== undefined && String(newPassword) !== String(confirmPassword)) {
+            return res.status(400).json({ success: false, message: "Passwords do not match." });
+        }
+
+        // User model's pre-save hook hashes the password. Never stored in plaintext.
+        user.password = newPassword;
+
+        // Invalidate ALL reset authorization immediately after the password change.
+        user.resetOtpHash = undefined;
+        user.resetOtpExpiry = undefined;
+        user.resetOtpAttempts = 0;
+        user.resetTokenHash = undefined;
+        user.resetTokenExpiry = undefined;
+        await user.save();
+
+        res.json({ success: true, message: "Password reset successfully. Please log in with your new password." });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 // GOOGLE LOGIN (demo - sign with google, actual OAuth needs client redirect/keys)
 exports.googleLogin = async (req, res) => {
     try {
