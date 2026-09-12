@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Checkout - FreshMart</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body data-page="checkout">
+
+<header>
+
+    <div class="logo">🥬 FreshMart</div>
+
+    <div class="header-actions">
+        <button class="secondary-btn" onclick="window.location.href='orders.html'">
+            My Orders
+        </button>
+        <button type="button" class="dark-mode-toggle" id="darkModeToggle" onclick="toggleDarkMode()" title="Toggle Dark Mode">🌙</button>
+        <button class="cart-btn" onclick="window.location.href='index.html'">
+            ← Continue Shopping
+        </button>
+    </div>
+
+</header>
+
+
+<section class="checkout-page">
+
+    <div class="checkout-container">
+
+        <div class="checkout-form">
+
+            <h2>📦 Delivery Details</h2>
+
+            <label>Full Name</label>
+
+            <input
+                type="text"
+                id="customerName"
+                placeholder="Enter your name"
+            >
+
+
+            <label>Mobile Number</label>
+
+            <input
+                type="tel"
+                id="customerPhone"
+                placeholder="Enter mobile number"
+                maxlength="10"
+                pattern="[0-9]{10}"
+            >
+
+
+            <label>Address</label>
+
+            <textarea
+                id="customerAddress"
+                placeholder="House no, street, area..."
+            ></textarea>
+
+
+            <label>City</label>
+
+            <input
+                type="text"
+                id="customerCity"
+                placeholder="Enter city"
+            >
+
+
+            <label>Pincode</label>
+
+            <input
+                type="text"
+                id="customerPincode"
+                placeholder="Enter pincode"
+                maxlength="6"
+                pattern="[0-9]{6}"
+                onblur="detectPincodeInfo()"
+            >
+
+            <div id="pincodeHint" class="pincode-hint" style="display:none;"></div>
+
+
+            <h2>💳 Payment Method</h2>
+
+            <div class="payment-option">
+                <label>
+                    <input
+                        type="radio"
+                        name="payment"
+                        value="cod"
+                        checked
+                        onchange="handlePaymentMethodChange(this.value)"
+                    >
+                    💵 Cash On Delivery
+                </label>
+            </div>
+
+            <div class="payment-option">
+                <label>
+                    <input
+                        type="radio"
+                        name="payment"
+                        value="online"
+                        onchange="handlePaymentMethodChange(this.value)"
+                    >
+                    🏦 Pay Online (UPI / Card / Net Banking)
+                </label>
+            </div>
+
+            <div class="online-methods" id="onlineMethods" style="display:none;">
+                <div class="method-row">
+                    <label><input type="radio" name="onlineMethod" value="UPI" checked> 📱 UPI</label>
+                    <label><input type="radio" name="onlineMethod" value="card"> 💳 Card</label>
+                    <label><input type="radio" name="onlineMethod" value="netbanking"> 🏛️ Net Banking</label>
+                    <label><input type="radio" name="onlineMethod" value="wallet"> 👛 Wallet</label>
+                </div>
+                <p class="online-note">Secure checkout via Razorpay. You will be redirected to a secure payment page to complete your order.</p>
+            </div>
+
+            <div class="payment-flag" id="paymentFlag" style="display:none;"></div>
+
+
+            <h2>🕐 Delivery Slot</h2>
+
+            <div class="slot-options" id="slotOptions">
+                <label>
+                    <input type="radio" name="deliverySlot" value="Morning (8-11 AM)" checked>
+                    🌅 Morning <span>(8 - 11 AM)</span>
+                </label>
+                <label>
+                    <input type="radio" name="deliverySlot" value="Evening (5-8 PM)">
+                    🌆 Evening <span>(5 - 8 PM)</span>
+                </label>
+            </div>
+            <p class="online-note">Choose a delivery time slot. We'll deliver within your preferred window.</p>
+
+
+            <button
+                class="place-order-btn"
+                id="placeOrderBtn"
+                onclick="placeOrder()"
+            >
+                🛍️ PLACE ORDER
+            </button>
+
+        </div>
+
+
+        <div class="order-summary">
+
+            <h2>🛒 Order Summary</h2>
+
+            <div id="checkoutItems"></div>
+
+            <hr>
+
+            <div class="summary-row">
+                <span>Subtotal</span>
+                <strong id="checkoutSubtotal">
+                    ₹0
+                </strong>
+            </div>
+
+            <div class="summary-row">
+                <span>Delivery</span>
+                <strong id="deliveryCharge">
+                    ₹20
+                </strong>
+            </div>
+
+            <hr>
+
+            <div class="summary-row total">
+                <span>Total</span>
+                <strong id="checkoutTotal">
+                    ₹20
+                </strong>
+            </div>
+
+            <div id="minOrderNote" class="min-order-note" style="display:none;"></div>
+
+        </div>
+
+    </div>
+
+</section>
+
+
+<div id="successMessage" class="success-message">
+
+    <div class="success-box">
+
+        <div class="success-icon">✅</div>
+
+        <h2>Order Placed!</h2>
+
+        <p>
+            Thank you for shopping with FreshMart.
+        </p>
+
+        <p id="orderNumber"></p>
+
+        <p id="successReceipt"></p>
+
+        <button onclick="window.location.href='index.html'">
+            Continue Shopping
+        </button>
+
+    </div>
+
+</div>
+
+
+<script src="api.js"></script>
+<script src="script.js"></script>
+
+</body>
+</html>

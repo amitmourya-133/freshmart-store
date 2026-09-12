@@ -1,0 +1,59 @@
+// ===============================
+// FRESHMART - EXPRESS APP
+// Builds the Express application (middleware + routes + static files)
+// so it can be started locally (server.js) or as a Vercel serverless
+// function (api/index.js) without duplicating the setup.
+// ===============================
+
+require("dotenv").config();
+const express = require("express");
+const cors = require("cors");
+const path = require("path");
+
+// Import routes
+const productRoutes = require("./routes/productRoutes");
+const orderRoutes = require("./routes/orderRoutes");
+const userRoutes = require("./routes/userRoutes");
+const paymentRoutes = require("./routes/paymentRoutes");
+const cartRoutes = require("./routes/cartRoutes");
+
+const app = express();
+
+// Register .jfif as a JPEG MIME type so product images served statically render in the browser
+const mime = require("mime");
+mime.define({ "image/jpeg": ["jfif"] }, true);
+
+// ===============================
+// MIDDLEWARE
+// ===============================
+
+app.use(cors());
+
+// Raw body for the Razorpay webhook (needed for HMAC signature verification).
+// Must be mounted BEFORE express.json() so the raw buffer is preserved.
+app.use("/api/payments/webhook", express.raw({ type: "*/*" }));
+
+app.use(express.json());
+
+// ===============================
+// ROUTES
+// ===============================
+
+app.use("/api/products", productRoutes);
+app.use("/api/orders", orderRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/payments", paymentRoutes);
+app.use("/api/cart", cartRoutes);
+
+// Health check
+app.get("/api/health", (req, res) => {
+    res.json({ success: true, message: "FreshMart API is running" });
+});
+
+// ===============================
+// SERVE STATIC FILES (frontend)
+// ===============================
+
+app.use(express.static(path.join(__dirname, ".")));
+
+module.exports = app;

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>FreshMart - Create Account</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body data-page="signup">
+
+    <div class="auth-page">
+
+        <div class="auth-box">
+
+            <div style="text-align:right; margin-bottom:10px;">
+                <button type="button" class="dark-mode-toggle" id="darkModeToggle" onclick="toggleDarkMode()" title="Toggle Dark Mode">🌙</button>
+            </div>
+
+            <div class="auth-logo">
+                🥬 FreshMart
+            </div>
+
+            <h1>Create Account</h1>
+
+            <p class="auth-subtitle">
+                Create your FreshMart account
+            </p>
+
+
+            <form id="signupForm">
+
+                <label for="signupName">
+                    Full Name
+                </label>
+
+                <input
+                    type="text"
+                    id="signupName"
+                    placeholder="Enter your name"
+                    required
+                >
+
+
+                <label for="signupPhone">
+                    Mobile Number
+                </label>
+
+                <input
+                    type="tel"
+                    id="signupPhone"
+                    placeholder="Enter mobile number"
+                    maxlength="10"
+                    required
+                >
+
+
+                <label for="signupEmail">
+                    Email
+                </label>
+
+                <input
+                    type="email"
+                    id="signupEmail"
+                    placeholder="Enter email"
+                    required
+                >
+
+
+                <label for="signupPassword">
+                    Password
+                </label>
+
+                <input
+                    type="password"
+                    id="signupPassword"
+                    placeholder="Create password"
+                    required
+                >
+
+
+                <label for="signupConfirmPassword">
+                    Confirm Password
+                </label>
+
+                <input
+                    type="password"
+                    id="signupConfirmPassword"
+                    placeholder="Confirm password"
+                    required
+                >
+
+
+                <button
+                    type="submit"
+                    class="auth-btn"
+                >
+                    Create Account
+                </button>
+
+            </form>
+
+
+            <p class="auth-bottom">
+                Already have an account?
+
+                <a href="login.html">
+                    Login
+                </a>
+            </p>
+
+        </div>
+
+    </div>
+
+
+    <script src="api.js"></script>
+    <script src="script.js"></script>
+
+</body>
+
+</html>

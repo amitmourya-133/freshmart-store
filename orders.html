@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>FreshMart - My Orders</title>
+
+    <link rel="stylesheet" href="./style.css">
+</head>
+
+<body data-page="orders">
+
+    <header>
+
+        <div class="logo">
+            🥬 FreshMart
+        </div>
+
+        <div class="header-actions">
+            <button
+                type="button"
+                class="secondary-btn"
+                onclick="window.location.href='index.html'"
+            >
+                🏠 Home
+            </button>
+            <button
+                type="button"
+                class="secondary-btn"
+                onclick="window.location.href='login.html'"
+            >
+                Login
+            </button>
+            <button
+                type="button"
+                class="dark-mode-toggle"
+                id="darkModeToggle"
+                onclick="toggleDarkMode()"
+                title="Toggle Dark Mode"
+            >
+                🌙
+            </button>
+        </div>
+
+    </header>
+
+
+    <section class="orders-page">
+
+        <h1>📦 My Orders</h1>
+
+        <div id="ordersContainer">
+
+           <p style="text-align:center;">
+                Loading orders...
+            
+            </p>
+
+        </div>
+
+    </section>
+
+
+    <script src="./api.js"></script>
+    <script src="./script.js"></script>
+
+</body>
+
+</html>

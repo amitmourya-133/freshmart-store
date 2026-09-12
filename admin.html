@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>FreshMart - Admin Panel</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body data-page="admin">
+
+    <header>
+
+        <div class="logo">🥬 FreshMart</div>
+
+        <div class="header-actions">
+            <button class="secondary-btn" onclick="window.location.href='index.html'">
+                ← Store
+            </button>
+            <button type="button" class="dark-mode-toggle" id="darkModeToggle" onclick="toggleDarkMode()" title="Toggle Dark Mode">🌙</button>
+            <button class="cart-btn logout-btn" onclick="adminLogout()">
+                Logout
+            </button>
+        </div>
+
+    </header>
+
+
+    <section class="admin-page">
+
+        <div class="admin-header">
+            <h1>🛠️ Admin Panel</h1>
+            <p>Manage orders, products and stock for FreshMart</p>
+        </div>
+
+        <div class="admin-tabs">
+            <button class="admin-tab active" id="tabOrdersBtn" onclick="switchTab('orders')">📦 Orders</button>
+            <button class="admin-tab" id="tabProductsBtn" onclick="switchTab('products')">🥬 Products</button>
+        </div>
+
+        <div id="adminOrdersSection" class="admin-section">
+
+            <div class="admin-section-head">
+                <h2>All Orders</h2>
+            </div>
+
+            <div id="adminOrdersList" class="admin-list">
+                <p style="text-align:center;color:var(--text-secondary);padding:40px;">Loading orders...</p>
+            </div>
+
+        </div>
+
+
+        <div id="adminProductsSection" class="admin-section" style="display:none;">
+
+            <div class="admin-section-head">
+                <h2>Products & Stock</h2>
+                <button class="add-product-btn" onclick="openAddProduct()">+ Add Product</button>
+            </div>
+
+            <div class="admin-stats" id="adminStats"></div>
+
+            <input type="text" id="adminProductSearch" class="admin-search" placeholder="Search products..." oninput="renderProducts()">
+
+            <div id="adminProductsList" class="admin-products-grid">
+                <p style="text-align:center;color:var(--text-secondary);padding:40px;">Loading products...</p>
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- Add/Edit Product Modal -->
+    <div id="productModal" class="admin-modal" style="display:none;">
+        <div class="admin-modal-box">
+            <div class="admin-modal-head">
+                <h3 id="productModalTitle">Add Product</h3>
+                <button class="modal-close" onclick="closeProductModal()">✕</button>
+            </div>
+
+            <form id="productForm" onsubmit="saveProduct(event)">
+
+                <input type="hidden" id="pfId">
+
+                <label>Product Name</label>
+                <input type="text" id="pfName" required>
+
+                <label>Category</label>
+                <select id="pfCategory">
+                    <option>Vegetables</option>
+                    <option>Fruits</option>
+                    <option>Grocery</option>
+                </select>
+
+                <label>Price (₹)</label>
+                <input type="number" id="pfPrice" min="0" step="0.01" required>
+
+                <label>Unit</label>
+                <input type="text" id="pfUnit" placeholder="kg / piece / dozen / pack">
+
+                <label>Emoji</label>
+                <input type="text" id="pfEmoji" placeholder="🥕">
+
+                <label>Gradient CSS</label>
+                <input type="text" id="pfGradient" placeholder="linear-gradient(135deg, #ff6b6b, #ee5a24)">
+
+                <label>Origin</label>
+                <input type="text" id="pfOrigin">
+
+                <label>Stock</label>
+                <input type="number" id="pfStock" min="0" required>
+
+                <label>Description</label>
+                <textarea id="pfDescription" rows="2"></textarea>
+
+                <div class="modal-actions">
+                    <button type="button" class="modal-cancel" onclick="closeProductModal()">Cancel</button>
+                    <button type="submit" class="modal-save">Save Product</button>
+                </div>
+
+            </form>
+
+        </div>
+    </div>
+
+
+    <script src="api.js"></script>
+    <script src="script.js"></script>
+    <script src="admin.js"></script>
+
+</body>
+</html>

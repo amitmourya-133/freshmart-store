@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>FreshMart - Weekly Veggie Box</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body data-page="subscription">
+
+    <header>
+        <div class="logo">🥬 FreshMart</div>
+        <div class="header-actions">
+            <button type="button" class="lang-toggle" id="langToggle" onclick="toggleLanguage(this)">हिं EN</button>
+            <button type="button" class="secondary-btn" onclick="window.location.href='index.html'">← Store</button>
+            <button type="button" class="dark-mode-toggle" id="darkModeToggle" onclick="toggleDarkMode()" title="Dark Mode">🌙</button>
+        </div>
+    </header>
+
+    <section class="sub-page">
+
+        <div class="sub-hero">
+            <h1>🥗 Weekly Veggie Box</h1>
+            <p>Fresh vegetables delivered to your doorstep every week. Skip or cancel anytime.</p>
+        </div>
+
+        <div class="sub-plans">
+
+            <div class="sub-card">
+                <div class="sub-emoji">🥬</div>
+                <h3>Basic Box</h3>
+                <p class="sub-desc">Daily essentials for 2 people.</p>
+                <div class="sub-price">₹499<span>/week</span></div>
+                <ul>
+                    <li>15+ seasonal vegetables</li>
+                    <li>5kg approx</li>
+                    <li>Free delivery</li>
+                    <li>Skip anytime</li>
+                </ul>
+                <button class="sub-btn" onclick="selectPlan('Basic Box', 499)">Choose Basic</button>
+            </div>
+
+            <div class="sub-card popular">
+                <div class="sub-tag">MOST POPULAR</div>
+                <div class="sub-emoji">🍅</div>
+                <h3>Standard Box</h3>
+                <p class="sub-desc">Everything for a family of 4.</p>
+                <div class="sub-price">₹899<span>/week</span></div>
+                <ul>
+                    <li>25+ seasonal vegetables</li>
+                    <li>8kg approx</li>
+                    <li>Free delivery</li>
+                    <li>+ 1kg fruits weekly</li>
+                    <li>Priority slots</li>
+                </ul>
+                <button class="sub-btn" onclick="selectPlan('Standard Box', 899)">Choose Standard</button>
+            </div>
+
+            <div class="sub-card">
+                <div class="sub-emoji">🍎</div>
+                <h3>Family Box</h3>
+                <p class="sub-desc">For large families & kitchens.</p>
+                <div class="sub-price">₹1499<span>/week</span></div>
+                <ul>
+                    <li>40+ vegetables & fruits</li>
+                    <li>14kg approx</li>
+                    <li>Free delivery</li>
+                    <li>+ 2kg fruits weekly</li>
+                    <li>Customizable box</li>
+                </ul>
+                <button class="sub-btn" onclick="selectPlan('Family Box', 1499)">Choose Family</button>
+            </div>
+
+        </div>
+
+        <!-- Subscription details form -->
+        <div class="sub-form-wrap" id="subFormWrap" style="display:none;">
+            <div class="sub-form-box">
+                <h3 id="subFormTitle">Subscribe to Standard Box</h3>
+
+                <label for="subName">Full Name</label>
+                <input type="text" id="subName" placeholder="Enter your name">
+
+                <label for="subPhone">Mobile Number</label>
+                <input type="tel" id="subPhone" placeholder="Enter mobile number" maxlength="10">
+
+                <label for="subAddress">Delivery Address</label>
+                <textarea id="subAddress" rows="2" placeholder="House no, street, area, city, pincode"></textarea>
+
+                <label for="subSlot">Preferred Delivery Slot</label>
+                <select id="subSlot">
+                    <option value="Morning (8-11 AM)">Morning (8-11 AM)</option>
+                    <option value="Evening (5-8 PM)">Evening (5-8 PM)</option>
+                </select>
+
+                <button class="sub-btn" onclick="confirmSubscription()">✅ Confirm Subscription</button>
+            </div>
+        </div>
+
+        <div class="sub-success" id="subSuccess" style="display:none;">
+            <div class="success-icon">🎉</div>
+            <h2>Subscription Confirmed!</h2>
+            <p id="subSuccessMsg">Your weekly veggie box subscription is active.</p>
+            <button class="sub-btn" onclick="window.location.href='index.html'">Continue Shopping</button>
+        </div>
+
+    </section>
+
+    <footer>
+        <h2>🥬 FreshMart</h2>
+        <p>Fresh vegetables, fruits & grocery delivered to your home.</p>
+        <p>© 2026 FreshMart. All Rights Reserved.</p>
+    </footer>
+
+    <script src="api.js"></script>
+    <script src="features.js"></script>
+    <script src="subscription.js"></script>
+
+</body>
+</html>

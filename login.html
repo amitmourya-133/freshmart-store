@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>FreshMart - Login</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body data-page="login">
+
+    <div class="auth-page">
+
+        <div class="auth-box">
+
+            <div style="text-align:right; margin-bottom:10px;">
+                <button type="button" class="dark-mode-toggle" id="darkModeToggle" onclick="toggleDarkMode()" title="Toggle Dark Mode">🌙</button>
+            </div>
+
+            <div class="auth-logo">
+                🥬 FreshMart
+            </div>
+
+            <h1>Welcome Back</h1>
+
+            <p class="auth-subtitle">
+                Login to your FreshMart account
+            </p>
+
+
+            <form id="loginForm">
+
+                <label for="loginEmail">
+                    Email
+                </label>
+
+                <input
+                    type="email"
+                    id="loginEmail"
+                    placeholder="Enter your email"
+                    required
+                >
+
+
+                <label for="loginPassword">
+                    Password
+                </label>
+
+                <input
+                    type="password"
+                    id="loginPassword"
+                    placeholder="Enter your password"
+                >
+
+                <label class="otp-label">
+                    Or login with OTP
+                </label>
+
+                <div class="otp-box">
+                    <input
+                        type="text"
+                        id="otpCode"
+                        placeholder="Enter OTP"
+                        maxlength="6"
+                    >
+                    <button
+                        type="button"
+                        class="otp-send"
+                        id="sendOtpBtn"
+                        onclick="handleSendOtp()"
+                    >
+                        Get OTP
+                    </button>
+                </div>
+                <div id="otpMessage" class="coupon-message"></div>
+
+
+                <button
+                    type="submit"
+                    class="auth-btn"
+                >
+                    Login
+                </button>
+
+            </form>
+
+            <div class="auth-divider">
+                <span>or</span>
+            </div>
+
+            <button
+                type="button"
+                class="auth-btn google-btn"
+                onclick="handleGoogleLogin()"
+            >
+                Sign in with Google
+            </button>
+
+
+            <p class="auth-bottom">
+                Don't have an account?
+
+                <a href="signup.html">
+                    Create Account
+                </a>
+            </p>
+
+        </div>
+
+    </div>
+
+
+    <script src="api.js"></script>
+    <script src="script.js"></script>
+
+</body>
+
+</html>

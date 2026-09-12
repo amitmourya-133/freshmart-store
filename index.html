@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FreshMart</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body data-page="home">
+
+<!-- HEADER -->
+<header>
+    <div class="logo">FreshMart</div>
+
+    <div class="search-box">
+        <input type="text" id="searchInput" placeholder="Search vegetables, fruits, grocery..." oninput="searchProducts()">
+        <button type="button" id="voiceSearchBtn" onclick="startVoiceSearch()" title="Voice Search">Voice</button>
+        <button type="button" onclick="searchProducts()">Search</button>
+    </div>
+
+    <div class="header-actions">
+        <button type="button" class="lang-toggle" id="langToggle" onclick="toggleLanguage(this)" title="Switch language">हिं EN</button>
+        <button type="button" class="secondary-btn" onclick="window.location.href='orders.html'">My Orders</button>
+        <button type="button" class="secondary-btn" onclick="window.location.href='login.html'">Login</button>
+        <button type="button" class="secondary-btn wishlist-btn-header" onclick="toggleWishlistPage()">Wishlist <span id="wishlistCount">0</span></button>
+        <button type="button" class="dark-mode-toggle" id="darkModeToggle" onclick="toggleDarkMode()" title="Toggle Dark Mode">Dark mode</button>
+        <button type="button" class="cart-btn" onclick="openCart()">
+            Cart <span id="cartCount">0</span>
+        </button>
+    </div>
+</header>
+
+<!-- HERO -->
+<section class="hero">
+    <div class="hero-content">
+        <h1>Freshness Delivered To Your Door</h1>
+        <p>Fresh vegetables, fruits and groceries at the best prices.</p>
+        <button type="button" onclick="scrollToProducts()">SHOP NOW</button>
+    </div>
+</section>
+
+<!-- OFFER BANNER SLIDER -->
+<section class="banner-slider" id="bannerSlider">
+    <div class="banner-track" id="bannerTrack">
+        <div class="banner-slide" style="background:linear-gradient(135deg,#159447,#0f6e33);">
+            <div class="banner-text">
+                <span class="banner-tag">TODAY'S DEAL</span>
+                <h2>Aaj Ka Offer!</h2>
+                <p>Fresh Tomato sirf <strong>₹60/kg</strong> — quality nomani guaranteed</p>
+                <button type="button" onclick="scrollToProducts()">Shop Now</button>
+            </div>
+            <div class="banner-visual"><img src="https://images.unsplash.com/photo-1546094096-0df4bcaaa337?auto=format&fit=crop&w=500&q=85" alt="Fresh tomatoes"></div>
+        </div>
+        <div class="banner-slide" style="background:linear-gradient(135deg,#ff7e5f,#feb47b);">
+            <div class="banner-text">
+                <span class="banner-tag">FREE DELIVERY</span>
+                <h2>Free Delivery!</h2>
+                <p>₹500+ ke order par <strong>FREE Delivery</strong> — abhi order karo</p>
+                <button type="button" onclick="scrollToProducts()">Shop Now</button>
+            </div>
+            <div class="banner-visual"><img src="https://images.unsplash.com/photo-1610832958506-aa56368176cf?auto=format&fit=crop&w=500&q=85" alt="Fresh produce delivery"></div>
+        </div>
+        <div class="banner-slide" style="background:linear-gradient(135deg,#159447,#2ea043);">
+            <div class="banner-text">
+                <span class="banner-tag">FRESH PICK</span>
+                <h2>Farm Fresh, Always!</h2>
+                <p>Fresh fruits &amp; veggies delivered to your doorstep</p>
+                <button type="button" onclick="scrollToProducts()">Shop Now</button>
+            </div>
+            <div class="banner-visual"><img src="https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=500&q=85" alt="Fresh vegetables"></div>
+        </div>
+    </div>
+    <div class="banner-dots" id="bannerDots"></div>
+</section>
+
+<!-- CATEGORIES -->
+<section class="categories">
+    <h2>Shop By Category</h2>
+    <div class="category-container">
+        <div class="category" onclick="filterCategory('Vegetables')">
+            <div><img src="https://images.unsplash.com/photo-1576047257161-0f1f2d5c4b2a?auto=format&fit=crop&w=300&q=85" alt="Vegetables"></div>
+            <h3>Vegetables</h3>
+        </div>
+        <div class="category" onclick="filterCategory('Fruits')">
+            <div><img src="https://images.unsplash.com/photo-1619546813926-a78fa6372cd2?auto=format&fit=crop&w=300&q=85" alt="Fruits"></div>
+            <h3>Fruits</h3>
+        </div>
+        <div class="category" onclick="filterCategory('Grocery')">
+            <div><img src="https://images.unsplash.com/photo-1601598851547-4302969d7b27?auto=format&fit=crop&w=300&q=85" alt="Grocery items"></div>
+            <h3>Grocery</h3>
+        </div>
+    </div>
+</section>
+
+<!-- PRODUCTS -->
+<section class="products-section" id="products">
+    <h2>Fresh Products</h2>
+
+    <div class="cat-filter-bar">
+        <button class="cat-filter-btn cat-filter-active" data-cat="All" onclick="showAllProducts()">All</button>
+        <button class="cat-filter-btn" data-cat="Vegetables" onclick="filterCategory('Vegetables')">Vegetables</button>
+        <button class="cat-filter-btn" data-cat="Fruits" onclick="filterCategory('Fruits')">Fruits</button>
+        <button class="cat-filter-btn" data-cat="Grocery" onclick="filterCategory('Grocery')">Grocery</button>
+    </div>
+
+    <div class="filter-row">
+        <div class="price-filter">
+            <span class="price-filter-label">Price:</span>
+            <strong id="priceRangeLabel" class="price-range-label">₹0 – ₹0</strong>
+            <div class="range-wrap" id="priceRangeWrap">
+                <input type="range" id="priceMin" class="price-range-input" min="0" max="0" step="1" value="0" oninput="onPriceRangeChange()">
+                <input type="range" id="priceMax" class="price-range-input" min="0" max="0" step="1" value="0" oninput="onPriceRangeChange()">
+            </div>
+        </div>
+
+        <div class="sort-wrap">
+            <label for="sortSelect">Sort:</label>
+            <select id="sortSelect" onchange="changeSort(this.value)">
+                <option value="default">Default</option>
+                <option value="low">Price: Low to High</option>
+                <option value="high">Price: High to Low</option>
+                <option value="popular">Popularity</option>
+            </select>
+        </div>
+
+        <button type="button" class="clear-filters-btn" onclick="clearFilters()">Clear Filters</button>
+    </div>
+
+    <div id="resultsInfo" class="results-info"></div>
+
+    <div id="productContainer" class="product-container">
+        <!-- Products rendered by JavaScript with skeleton loading -->
+    </div>
+
+    <div id="noResults" class="no-results" style="display:none;">
+        <div class="cart-empty-icon">🔍</div>
+        <h3>No products found</h3>
+        <p>Try adjusting your filters or search term.</p>
+    </div>
+
+    <div class="load-more-wrap">
+        <button type="button" class="load-more-btn" id="loadMoreBtn" onclick="loadMoreProducts()">Load More</button>
+    </div>
+</section>
+
+<!-- AI RECOMMENDATIONS -->
+<section class="products-section" id="recommendedSection" style="display:none;">
+    <h2>Aapko yeh bhi pasand aa sakta hai</h2>
+    <div id="recommendedContainer" class="product-container">
+    </div>
+</section>
+
+<!-- SUBSCRIPTION CTA -->
+<section class="subscription-banner" onclick="window.location.href='subscription.html'">
+    <div>
+        <h3>Weekly Veggie Box</h3>
+        <p>Fresh vegetables delivered every week. Save up to 20%!</p>
+    </div>
+    <button type="button">Subscribe Now</button>
+</section>
+
+<!-- RECENTLY VIEWED -->
+<section class="products-section" id="recentlyViewedSection" style="display:none;">
+    <h2>Recently Viewed</h2>
+    <div id="recentlyViewedContainer" class="product-container">
+    </div>
+</section>
+
+<!-- FEATURES -->
+<section class="features">
+    <div>
+        <h3>Fast Delivery</h3>
+        <p>Quick delivery to your doorstep.</p>
+    </div>
+    <div>
+        <h3>Fresh Products</h3>
+        <p>Fresh vegetables and fruits.</p>
+    </div>
+    <div>
+        <h3>Best Prices</h3>
+        <p>Affordable prices for everyone.</p>
+    </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+    <h2>FreshMart</h2>
+    <p>Fresh vegetables, fruits & grocery delivered to your home.</p>
+    <p>© 2026 FreshMart. All Rights Reserved.</p>
+</footer>
+
+<!-- CART MODAL -->
+<div id="cartModal" class="cart-modal">
+    <div class="cart-content">
+        <button type="button" class="close-btn" onclick="closeCart()">✕</button>
+        <h2>Your Cart</h2>
+        <div id="cartItems"></div>
+        <h3 id="cartTotal">Total: ₹0</h3>
+        <div id="minOrderNoteCart" class="min-order-note" style="display:none;"></div>
+        <button type="button" class="checkout-btn" onclick="proceedToCheckout()">Proceed To Checkout</button>
+    </div>
+</div>
+
+<!-- WISHLIST MODAL -->
+<div id="wishlistModal" class="cart-modal">
+    <div class="cart-content">
+        <button type="button" class="close-btn" onclick="closeWishlistPage()">✕</button>
+        <h2>My Wishlist</h2>
+        <div id="wishlistItems"></div>
+        <button type="button" class="checkout-btn" onclick="closeWishlistPage()">Continue Shopping</button>
+    </div>
+</div>
+
+    <script src="./api.js"></script>
+    <script src="./script.js"></script>
+
+</body>
+</html>
