@@ -2296,6 +2296,16 @@ function initializePage() {
         }
     }
 
+    // From an unverified login attempt (login failure with needsVerification)
+    // we land here with ?v=<email> -> jump straight into the signup OTP step.
+    if (page === "signup") {
+        var verifyEmail = new URLSearchParams(window.location.search).get("v");
+        if (verifyEmail) {
+            pendingSignup = { email: String(verifyEmail).toLowerCase() };
+            showSignupOtpStep(pendingSignup.email);
+        }
+    }
+
     function runPage() {
         if (page === "home") {
             initHomePage();
@@ -2330,6 +2340,7 @@ function initializePage() {
 
     bindSignupForm();
     bindLoginForm();
+    bindAuthFlowForms();
 }
 
 document.addEventListener("DOMContentLoaded", initializePage);
@@ -2364,13 +2375,13 @@ function bindSignupForm() {
 
         var user = { name: name, phone: phone, email: email, password: password };
 
-        // Try backend signup (accounts live in MongoDB via /users/signup).
+        // Step 1 of signup: backend validates + emails an OTP and creates the
+        // account as UNVERIFIED (no JWT yet). The user must then confirm the
+        // OTP in step 2 before any session is issued.
         apiSignup(user)
             .then(function(data) {
-                showToast("Account created! You can log in now.", "success");
-                setTimeout(function() {
-                    window.location.href = "login.html";
-                }, 800);
+                pendingSignup = { name: name, phone: phone, email: email, password: password };
+                showSignupOtpStep(email);
             })
             .catch(function(err) {
                 var msg = (err && err.message) ? String(err.message) : "";
@@ -2385,12 +2396,105 @@ function bindSignupForm() {
                     } catch (error) {}
                 }
                 if (/already exists/i.test(msg)) {
-                    showToast("An account with this email already exists.", "error");
+                    showToast("An account with this email already exists. Please log in.", "error");
                     return;
                 }
-                showToast("Could not reach the server. Please try again in a moment.", "error");
+                if (/password must be at least 6 characters/i.test(msg)) {
+                    showToast("Password must be at least 6 characters long.", "error");
+                    return;
+                }
+                showToast((err && err.message) ? msg : "Could not reach the server. Please try again in a moment.", "error");
             });
     });
+}
+
+// ===============================
+// SIGNUP OTP VERIFICATION
+// ===============================
+
+var pendingSignup = null;
+
+// Step 2 of signup: switch the form UI to the OTP entry step.
+function showSignupOtpStep(email) {
+    var details = document.getElementById("signupDetailsStep");
+    var otpStep = document.getElementById("signupOtpStep");
+    if (details) details.style.display = "none";
+    if (otpStep) otpStep.style.display = "";
+
+    var info = document.getElementById("signupOtpInfo");
+    if (info) info.textContent = "A 6-digit OTP has been sent to " + email;
+
+    if (pendingSignup) pendingSignup.email = email;
+
+    var otpInput = document.getElementById("signupOtpInput");
+    if (otpInput) otpInput.value = "";
+
+    var btn = document.getElementById("signupOtpBtn");
+    if (btn) { btn.disabled = false; btn.textContent = "Verify Email"; }
+
+    startResendCooldown("signupResendBtn", 60);
+}
+
+// Return to the account details step to edit them.
+function showSignupDetailsStep() {
+    var details = document.getElementById("signupDetailsStep");
+    var otpStep = document.getElementById("signupOtpStep");
+    if (details) details.style.display = "";
+    if (otpStep) otpStep.style.display = "none";
+    clearAuthFlowMessage();
+}
+
+// Verify the emailed signup OTP. Only success triggers the session JWT.
+function handleSignupVerify() {
+    var otpInput = document.getElementById("signupOtpInput");
+    var otp = otpInput ? String(otpInput.value || "").trim() : "";
+    if (!/^\d{6}$/.test(otp)) {
+        setAuthFlowMessage("Please enter the 6-digit OTP sent to your email.", "error");
+        return;
+    }
+    if (!pendingSignup || !pendingSignup.email) {
+        // No pending signup session - go back to the details step.
+        showSignupDetailsStep();
+        return;
+    }
+
+    var btn = document.getElementById("signupOtpBtn");
+    if (btn) { btn.disabled = true; btn.textContent = "Verifying..."; }
+
+    apiSignupVerifyOtp(pendingSignup.email, otp)
+        .then(function(data) {
+            var user = data.data || {};
+            writeStorageValue("freshMartLoggedIn", "true");
+            writeStorageValue("freshMartUser", JSON.stringify({ name: user.name, email: user.email, phone: user.phone, role: user.role, isAdmin: !!user.isAdmin }));
+            showToast("Email verified! Your account is ready.", "success");
+            redirectAfterLoginCheck(safeRedirectDestination("index.html"));
+        })
+        .catch(function(err) {
+            if (btn) { btn.disabled = false; btn.textContent = "Verify Email"; }
+            setAuthFlowMessage((err && err.message) ? err.message : "Email verification failed. Please try again.", "error");
+        });
+}
+
+// Resend the signup OTP (60s cooldown enforced both client & server side).
+function handleSignupResend() {
+    if (!pendingSignup || !pendingSignup.email) {
+        showSignupDetailsStep();
+        return;
+    }
+    var btn = document.getElementById("signupResendBtn");
+    if (btn) btn.disabled = true;
+
+    apiSignupResendOtp(pendingSignup.email)
+        .then(function(data) {
+            setAuthFlowMessage(data.message || "A new code has been sent to your email.", "success");
+            startResendCooldown("signupResendBtn", 60);
+            var otpInput = document.getElementById("signupOtpInput");
+            if (otpInput) otpInput.value = "";
+        })
+        .catch(function(err) {
+            if (btn) btn.disabled = false;
+            setAuthFlowMessage((err && err.message) ? err.message : "Could not resend the code. Please try again.", "error");
+        });
 }
 
 // ===============================
@@ -2440,7 +2544,274 @@ function handlePasswordLogin() {
         }
     }).catch(function(err) {
         showToast((err && err.message) ? err.message : "Invalid email or password.", "error");
+        if (err && err.needsVerification) {
+            setTimeout(function() {
+                window.location.href = "signup.html?v=" + encodeURIComponent(email);
+            }, 1800);
+        }
     });
+}
+
+// ===============================
+// FORGOT PASSWORD (OTP -> new password)
+// ===============================
+
+// Show the "forgot password" email step, pre-filling the login email.
+function showForgotPasswordStep() {
+    var loginStep = document.getElementById("loginStep1");
+    var forgotStep = document.getElementById("forgotPasswordStep");
+    var emailFromLogin = document.getElementById("loginEmail");
+    var forgotEmail = document.getElementById("forgotEmail");
+
+    if (loginStep) loginStep.style.display = "none";
+    if (forgotStep) forgotStep.style.display = "";
+    if (forgotEmail && emailFromLogin && emailFromLogin.value) {
+        forgotEmail.value = String(emailFromLogin.value).trim();
+    }
+    clearAuthFlowMessage();
+}
+
+// Show the login (email + password) step.
+function showLoginStep1() {
+    var loginStep = document.getElementById("loginStep1");
+    var forgotStep = document.getElementById("forgotPasswordStep");
+    var otpStep = document.getElementById("forgotOtpStep");
+    var resetStep = document.getElementById("resetPasswordStep");
+
+    if (loginStep) loginStep.style.display = "";
+    if (forgotStep) forgotStep.style.display = "none";
+    if (otpStep) otpStep.style.display = "none";
+    if (resetStep) resetStep.style.display = "none";
+    clearAuthFlowMessage();
+}
+
+// Step 1: ask the backend to email a reset OTP to the given address.
+function handleForgotPasswordRequest() {
+    var emailInput = document.getElementById("forgotEmail");
+    var email = emailInput ? String(emailInput.value || "").trim() : "";
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        setAuthFlowMessage("Please enter a valid email address.", "error");
+        return;
+    }
+
+    var btn = document.getElementById("forgotSendBtn");
+    if (btn) { btn.disabled = true; btn.textContent = "Sending..."; }
+
+    apiForgotPasswordRequest(email)
+        .then(function(data) {
+            if (btn) { btn.disabled = false; btn.textContent = "Send OTP"; }
+            showForgotOtpStep(email);
+            setAuthFlowMessage(data.message || "If an account exists for this email, an OTP has been sent.", "success");
+        })
+        .catch(function(err) {
+            if (btn) { btn.disabled = false; btn.textContent = "Send OTP"; }
+            setAuthFlowMessage((err && err.message) ? err.message : "Could not send the OTP. Please try again.", "error");
+        });
+}
+
+// Step 2: show the reset-OTP entry step and start the resend countdown.
+function showForgotOtpStep(email) {
+    var forgotStep = document.getElementById("forgotPasswordStep");
+    var otpStep = document.getElementById("forgotOtpStep");
+    if (forgotStep) forgotStep.style.display = "none";
+    if (otpStep) otpStep.style.display = "";
+
+    pendingResetEmail = email;
+
+    var info = document.getElementById("forgotOtpInfo");
+    if (info) info.textContent = "A 6-digit OTP has been sent to " + email;
+
+    var otpInput = document.getElementById("forgotOtpInput");
+    if (otpInput) otpInput.value = "";
+
+    var btn = document.getElementById("forgotOtpBtn");
+    if (btn) { btn.disabled = false; btn.textContent = "Verify OTP"; }
+
+    startResendCooldown("forgotResendBtn", 60);
+}
+
+var pendingResetEmail = null;
+
+// Step 2b: verify the reset OTP; on success the backend returns a short-lived
+// reset token (kept in memory only - never persisted in localStorage).
+function handleForgotOtpVerify() {
+    var otpInput = document.getElementById("forgotOtpInput");
+    var otp = otpInput ? String(otpInput.value || "").trim() : "";
+    if (!/^\d{6}$/.test(otp)) {
+        setAuthFlowMessage("Please enter the 6-digit OTP sent to your email.", "error");
+        return;
+    }
+    if (!pendingResetEmail) {
+        showForgotPasswordStep();
+        return;
+    }
+
+    var btn = document.getElementById("forgotOtpBtn");
+    if (btn) { btn.disabled = true; btn.textContent = "Verifying..."; }
+
+    apiForgotPasswordVerify(pendingResetEmail, otp)
+        .then(function(data) {
+            if (data.resetToken) pendingResetToken = data.resetToken;
+            showResetPasswordStep();
+        })
+        .catch(function(err) {
+            if (btn) { btn.disabled = false; btn.textContent = "Verify OTP"; }
+            setAuthFlowMessage((err && err.message) ? err.message : "OTP verification failed. Please try again.", "error");
+        });
+}
+
+// Resend the reset OTP (60s cooldown).
+function handleForgotResend() {
+    if (!pendingResetEmail) {
+        showForgotPasswordStep();
+        return;
+    }
+    var btn = document.getElementById("forgotResendBtn");
+    if (btn) btn.disabled = true;
+
+    apiForgotPasswordResend(pendingResetEmail)
+        .then(function(data) {
+            setAuthFlowMessage(data.message || "A new OTP has been sent to your email.", "success");
+            startResendCooldown("forgotResendBtn", 60);
+            var otpInput = document.getElementById("forgotOtpInput");
+            if (otpInput) otpInput.value = "";
+        })
+        .catch(function(err) {
+            if (btn) btn.disabled = false;
+            setAuthFlowMessage((err && err.message) ? err.message : "Could not resend the OTP. Please try again.", "error");
+        });
+}
+
+var pendingResetToken = null;
+
+// Step 4: show the "create new password" step.
+function showResetPasswordStep() {
+    var otpStep = document.getElementById("forgotOtpStep");
+    var resetStep = document.getElementById("resetPasswordStep");
+    if (otpStep) otpStep.style.display = "none";
+    if (resetStep) resetStep.style.display = "";
+    clearAuthFlowMessage();
+}
+
+// Step 4b: submit the new password using the short-lived reset token.
+function handleResetPassword() {
+    var newPwEl = document.getElementById("resetNewPassword");
+    var confPwEl = document.getElementById("resetConfirmPassword");
+    var newPw = newPwEl ? String(newPwEl.value || "") : "";
+    var confPw = confPwEl ? String(confPwEl.value || "") : "";
+
+    if (newPw.length < 6) {
+        setAuthFlowMessage("New password must be at least 6 characters long.", "error");
+        return;
+    }
+    if (newPw !== confPw) {
+        setAuthFlowMessage("Passwords do not match.", "error");
+        return;
+    }
+    if (!pendingResetToken) {
+        setAuthFlowMessage("Your reset session has expired. Please start over.", "error");
+        showForgotPasswordStep();
+        return;
+    }
+
+    var btn = document.getElementById("resetPasswordBtn");
+    if (btn) { btn.disabled = true; btn.textContent = "Resetting..."; }
+
+    apiForgotPasswordReset(pendingResetToken, newPw)
+        .then(function(data) {
+            pendingResetToken = null;
+            pendingResetEmail = null;
+            setAuthFlowMessage(data.message || "Your password has been reset. You can log in now.", "success");
+            if (btn) { btn.disabled = false; btn.textContent = "Reset Password"; }
+            setTimeout(function() {
+                showLoginStep1();
+                var emailInput = document.getElementById("loginEmail");
+                if (emailInput) emailInput.value = pendingSignup ? pendingSignup.email : "";
+            }, 1500);
+        })
+        .catch(function(err) {
+            if (btn) { btn.disabled = false; btn.textContent = "Reset Password"; }
+            setAuthFlowMessage((err && err.message) ? err.message : "Password reset failed. Please try again.", "error");
+        });
+}
+
+// ===============================
+// SHARED AUTH-FLOW UI HELPERS
+// ===============================
+
+// 60-second resend countdown used by both signup and forgot-password OTP steps.
+function startResendCooldown(buttonId, seconds) {
+    var btn = document.getElementById(buttonId);
+    if (!btn) return;
+    btn.disabled = true;
+    var remaining = seconds;
+    btn.textContent = "Resend OTP (" + remaining + "s)";
+    var interval = setInterval(function() {
+        remaining--;
+        if (remaining <= 0) {
+            clearInterval(interval);
+            btn.disabled = false;
+            btn.textContent = "Resend OTP";
+        } else {
+            btn.textContent = "Resend OTP (" + remaining + "s)";
+        }
+    }, 1000);
+}
+
+// Inline message box shared by the auth flows (never contains a password).
+function setAuthFlowMessage(text, type) {
+    var box = document.getElementById("authFlowMsg");
+    if (!box) return;
+    box.style.display = "block";
+    box.className = "form-message " + (type === "success" ? "form-message-success" : "form-message-error");
+    box.textContent = text;
+}
+
+function clearAuthFlowMessage() {
+    var box = document.getElementById("authFlowMsg");
+    if (!box) return;
+    box.style.display = "none";
+    box.textContent = "";
+}
+
+// Bind every auth-flow form (called once from initializePage).
+function bindAuthFlowForms() {
+    var forgotForm = document.getElementById("forgotPasswordForm");
+    if (forgotForm && forgotForm.dataset.bound !== "true") {
+        forgotForm.dataset.bound = "true";
+        forgotForm.addEventListener("submit", function(event) {
+            event.preventDefault();
+            handleForgotPasswordRequest();
+        });
+    }
+
+    var forgotOtpForm = document.getElementById("forgotOtpForm");
+    if (forgotOtpForm && forgotOtpForm.dataset.bound !== "true") {
+        forgotOtpForm.dataset.bound = "true";
+        forgotOtpForm.addEventListener("submit", function(event) {
+            event.preventDefault();
+            handleForgotOtpVerify();
+        });
+    }
+
+    var resetForm = document.getElementById("resetPasswordForm");
+    if (resetForm && resetForm.dataset.bound !== "true") {
+        resetForm.dataset.bound = "true";
+        resetForm.addEventListener("submit", function(event) {
+            event.preventDefault();
+            handleResetPassword();
+        });
+    }
+
+    var signupOtpForm = document.getElementById("signupOtpForm");
+    if (signupOtpForm && signupOtpForm.dataset.bound !== "true") {
+        signupOtpForm.dataset.bound = "true";
+        signupOtpForm.addEventListener("submit", function(event) {
+            event.preventDefault();
+            handleSignupVerify();
+        });
+    }
 }
 
 // ===============================

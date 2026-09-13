@@ -8,6 +8,98 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const mongoose = require("mongoose");
 const googleAuth = require("../utils/googleAuth");
+const { sendOtpEmail } = require("../utils/emailService");
+
+// ---------- OTP / VERIFICATION CONSTANTS ----------
+const OTP_TTL_MS = 5 * 60 * 1000;          // OTP valid for 5 minutes
+const OTP_MAX_ATTEMPTS = 5;                // max verification attempts per OTP
+const OTP_RESEND_COOLDOWN_MS = 60 * 1000;  // resend cooldown of 60 seconds
+const RESET_TOKEN_TTL_MS = 10 * 60 * 1000; // hashed reset token valid for 10 minutes
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// ---------- OTP HELPERS (only hashes are ever stored) ----------
+
+// Cryptographically-random 6-digit OTP (100000 - 999999).
+function generateOtp() {
+    return String(crypto.randomInt(100000, 1000000));
+}
+
+// SHA-256 digest of an OTP / reset token. This is the ONLY thing persisted.
+function hashSecret(value) {
+    return crypto.createHash("sha256").update(String(value)).digest("hex");
+}
+
+// Constant-time comparison of two plain strings (hashes are fixed-length hex).
+function safeEqual(a, b) {
+    const ba = Buffer.from(String(a), "utf8");
+    const bb = Buffer.from(String(b), "utf8");
+    if (ba.length !== bb.length) return false;
+    return crypto.timingSafeEqual(ba, bb);
+}
+
+function normalizeEmail(email) {
+    return String(email || "").trim().toLowerCase();
+}
+
+function validEmail(email) {
+    return EMAIL_RE.test(String(email || ""));
+}
+
+// Generate an OTP for the given field prefix ("otp" or "resetOtp"),
+// store only its hash (+ expiry + resend timestamp) and return the plain OTP
+// so the caller can email it. Generating a new OTP automatically invalidates
+// any previous one (its hash is replaced).
+async function issueOtp(user, prefix) {
+    const otp = generateOtp();
+    const now = Date.now();
+    user[prefix + "Hash"] = hashSecret(otp);
+    user[prefix + "Expiry"] = new Date(now + OTP_TTL_MS);
+    user[prefix + "Attempts"] = 0;
+    user[prefix + "ResendAt"] = new Date(now);
+    await user.save();
+    return otp;
+}
+
+// Verify an OTP. Never reveals the correct value; returns a result string:
+//   "ok"           verified (fields cleared -> single use)
+//   "invalid"      wrong code (attempt counter incremented)
+//   "expired"      no active / expired code
+//   "max_attempts" attempt limit reached
+async function verifyOtp(user, otp, prefix) {
+    const attempts = Number(user[prefix + "Attempts"] || 0);
+    const storedHash = user[prefix + "Hash"];
+    const expiry = user[prefix + "Expiry"];
+
+    if (!storedHash || !expiry || new Date(expiry).getTime() < Date.now()) {
+        return "expired";
+    }
+    if (attempts >= OTP_MAX_ATTEMPTS) {
+        return "max_attempts";
+    }
+    if (!safeEqual(hashSecret(otp), storedHash)) {
+        user[prefix + "Attempts"] = attempts + 1;
+        await user.save();
+        return "invalid";
+    }
+
+    // Verified -> single-use: clear every OTP field for this prefix.
+    user[prefix + "Hash"] = null;
+    user[prefix + "Expiry"] = null;
+    user[prefix + "Attempts"] = null;
+    user[prefix + "ResendAt"] = null;
+    await user.save();
+    return "ok";
+}
+
+// Enforce the 60-second resend cooldown. Returns remaining seconds when
+// cooling down (0 when the user may resend right away).
+async function resendCooling(user, prefix) {
+    const last = user[prefix + "ResendAt"];
+    if (!last) return 0;
+    const elapsed = Date.now() - new Date(last).getTime();
+    if (elapsed >= OTP_RESEND_COOLDOWN_MS) return 0;
+    return Math.ceil((OTP_RESEND_COOLDOWN_MS - elapsed) / 1000);
+}
 
 // Generate JWT token
 function generateToken(id) {
@@ -16,35 +108,154 @@ function generateToken(id) {
     });
 }
 
-// SIGNUP (email + password) — creates the account and lets the user log in
-// immediately with email + password. No OTP step, no email dependency.
+// Sanitized public representation of a user (never passwords, OTPs, hashes).
+function publicUser(user) {
+    return {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        isAdmin: user.isAdmin,
+        emailVerified: user.emailVerified !== false
+    };
+}
+
+function validatePassword(pw) {
+    return typeof pw === "string" && pw.length >= 6;
+}
+
+// ===============================
+// SIGNUP (email + password, OTP-verified)
+// ===============================
+// Step 1 of signup: validate the input, (re)create the NOT-yet-verified
+// account, generate a signup OTP and email it. A JWT is NEVER issued here -
+// it is only issued after /signup/verify-otp succeeds.
 exports.signup = async (req, res) => {
     try {
         const { name, email, phone, password } = req.body;
+        const normalized = normalizeEmail(email);
 
-        if (!email || !password) {
-            return res.status(400).json({ success: false, message: "Email and password required" });
+        if (!validEmail(normalized)) {
+            return res.status(400).json({ success: false, message: "Please enter a valid email address." });
+        }
+        if (!validatePassword(password)) {
+            return res.status(400).json({ success: false, message: "Password must be at least 6 characters long." });
         }
 
-        const existingUser = await User.findOne({ email: email.toLowerCase() });
-        if (existingUser) {
-            return res.status(400).json({ success: false, message: "An account with this email already exists" });
+        let user = await User.findOne({ email: normalized });
+
+        // Email already belongs to a confirmed account -> standard signup error.
+        if (user && user.emailVerified !== false) {
+            return res.status(400).json({ success: false, message: "An account with this email already exists. Please log in." });
         }
 
-        const user = await User.create({ name, email, phone, password });
+        // Either no account yet, or an abandoned unverified signup.
+        if (!user) {
+            user = await User.create({
+                name: name || "",
+                email: normalized,
+                phone: phone || "",
+                password: password,
+                emailVerified: false
+            });
+        } else {
+            // Same person retrying signup -> refresh the pending details.
+            user.name = name || user.name;
+            user.phone = phone !== undefined ? phone : user.phone;
+            if (password) user.password = password;
+            await user.save();
+        }
+
+        const otp = await issueOtp(user, "otp");
+        await sendOtpEmail({ to: normalized, otp: otp, purpose: "signup" });
 
         res.status(201).json({
             success: true,
-            message: "Account created. You can log in now.",
-            email: user.email
+            message: "If an account exists for this email, an OTP has been sent. Please verify your email to complete signup."
         });
     } catch (error) {
         res.status(400).json({ success: false, message: error.message });
     }
 };
 
-// LOGIN (email + password) — direct credential check, issues the JWT session
-// immediately. No OTP step.
+// Step 2 of signup: verify the emailed OTP and ONLY THEN issue the session JWT.
+exports.signupVerifyOtp = async (req, res) => {
+    try {
+        const { email, otp } = req.body;
+        const normalized = normalizeEmail(email);
+        if (!validEmail(normalized)) {
+            return res.status(400).json({ success: false, message: "Please enter a valid email address." });
+        }
+
+        const user = await User.findOne({ email: normalized });
+        if (!user) {
+            return res.status(400).json({ success: false, message: "Invalid or expired verification code." });
+        }
+        if (user.emailVerified !== false) {
+            return res.status(400).json({ success: false, message: "This account is already verified. Please log in." });
+        }
+
+        const result = await verifyOtp(user, otp, "otp");
+        if (result === "ok") {
+            user.emailVerified = true;
+            await user.save();
+            return res.json({
+                success: true,
+                token: generateToken(user._id),
+                message: "Email verified. Your account is ready!",
+                data: publicUser(user)
+            });
+        }
+        if (result === "invalid") {
+            const attempts = Number(user.otpAttempts || 0);
+            const remaining = Math.max(0, OTP_MAX_ATTEMPTS - attempts);
+            return res.status(400).json({ success: false, message: "Incorrect verification code. " + remaining + " attempt(s) left." });
+        }
+        if (result === "expired") {
+            return res.status(400).json({ success: false, message: "This verification code has expired. Request a new one." });
+        }
+        return res.status(429).json({ success: false, message: "Too many incorrect attempts. Request a new code." });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+// Resend a signup OTP (60s cooldown; a new OTP invalidates the previous one).
+exports.signupResendOtp = async (req, res) => {
+    try {
+        const { email } = req.body;
+        const normalized = normalizeEmail(email);
+        if (!validEmail(normalized)) {
+            return res.status(400).json({ success: false, message: "Please enter a valid email address." });
+        }
+
+        const user = await User.findOne({ email: normalized });
+        if (!user || user.emailVerified !== false) {
+            // Generic message - never reveals whether an account exists.
+            return res.json({ success: true, message: "If an account exists for this email, an OTP has been sent." });
+        }
+
+        const wait = await resendCooling(user, "otp");
+        if (wait > 0) {
+            return res.status(429).json({ success: false, message: "Please wait " + wait + " seconds before requesting a new code." });
+        }
+
+        const otp = await issueOtp(user, "otp");
+        await sendOtpEmail({ to: normalized, otp: otp, purpose: "signup" });
+
+        res.json({ success: true, message: "A new verification code has been sent to your email." });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+// ===============================
+// LOGIN (email + password)
+// ===============================
+// Existing users (emailVerified missing/true) log in exactly as before.
+// Only brand-new signup accounts that have NOT verified their email are asked
+// to verify first - the password is still validated so no enumeration occurs.
 exports.login = async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -52,7 +263,7 @@ exports.login = async (req, res) => {
             return res.status(400).json({ success: false, message: "Email and password required" });
         }
 
-        const user = await User.findOne({ email: email.toLowerCase() });
+        const user = await User.findOne({ email: normalizeEmail(email) });
         if (!user) {
             return res.status(400).json({ success: false, message: "No account found. Please create an account first." });
         }
@@ -62,12 +273,140 @@ exports.login = async (req, res) => {
             return res.status(400).json({ success: false, message: "Invalid email or password" });
         }
 
+        if (user.emailVerified === false) {
+            return res.status(403).json({
+                success: false,
+                message: "Please verify your email before logging in. Check your inbox for the OTP.",
+                needsVerification: true
+            });
+        }
+
         res.json({
             success: true,
             message: "Login successful.",
             token: generateToken(user._id),
-            data: { _id: user._id, name: user.name, email: user.email, phone: user.phone, role: user.role, isAdmin: user.isAdmin }
+            data: publicUser(user)
         });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// ===============================
+// FORGOT PASSWORD (OTP -> hashed reset token -> new password)
+// ===============================
+
+// Step 1: email the user a password-reset OTP. Response is always generic so
+// the endpoint cannot be used to discover registered addresses.
+exports.forgotPasswordRequest = async (req, res) => {
+    try {
+        const { email } = req.body;
+        const normalized = normalizeEmail(email);
+        if (!validEmail(normalized)) {
+            return res.status(400).json({ success: false, message: "Please enter a valid email address." });
+        }
+
+        const user = await User.findOne({ email: normalized });
+        if (user && user.emailVerified !== false) {
+            const otp = await issueOtp(user, "resetOtp");
+            await sendOtpEmail({ to: normalized, otp: otp, purpose: "reset" });
+        }
+
+        res.json({ success: true, message: "If an account exists for this email, an OTP has been sent." });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// Step 2: verify the reset OTP and issue a short-lived, single-use reset token
+// (only its SHA-256 hash is persisted - see the User model resetTokenHash).
+exports.forgotPasswordVerify = async (req, res) => {
+    try {
+        const { email, otp } = req.body;
+        const normalized = normalizeEmail(email);
+        if (!validEmail(normalized)) {
+            return res.status(400).json({ success: false, message: "Please enter a valid email address." });
+        }
+
+        const user = await User.findOne({ email: normalized });
+        if (!user) {
+            return res.status(400).json({ success: false, message: "Invalid or expired OTP." });
+        }
+
+        const result = await verifyOtp(user, otp, "resetOtp");
+        if (result === "ok") {
+            // Single-use hashed reset token, 10-minute lifetime.
+            const rawToken = crypto.randomBytes(32).toString("hex");
+            user.resetTokenHash = hashSecret(rawToken);
+            user.resetTokenExpiry = new Date(Date.now() + RESET_TOKEN_TTL_MS);
+            await user.save();
+            return res.json({ success: true, resetToken: rawToken, message: "OTP verified. You can now set a new password." });
+        }
+        if (result === "invalid") {
+            const attempts = Number(user.resetOtpAttempts || 0);
+            const remaining = Math.max(0, OTP_MAX_ATTEMPTS - attempts);
+            return res.status(400).json({ success: false, message: "Incorrect OTP. " + remaining + " attempt(s) left." });
+        }
+        if (result === "expired") {
+            return res.status(400).json({ success: false, message: "This OTP has expired. Request a new one." });
+        }
+        return res.status(429).json({ success: false, message: "Too many incorrect attempts. Request a new code." });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// Resend a password-reset OTP (60s cooldown; generic for unknown addresses).
+exports.forgotPasswordResendOtp = async (req, res) => {
+    try {
+        const { email } = req.body;
+        const normalized = normalizeEmail(email);
+        if (!validEmail(normalized)) {
+            return res.status(400).json({ success: false, message: "Please enter a valid email address." });
+        }
+
+        const user = await User.findOne({ email: normalized });
+        if (!user || user.emailVerified === false) {
+            return res.json({ success: true, message: "If an account exists for this email, an OTP has been sent." });
+        }
+
+        const wait = await resendCooling(user, "resetOtp");
+        if (wait > 0) {
+            return res.status(429).json({ success: false, message: "Please wait " + wait + " seconds before requesting a new code." });
+        }
+
+        const otp = await issueOtp(user, "resetOtp");
+        await sendOtpEmail({ to: normalized, otp: otp, purpose: "reset" });
+
+        res.json({ success: true, message: "A new OTP has been sent to your email." });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// Step 3: validate the hashed reset token, set the new password (bcrypt hash
+// is applied by the User model pre-save hook), and invalidate the token.
+exports.forgotPasswordReset = async (req, res) => {
+    try {
+        const { resetToken, newPassword } = req.body;
+        if (!resetToken) {
+            return res.status(400).json({ success: false, message: "Reset token is required." });
+        }
+        if (!validatePassword(newPassword)) {
+            return res.status(400).json({ success: false, message: "New password must be at least 6 characters long." });
+        }
+
+        const user = await User.findOne({ resetTokenHash: hashSecret(resetToken) });
+        if (!user || !user.resetTokenExpiry || new Date(user.resetTokenExpiry).getTime() < Date.now()) {
+            return res.status(400).json({ success: false, message: "This reset token is invalid or has expired. Please request a new OTP." });
+        }
+
+        user.password = newPassword;
+        user.resetTokenHash = null;
+        user.resetTokenExpiry = null;
+        await user.save();
+
+        res.json({ success: true, message: "Your password has been reset. You can now log in with your new password." });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
@@ -167,11 +506,13 @@ exports.googleLogin = async (req, res) => {
                 user.googleId = claims.sub;
                 await user.save();
             } else {
+                // Google has already verified this email, so no OTP is needed.
                 user = await User.create({
                     name: claims.name || claims.email.split("@")[0],
                     email: claims.email,
                     googleId: claims.sub,
-                    password: googleAuth.randomPassword()
+                    password: googleAuth.randomPassword(),
+                    emailVerified: true
                 });
             }
         }
@@ -179,7 +520,7 @@ exports.googleLogin = async (req, res) => {
         res.json({
             success: true,
             token: generateToken(user._id),
-            data: { _id: user._id, name: user.name, email: user.email, phone: user.phone, role: user.role, isAdmin: user.isAdmin }
+            data: publicUser(user)
         });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });

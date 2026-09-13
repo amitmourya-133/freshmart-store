@@ -24,15 +24,14 @@
                 🥬 FreshMart
             </div>
 
-            <h1>Welcome Back</h1>
-
-            <p class="auth-subtitle">
-                Login to your FreshMart account
-            </p>
-
-
             <!-- STEP 1: Email + Password -->
             <div id="loginStep1">
+
+                <h1>Welcome Back</h1>
+
+                <p class="auth-subtitle">
+                    Login to your FreshMart account
+                </p>
 
                 <form id="loginForm">
 
@@ -58,39 +57,200 @@
                         placeholder="Enter your password"
                     />
 
+                    <a
+                        href="#"
+                        id="forgotPasswordLink"
+                        class="auth-forgot-link"
+                        onclick="event.preventDefault(); showForgotPasswordStep();"
+                    >
+                        Forgot Password?
+                    </a>
+
                     <button
                         type="submit"
                         class="auth-btn"
+                        id="loginSubmitBtn"
                     >
                         Login
                     </button>
 
                 </form>
 
+                <div class="auth-divider">
+                    <span>or</span>
+                </div>
+
+                <button
+                    type="button"
+                    id="googleLoginBtn"
+                    class="auth-btn google-btn"
+                    onclick="handleGoogleLogin()"
+                >
+                    Sign in with Google
+                </button>
+
+                <p class="auth-bottom">
+                    Don't have an account?
+
+                    <a href="signup.html">
+                        Create Account
+                    </a>
+                </p>
+
             </div>
 
+            <!-- STEP 2: Forgot password - email -->
+            <div id="forgotPasswordStep" style="display:none;">
 
-            <div class="auth-divider">
-                <span>or</span>
+                <h1>Forgot Password</h1>
+
+                <p class="auth-subtitle">
+                    Enter your registered email to receive an OTP
+                </p>
+
+                <form id="forgotPasswordForm">
+
+                    <label for="forgotEmail">
+                        Email
+                    </label>
+
+                    <input
+                        type="email"
+                        id="forgotEmail"
+                        placeholder="Enter your registered email"
+                        required
+                    />
+
+                    <button
+                        type="submit"
+                        class="auth-btn"
+                        id="forgotSendBtn"
+                    >
+                        Send OTP
+                    </button>
+
+                </form>
+
+                <p class="auth-bottom">
+                    Remembered your password?
+
+                    <a href="#" onclick="event.preventDefault(); showLoginStep1();">
+                        Back to Login
+                    </a>
+                </p>
+
             </div>
 
-            <button
-                type="button"
-                id="googleLoginBtn"
-                class="auth-btn google-btn"
-                onclick="handleGoogleLogin()"
-            >
-                Sign in with Google
-            </button>
+            <!-- STEP 3: Forgot password - OTP -->
+            <div id="forgotOtpStep" style="display:none;">
 
+                <h1>Enter OTP</h1>
 
-            <p class="auth-bottom">
-                Don't have an account?
+                <p class="auth-subtitle" id="forgotOtpInfo">
+                    A 6-digit OTP has been sent to your email
+                </p>
 
-                <a href="signup.html">
-                    Create Account
-                </a>
-            </p>
+                <form id="forgotOtpForm">
+
+                    <label for="forgotOtpInput">
+                        OTP
+                    </label>
+
+                    <input
+                        type="text"
+                        id="forgotOtpInput"
+                        class="otp-input"
+                        placeholder="Enter 6-digit OTP"
+                        inputmode="numeric"
+                        maxlength="6"
+                        autocomplete="one-time-code"
+                        required
+                    />
+
+                    <button
+                        type="submit"
+                        class="auth-btn"
+                        id="forgotOtpBtn"
+                    >
+                        Verify OTP
+                    </button>
+
+                    <button
+                        type="button"
+                        class="auth-btn otp-resend-btn"
+                        id="forgotResendBtn"
+                        onclick="handleForgotResend()"
+                    >
+                        Resend OTP
+                    </button>
+
+                </form>
+
+                <p class="auth-bottom">
+                    <a href="#" onclick="event.preventDefault(); showForgotPasswordStep();">
+                        Back
+                    </a>
+                </p>
+
+            </div>
+
+            <!-- STEP 4: Forgot password - new password -->
+            <div id="resetPasswordStep" style="display:none;">
+
+                <h1>Create New Password</h1>
+
+                <p class="auth-subtitle">
+                    Enter your new password (min 6 characters)
+                </p>
+
+                <form id="resetPasswordForm">
+
+                    <label for="resetNewPassword">
+                        New Password
+                    </label>
+
+                    <input
+                        type="password"
+                        id="resetNewPassword"
+                        placeholder="Enter new password"
+                        minlength="6"
+                        required
+                    />
+
+                    <label for="resetConfirmPassword">
+                        Confirm New Password
+                    </label>
+
+                    <input
+                        type="password"
+                        id="resetConfirmPassword"
+                        placeholder="Confirm new password"
+                        minlength="6"
+                        required
+                    />
+
+                    <button
+                        type="submit"
+                        class="auth-btn"
+                        id="resetPasswordBtn"
+                    >
+                        Reset Password
+                    </button>
+
+                </form>
+
+                <p class="auth-bottom">
+                    Need help?
+
+                    <a href="#" onclick="event.preventDefault(); window.location.href='help.html'">
+                        Help Center
+                    </a>
+                </p>
+
+            </div>
+
+            <!-- Inline message area (success / error for the flows above) -->
+            <div id="authFlowMsg" class="form-message" style="display:none;"></div>
 
         </div>
 

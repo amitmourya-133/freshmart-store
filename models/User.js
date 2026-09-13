@@ -27,6 +27,11 @@ const userSchema = new mongoose.Schema(
         resetTokenHash: { type: String },
         resetTokenExpiry: { type: Date },
         googleId: { type: String },
+        // Email verification status. Defaults to true so pre-existing accounts
+        // (which have no field at all) keep logging in as before. Only newly
+        // created signup accounts start as emailVerified: false until their
+        // signup OTP is confirmed.
+        emailVerified: { type: Boolean, default: true },
         isAdmin: { type: Boolean, default: false }
     },
     { timestamps: true }

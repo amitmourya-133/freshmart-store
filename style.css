@@ -1116,6 +1116,80 @@ footer p { color: rgba(255,255,255,0.85); }
     text-decoration: underline;
 }
 
+/* ---------- FORGOT PASSWORD / OTP (auth flows) ---------- */
+.auth-forgot-link {
+    display: block;
+    text-align: right;
+    margin-top: 10px;
+    font-size: 13px;
+    color: var(--green-primary);
+    font-weight: bold;
+    text-decoration: none;
+}
+
+.auth-forgot-link:hover {
+    text-decoration: underline;
+}
+
+.otp-input {
+    text-align: center;
+    letter-spacing: 6px;
+    font-size: 20px;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.otp-resend-btn {
+    margin-top: 12px;
+    background: var(--bg-tertiary);
+    color: var(--green-dark);
+    border: 1px solid var(--border-color);
+}
+
+.otp-resend-btn:hover {
+    background: var(--border-color);
+    transform: none;
+}
+
+.otp-resend-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.form-message {
+    margin-top: 18px;
+    padding: 11px 13px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.form-message-success {
+    background: #e6f7ec;
+    color: #0f6e33;
+    border: 1px solid #a9dfbf;
+}
+
+.form-message-error {
+    background: #fdecea;
+    color: #c0392b;
+    border: 1px solid #f5b7b1;
+}
+
+body.dark-mode .form-message-success {
+    background: rgba(39, 174, 96, 0.15);
+    color: #7ee2a8;
+    border-color: rgba(39, 174, 96, 0.4);
+}
+
+body.dark-mode .form-message-error {
+    background: rgba(231, 76, 60, 0.15);
+    color: #f1948a;
+    border-color: rgba(231, 76, 60, 0.4);
+}
+
 /* ---------- OTP LOGIN ---------- */
 .otp-label {
     display: block;

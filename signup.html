@@ -24,93 +24,155 @@
                 🥬 FreshMart
             </div>
 
-            <h1>Create Account</h1>
+            <!-- STEP 1: Account details -->
+            <div id="signupDetailsStep">
 
-            <p class="auth-subtitle">
-                Create your FreshMart account
-            </p>
+                <h1>Create Account</h1>
 
+                <p class="auth-subtitle">
+                    Create your FreshMart account
+                </p>
 
-            <form id="signupForm">
+                <form id="signupForm">
 
-                <label for="signupName">
-                    Full Name
-                </label>
+                    <label for="signupName">
+                        Full Name
+                    </label>
 
-                <input
-                    type="text"
-                    id="signupName"
-                    placeholder="Enter your name"
-                    required
-                >
-
-
-                <label for="signupPhone">
-                    Mobile Number
-                </label>
-
-                <input
-                    type="tel"
-                    id="signupPhone"
-                    placeholder="Enter mobile number"
-                    maxlength="10"
-                    required
-                >
+                    <input
+                        type="text"
+                        id="signupName"
+                        placeholder="Enter your name"
+                        required
+                    />
 
 
-                <label for="signupEmail">
-                    Email
-                </label>
+                    <label for="signupPhone">
+                        Mobile Number
+                    </label>
 
-                <input
-                    type="email"
-                    id="signupEmail"
-                    placeholder="Enter email"
-                    required
-                >
-
-
-                <label for="signupPassword">
-                    Password
-                </label>
-
-                <input
-                    type="password"
-                    id="signupPassword"
-                    placeholder="Create password"
-                    required
-                >
+                    <input
+                        type="tel"
+                        id="signupPhone"
+                        placeholder="Enter mobile number"
+                        maxlength="10"
+                        required
+                    />
 
 
-                <label for="signupConfirmPassword">
-                    Confirm Password
-                </label>
+                    <label for="signupEmail">
+                        Email
+                    </label>
 
-                <input
-                    type="password"
-                    id="signupConfirmPassword"
-                    placeholder="Confirm password"
-                    required
-                >
-
-
-                <button
-                    type="submit"
-                    class="auth-btn"
-                >
-                    Create Account
-                </button>
-
-            </form>
+                    <input
+                        type="email"
+                        id="signupEmail"
+                        placeholder="Enter email"
+                        required
+                    />
 
 
-            <p class="auth-bottom">
-                Already have an account?
+                    <label for="signupPassword">
+                        Password
+                    </label>
 
-                <a href="login.html">
-                    Login
-                </a>
-            </p>
+                    <input
+                        type="password"
+                        id="signupPassword"
+                        placeholder="Create password"
+                        minlength="6"
+                        required
+                    />
+
+
+                    <label for="signupConfirmPassword">
+                        Confirm Password
+                    </label>
+
+                    <input
+                        type="password"
+                        id="signupConfirmPassword"
+                        placeholder="Confirm password"
+                        required
+                    />
+
+
+                    <button
+                        type="submit"
+                        class="auth-btn"
+                        id="signupSubmitBtn"
+                    >
+                        Create Account
+                    </button>
+
+                </form>
+
+                <p class="auth-bottom">
+                    Already have an account?
+
+                    <a href="login.html">
+                        Login
+                    </a>
+                </p>
+
+            </div>
+
+            <!-- STEP 2: Email OTP verification (account is created but NOT active
+                 until this OTP is confirmed - no JWT is issued before this step) -->
+            <div id="signupOtpStep" style="display:none;">
+
+                <h1>Verify Your Email</h1>
+
+                <p class="auth-subtitle" id="signupOtpInfo">
+                    A 6-digit OTP has been sent to your email
+                </p>
+
+                <form id="signupOtpForm">
+
+                    <label for="signupOtpInput">
+                        OTP
+                    </label>
+
+                    <input
+                        type="text"
+                        id="signupOtpInput"
+                        class="otp-input"
+                        placeholder="Enter 6-digit OTP"
+                        inputmode="numeric"
+                        maxlength="6"
+                        autocomplete="one-time-code"
+                        required
+                    />
+
+                    <button
+                        type="submit"
+                        class="auth-btn"
+                        id="signupOtpBtn"
+                    >
+                        Verify Email
+                    </button>
+
+                    <button
+                        type="button"
+                        class="auth-btn otp-resend-btn"
+                        id="signupResendBtn"
+                        onclick="handleSignupResend()"
+                    >
+                        Resend OTP
+                    </button>
+
+                </form>
+
+                <p class="auth-bottom">
+                    <a href="#" onclick="event.preventDefault(); showSignupDetailsStep();">
+                        Edit details
+                    </a>
+                </p>
+
+            </div>
+
+            <!-- Inline message area (success / error for the flows above) -->
+            <div id="authFlowMsg" class="form-message" style="display:none;"></div>
 
         </div>
 

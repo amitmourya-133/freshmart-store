@@ -153,6 +153,87 @@ function apiSignup(user) {
         });
 }
 
+// Step 2 of signup: confirm the emailed OTP. Only on success does the backend
+// issue the session JWT (set by this helper before returning).
+function apiSignupVerifyOtp(email, otp) {
+    return fetch(API.base + "/users/signup/verify-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email, otp: otp })
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Email verification failed.");
+            if (data.token) setAuthToken(data.token);
+            return data;
+        });
+}
+
+function apiSignupResendOtp(email) {
+    return fetch(API.base + "/users/signup/resend-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email })
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Could not resend the code.");
+            return data;
+        });
+}
+
+function apiForgotPasswordRequest(email) {
+    return fetch(API.base + "/users/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email })
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Could not send the OTP.");
+            return data;
+        });
+}
+
+function apiForgotPasswordVerify(email, otp) {
+    return fetch(API.base + "/users/forgot-password/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email, otp: otp })
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "OTP verification failed.");
+            return data;
+        });
+}
+
+function apiForgotPasswordResend(email) {
+    return fetch(API.base + "/users/forgot-password/resend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email })
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Could not resend the OTP.");
+            return data;
+        });
+}
+
+function apiForgotPasswordReset(resetToken, newPassword) {
+    return fetch(API.base + "/users/forgot-password/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resetToken: resetToken, newPassword: newPassword })
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Password reset failed.");
+            return data;
+        });
+}
+
 function apiLogin(creds) {
     return fetch(API.base + "/users/login", {
         method: "POST",
@@ -161,7 +242,11 @@ function apiLogin(creds) {
     })
         .then(function(res) { return res.json(); })
         .then(function(data) {
-            if (!data.success) throw new Error(data.message || "Login failed");
+            if (!data.success) {
+                var e = new Error(data.message || "Login failed");
+                if (data.needsVerification) e.needsVerification = true;
+                throw e;
+            }
             return data;
         });
 }

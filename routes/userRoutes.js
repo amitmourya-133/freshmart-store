@@ -6,7 +6,13 @@ const express = require("express");
 const router = express.Router();
 const {
     signup,
+    signupVerifyOtp,
+    signupResendOtp,
     login,
+    forgotPasswordRequest,
+    forgotPasswordVerify,
+    forgotPasswordResendOtp,
+    forgotPasswordReset,
     getMe,
     googleConfigStatus,
     googleAuthStart,
@@ -21,8 +27,18 @@ const { rateLimit } = require("../utils/rateLimit");
 const authLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 30 });
 
 // Public
+// Signup is OTP-gated: /signup creates an unverified account + emails an OTP,
+// /signup/verify-otp issues the JWT only after the OTP is confirmed.
 router.post("/signup", authLimiter, signup);
+router.post("/signup/verify-otp", authLimiter, signupVerifyOtp);
+router.post("/signup/resend-otp", authLimiter, signupResendOtp);
 router.post("/login", authLimiter, login);
+
+// Password reset (OTP -> short-lived hashed reset token -> new password)
+router.post("/forgot-password", authLimiter, forgotPasswordRequest);
+router.post("/forgot-password/verify", authLimiter, forgotPasswordVerify);
+router.post("/forgot-password/resend", authLimiter, forgotPasswordResendOtp);
+router.post("/forgot-password/reset", authLimiter, forgotPasswordReset);
 
 // Real Google OAuth: config probe + authorization redirect (public pages).
 router.get("/google-config", googleConfigStatus);
