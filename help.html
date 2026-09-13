@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>FreshMart - Help Center</title>
+
+    <link rel="stylesheet" href="./style.css">
+</head>
+
+<body data-page="help">
+
+    <header>
+
+        <div class="logo">
+            🥬 FreshMart
+        </div>
+
+        <div class="header-actions">
+            <button
+                type="button"
+                class="secondary-btn"
+                onclick="window.location.href='index.html'"
+            >
+                🏠 Home
+            </button>
+            <button
+                type="button"
+                class="secondary-btn"
+                onclick="window.location.href='orders.html'"
+            >
+                📦 My Orders
+            </button>
+            <div class="auth-area" id="authArea"></div>
+            <button
+                type="button"
+                class="dark-mode-toggle"
+                id="darkModeToggle"
+                onclick="toggleDarkMode()"
+                title="Toggle Dark Mode"
+            >
+                🌙
+            </button>
+        </div>
+
+    </header>
+
+    <section class="help-center">
+        <div class="help-center-card">
+            <div class="help-icon">🆘</div>
+            <h1>Help Center</h1>
+            <p>Need help with your order or purchased product? Contact FreshMart Support.</p>
+            <a
+                id="helpWhatsappBtn"
+                class="wa-btn"
+                target="_blank"
+                rel="noopener"
+                href="https://wa.me/919068424873"
+            >
+                💬 Contact Support on WhatsApp
+            </a>
+            <p id="helpOrderNote" class="help-order-note"></p>
+        </div>
+    </section>
+
+    <script src="./api.js"></script>
+    <script src="./script.js"></script>
+    <script src="./help.js"></script>
+
+</body>
+
+</html>

@@ -64,7 +64,7 @@ const SERVED_ONLY_EXT = [".html", ".js", ".css", ".png", ".jpg", ".jpeg", ".jfif
 const NEVER_SERVE_PREFIX = [
     "/.env", "/.git", "/node_modules", "/server.js", "/app.js", "/seed.js",
     "/seedAdmin.js", "/package.json", "/package-lock.json", "/vercel.json",
-    "/controllers", "/models", "/routes", "/middleware", "/utils", "/api",
+    "/controllers", "/models", "/routes", "/middleware", "/utils", "/api/",
     "/.vercel", "/\.db"
 ];
 app.use("/", (req, res, next) => {

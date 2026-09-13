@@ -149,7 +149,6 @@ function apiSignup(user) {
         .then(function(res) { return res.json(); })
         .then(function(data) {
             if (!data.success) throw new Error(data.message || "Signup failed");
-            // No token is issued on signup — OTP verification must complete first.
             return data;
         });
 }
@@ -167,35 +166,13 @@ function apiLogin(creds) {
         });
 }
 
-// Send an OTP. For "login" purpose the backend validates email + password first.
-function apiSendOtpRequest(email, password, purpose) {
-    return fetch(API.base + "/users/send-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email, password: password, purpose: purpose || "login" })
-    })
-        .then(function(res) { return res.json(); });
-}
-
-function apiVerifyOTP(email, otp) {
-    return fetch(API.base + "/users/verify-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email, otp: otp })
-    })
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-            if (!data.success) throw new Error(data.message || "OTP verification failed");
-            if (data.token) setAuthToken(data.token);
-            return data;
-        });
-}
-
-function apiGoogleLogin(email, name) {
+// Real Google OAuth: POST the authorization code + CSRF state returned on the
+// login page callback; the server exchanges and verifies the ID token.
+function apiGoogleLogin(code, state) {
     return fetch(API.base + "/users/google-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email, name: name })
+        body: JSON.stringify({ code: code, state: state })
     })
         .then(function(res) { return res.json(); })
         .then(function(data) {
@@ -205,35 +182,11 @@ function apiGoogleLogin(email, name) {
         });
 }
 
-// ---------- FORGOT PASSWORD / RESET ----------
-
-// Always returns the generic anti-enumeration response from the server.
-function apiForgotPassword(email) {
-    return fetch(API.base + "/users/forgot-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email })
-    }).then(function(res) { return res.json(); });
-}
-
-// Verify the reset OTP. On success returns a short-lived single-use resetToken —
-// this never creates a login session.
-function apiVerifyResetOtp(email, otp) {
-    return fetch(API.base + "/users/verify-reset-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email, otp: otp })
-    }).then(function(res) { return res.json(); });
-}
-
-// Apply the new password using the verified reset token. No session is issued.
-function apiResetPassword(resetToken, newPassword, confirmPassword) {
-    return fetch(API.base + "/users/reset-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resetToken: resetToken, newPassword: newPassword, confirmPassword: confirmPassword })
-    })
-        .then(function(res) { return res.json(); });
+// Public probe: is Google OAuth configured server-side? (boolean only, no secrets)
+function apiGoogleStatus() {
+    return fetch(API.base + "/users/google-config")
+        .then(function(res) { return res.json(); })
+        .catch(function() { return { success: false, configured: false }; });
 }
 
 // ---------- AUTH SESSION HELPERS (customer entry flow) ----------
@@ -286,6 +239,29 @@ function clearAuthState() {
         localStorage.removeItem("freshMartUser");
         localStorage.removeItem("freshMartRedirect");
     } catch (e) {}
+}
+
+// Enrich the stored auth profile (name/email/phone) with the backend role so the
+// header can render the Admin shortcut only for real admins. This never grants
+// access on its own - admin.html and every admin API still enforce auth on the server.
+function refreshAuthProfile() {
+    var token = getAuthToken();
+    if (!token) return Promise.resolve(null);
+    return apiGetMe().then(function(user) {
+        var existing = getAuthUser() || {};
+        var merged = {
+            name: user.name || existing.name || "",
+            email: user.email || existing.email || "",
+            phone: user.phone || existing.phone || "",
+            role: user.role || "",
+            isAdmin: !!user.isAdmin || user.role === "admin"
+        };
+        writeStorageValue("freshMartUser", JSON.stringify(merged));
+        if (typeof updateAuthHeader === "function") updateAuthHeader();
+        return merged;
+    }).catch(function() {
+        return null;
+    });
 }
 
 // ---------- ADMIN ----------
@@ -423,6 +399,20 @@ function apiUpdateStock(id, stock) {
         });
 }
 
+// Update price only (admin) - validated backend-side, up or down
+function apiUpdateProductPrice(id, price) {
+    return fetch(API.base + "/products/" + id + "/price", {
+        method: "PATCH",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ price: price })
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(res) {
+            if (!res.success) throw new Error(res.message || "Failed to update price");
+            return res.data;
+        });
+}
+
 // Delete product (admin)
 function apiDeleteProduct(id) {
     return fetch(API.base + "/products/" + id, {
@@ -523,6 +513,30 @@ function fetchAdminCustomers(search) {
         .then(function(res) { return res.json(); })
         .then(function(data) {
             if (!data.success) throw new Error(data.message || "Failed to load users");
+            return data.data;
+        });
+}
+
+// Order history for a specific customer (admin only)
+function fetchAdminCustomerOrders(userId) {
+    return fetch(API.base + "/users/admin/" + encodeURIComponent(userId) + "/orders", {
+        headers: getAuthHeaders()
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed to load orders");
+            return data;
+        });
+}
+
+// Fetch a single order by id (owner or admin only)
+function apiGetOrder(id) {
+    return fetch(API.base + "/orders/" + encodeURIComponent(id), {
+        headers: getAuthHeaders()
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Order not found");
             return data.data;
         });
 }

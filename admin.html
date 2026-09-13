@@ -36,13 +36,26 @@
         </div>
 
         <div class="admin-tabs">
-            <button class="admin-tab active" id="tabOrdersBtn" onclick="switchTab('orders')">📦 Orders</button>
+            <button class="admin-tab" id="tabDashboardBtn" onclick="switchTab('dashboard')">Dashboard</button>
+            <button class="admin-tab" id="tabOrdersBtn" onclick="switchTab('orders')">📦 Orders</button>
             <button class="admin-tab" id="tabProductsBtn" onclick="switchTab('products')">🥬 Products</button>
             <button class="admin-tab" id="tabCustomersBtn" onclick="switchTab('customers')">👥 Customers</button>
             <button class="admin-tab" id="tabReviewsBtn" onclick="switchTab('reviews')">⭐ Reviews</button>
         </div>
 
-        <div id="adminOrdersSection" class="admin-section">
+        <div id="adminDashboardSection" class="admin-section">
+
+            <div class="admin-section-head">
+                <h2>Store Dashboard</h2>
+            </div>
+
+            <div id="adminDashboardStats" class="admin-stats">
+                <p style="text-align:center;color:var(--text-secondary);padding:20px;">Loading dashboard...</p>
+            </div>
+
+        </div>
+
+        <div id="adminOrdersSection" class="admin-section" style="display:none;">
 
             <div class="admin-section-head">
                 <h2>Order Dashboard</h2>
@@ -91,6 +104,23 @@
             <div class="admin-stats" id="adminStats"></div>
 
             <input type="text" id="adminProductSearch" class="admin-search" placeholder="Search products..." oninput="renderProducts()">
+
+            <div class="admin-filters">
+                <select id="adminProductCategory" class="status-select" onchange="renderProducts()">
+                    <option value="">All categories</option>
+                    <option>Vegetables</option>
+                    <option>Fruits</option>
+                    <option>Grocery</option>
+                </select>
+                <select id="adminProductSort" class="status-select" onchange="renderProducts()">
+                    <option value="default">Default</option>
+                    <option value="price-asc">Price: Low to High</option>
+                    <option value="price-desc">Price: High to Low</option>
+                    <option value="stock-asc">Stock: Low to High</option>
+                    <option value="stock-desc">Stock: High to Low</option>
+                    <option value="name-asc">Name: A-Z</option>
+                </select>
+            </div>
 
             <div id="adminProductsList" class="admin-products-grid">
                 <p style="text-align:center;color:var(--text-secondary);padding:40px;">Loading products...</p>
@@ -200,6 +230,18 @@
 
             </form>
 
+        </div>
+    </div>
+
+
+    <!-- Customer Order History Modal -->
+    <div id="customerOrdersModal" class="admin-modal" style="display:none;">
+        <div class="admin-modal-box admin-modal-wide">
+            <div class="admin-modal-head">
+                <h3 id="customerOrdersTitle">Customer Orders</h3>
+                <button class="modal-close" onclick="closeCustomerOrders()">&times;</button>
+            </div>
+            <div id="customerOrdersBody"></div>
         </div>
     </div>
 

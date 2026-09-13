@@ -341,7 +341,10 @@ exports.getOrders = async (req, res) => {
                 { "customer.phone": { $regex: s, $options: "i" } }
             ];
         }
-        const orders = await Order.find(filter).sort({ createdAt: -1 }).limit(200);
+        const orders = await Order.find(filter)
+            .sort({ createdAt: -1 })
+            .limit(200)
+            .populate("user", "name email phone");
         res.json({ success: true, count: orders.length, data: orders });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
@@ -354,13 +357,14 @@ exports.getOrders = async (req, res) => {
 exports.getOverview = async (req, res) => {
     try {
         const threshold = Math.max(0, parseInt(req.query.threshold, 10) || 5);
-        const [totalProducts, totalCustomers, totalOrders, deliveredOrders, cancelledOrders, paidOrders, salesAgg, activeAgg] = await Promise.all([
+        const [totalProducts, totalCustomers, totalOrders, deliveredOrders, cancelledOrders, paidOrders, preparingOrders, salesAgg, activeAgg] = await Promise.all([
             Product.countDocuments(),
             User.countDocuments({ role: "customer" }),
             Order.countDocuments(),
             Order.countDocuments({ status: "Delivered" }),
             Order.countDocuments({ status: "Cancelled" }),
             Order.countDocuments({ paymentStatus: "PAID" }),
+            Order.countDocuments({ status: "Preparing" }),
             Order.aggregate([{ $match: { status: { $ne: "Cancelled" } } }, { $group: { _id: null, total: { $sum: "$total" } } }]),
             Product.aggregate([
                 { $match: { active: true } },
@@ -383,6 +387,7 @@ exports.getOverview = async (req, res) => {
                 paidOrders: paidOrders,
                 deliveredOrders: deliveredOrders,
                 cancelledOrders: cancelledOrders,
+                preparingOrders: preparingOrders,
                 lowStockProducts: stock.low,
                 outOfStockProducts: stock.out,
                 totalSales: round2(agg.total),
@@ -411,7 +416,7 @@ exports.getMyOrders = async (req, res) => {
 // ===============================
 exports.getOrder = async (req, res) => {
     try {
-        const order = await Order.findById(req.params.id);
+        const order = await Order.findById(req.params.id).populate("user", "name email phone");
         if (!order) {
             return res.status(404).json({ success: false, message: "Order not found" });
         }

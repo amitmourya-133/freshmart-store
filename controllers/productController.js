@@ -59,7 +59,22 @@ exports.getAdminProducts = async (req, res) => {
 // CREATE PRODUCT (admin)
 exports.createProduct = async (req, res) => {
     try {
-        const product = await Product.create(req.body);
+        const body = Object.assign({}, req.body);
+        if (body.price !== undefined) {
+            const p = Number(body.price);
+            if (typeof p !== "number" || isNaN(p) || !isFinite(p) || p < 0) {
+                return res.status(400).json({ success: false, message: "Price must be a valid positive number" });
+            }
+            body.price = Math.round(p * 100) / 100;
+        }
+        if (body.stock !== undefined) {
+            const s = Number(body.stock);
+            if (typeof s !== "number" || isNaN(s) || !isFinite(s) || s < 0) {
+                return res.status(400).json({ success: false, message: "Stock must be a valid positive number" });
+            }
+            body.stock = Math.floor(s);
+        }
+        const product = await Product.create(body);
         res.status(201).json({ success: true, data: product });
     } catch (error) {
         res.status(400).json({ success: false, message: error.message });
@@ -72,13 +87,54 @@ exports.updateProduct = async (req, res) => {
         if (isBadObjectId(req.params.id)) {
             return res.status(404).json({ success: false, message: "Product not found" });
         }
-        const product = await Product.findByIdAndUpdate(req.params.id, req.body, {
+        const updates = {};
+        const allowed = ["name", "unit", "category", "emoji", "gradient", "description", "nutrition", "tips", "origin", "active", "rating", "ratingCount"];
+        allowed.forEach((k) => {
+            if (req.body[k] !== undefined) updates[k] = req.body[k];
+        });
+        if (req.body.price !== undefined) {
+            const p = Number(req.body.price);
+            if (typeof p !== "number" || isNaN(p) || !isFinite(p) || p < 0) {
+                return res.status(400).json({ success: false, message: "Price must be a valid positive number" });
+            }
+            updates.price = Math.round(p * 100) / 100;
+        }
+        if (req.body.stock !== undefined) {
+            const s = Number(req.body.stock);
+            if (typeof s !== "number" || isNaN(s) || !isFinite(s) || s < 0) {
+                return res.status(400).json({ success: false, message: "Stock must be a valid positive number" });
+            }
+            updates.stock = Math.floor(s);
+        }
+        const product = await Product.findByIdAndUpdate(req.params.id, updates, {
             new: true,
             runValidators: true
         });
         if (!product) {
             return res.status(404).json({ success: false, message: "Product not found" });
         }
+        res.json({ success: true, data: product });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+// UPDATE PRICE ONLY (admin) - validated, up or down
+exports.updatePrice = async (req, res) => {
+    try {
+        if (isBadObjectId(req.params.id)) {
+            return res.status(404).json({ success: false, message: "Product not found" });
+        }
+        const price = Number(req.body.price);
+        if (req.body.price === undefined || typeof price !== "number" || isNaN(price) || !isFinite(price) || price < 0) {
+            return res.status(400).json({ success: false, message: "Price must be a valid positive number" });
+        }
+        const product = await Product.findById(req.params.id);
+        if (!product) {
+            return res.status(404).json({ success: false, message: "Product not found" });
+        }
+        product.price = Math.round(price * 100) / 100;
+        await product.save();
         res.json({ success: true, data: product });
     } catch (error) {
         res.status(400).json({ success: false, message: error.message });
@@ -92,14 +148,15 @@ exports.updateStock = async (req, res) => {
             return res.status(404).json({ success: false, message: "Product not found" });
         }
         const { stock } = req.body;
-        if (stock === undefined || stock < 0) {
+        const s = Number(stock);
+        if (stock === undefined || s === undefined || isNaN(s) || !isFinite(s) || s < 0) {
             return res.status(400).json({ success: false, message: "Valid stock value required" });
         }
         const product = await Product.findById(req.params.id);
         if (!product) {
             return res.status(404).json({ success: false, message: "Product not found" });
         }
-        product.stock = stock;
+        product.stock = Math.floor(s);
         await product.save();
         res.json({ success: true, data: product });
     } catch (error) {

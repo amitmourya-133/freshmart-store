@@ -10,6 +10,7 @@ const {
     getAdminProducts,
     createProduct,
     updateProduct,
+    updatePrice,
     updateStock,
     deleteProduct,
     setRating,
@@ -26,6 +27,7 @@ router.get("/admin/all", protect, admin, getAdminProducts);
 router.post("/", protect, admin, createProduct);
 router.put("/:id", protect, admin, updateProduct);
 router.patch("/:id/stock", protect, admin, updateStock);
+router.patch("/:id/price", protect, admin, updatePrice);
 router.put("/:id/rating", protect, admin, setRating);
 router.delete("/:id", protect, admin, deleteProduct);
 
