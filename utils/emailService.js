@@ -67,7 +67,14 @@ async function sendEmail({ to, subject, html }) {
     } catch (err) {
         // Never log the SMTP password or any secret. A transport-level error
         // is intentionally swallowed (delivery failure is reported to the caller).
-        return { sent: false, reason: "smtp_error" };
+        // Only a sanitized failure code (e.g. EAUTH / 535 / ETIMEDOUT) is
+        // exposed for diagnostics - never the underlying SMTP response text.
+        const code = err ? (err.responseCode || err.code) : undefined;
+        return {
+            sent: false,
+            reason: "smtp_error",
+            code: (code !== undefined && code !== null) ? String(code) : (err && err.name) || "unknown"
+        };
     }
 }
 

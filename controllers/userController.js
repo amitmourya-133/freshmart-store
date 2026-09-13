@@ -101,6 +101,25 @@ async function resendCooling(user, prefix) {
     return Math.ceil((OTP_RESEND_COOLDOWN_MS - elapsed) / 1000);
 }
 
+// Send an OTP email and enforce fail-closed delivery: callers must never
+// report an OTP as sent unless Gmail actually accepted it. Only sanitized
+// failure codes/reasons are logged - never credentials or OTP values.
+async function deliverOtp(user, otp, purpose) {
+    let result;
+    try {
+        result = await sendOtpEmail({ to: user.email, otp: otp, purpose: purpose });
+    } catch (err) {
+        console.error("[email] OTP send threw (purpose=" + purpose + "): " + ((err && (err.code || err.name)) || "unknown"));
+        return false;
+    }
+    if (!result || result.sent !== true) {
+        console.error("[email] OTP send failed (purpose=" + purpose + "): " +
+            ((result && (result.reason + (result.code ? "/" + result.code : ""))) || "unknown"));
+        return false;
+    }
+    return true;
+}
+
 // Generate JWT token
 function generateToken(id) {
     return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -151,7 +170,8 @@ exports.signup = async (req, res) => {
         }
 
         // Either no account yet, or an abandoned unverified signup.
-        if (!user) {
+        const createdFresh = !user;
+        if (createdFresh) {
             user = await User.create({
                 name: name || "",
                 email: normalized,
@@ -168,7 +188,13 @@ exports.signup = async (req, res) => {
         }
 
         const otp = await issueOtp(user, "otp");
-        await sendOtpEmail({ to: normalized, otp: otp, purpose: "signup" });
+        if (!(await deliverOtp(user, otp, "signup"))) {
+            // Roll back ONLY the account created in this request so a broken
+            // email config never litters the DB. An existing (abandoned,
+            // unverified) account is left untouched so the same user can retry.
+            if (createdFresh) await User.deleteOne({ _id: user._id });
+            return res.status(500).json({ success: false, message: "Unable to send OTP email. Please try again later." });
+        }
 
         res.status(201).json({
             success: true,
@@ -242,7 +268,9 @@ exports.signupResendOtp = async (req, res) => {
         }
 
         const otp = await issueOtp(user, "otp");
-        await sendOtpEmail({ to: normalized, otp: otp, purpose: "signup" });
+        if (!(await deliverOtp(user, otp, "signup"))) {
+            return res.status(500).json({ success: false, message: "Unable to send OTP email. Please try again later." });
+        }
 
         res.json({ success: true, message: "A new verification code has been sent to your email." });
     } catch (error) {
@@ -309,7 +337,9 @@ exports.forgotPasswordRequest = async (req, res) => {
         const user = await User.findOne({ email: normalized });
         if (user && user.emailVerified !== false) {
             const otp = await issueOtp(user, "resetOtp");
-            await sendOtpEmail({ to: normalized, otp: otp, purpose: "reset" });
+            if (!(await deliverOtp(user, otp, "reset"))) {
+                return res.status(500).json({ success: false, message: "Unable to send OTP email. Please try again later." });
+            }
         }
 
         res.json({ success: true, message: "If an account exists for this email, an OTP has been sent." });
@@ -376,7 +406,9 @@ exports.forgotPasswordResendOtp = async (req, res) => {
         }
 
         const otp = await issueOtp(user, "resetOtp");
-        await sendOtpEmail({ to: normalized, otp: otp, purpose: "reset" });
+        if (!(await deliverOtp(user, otp, "reset"))) {
+            return res.status(500).json({ success: false, message: "Unable to send OTP email. Please try again later." });
+        }
 
         res.json({ success: true, message: "A new OTP has been sent to your email." });
     } catch (error) {
