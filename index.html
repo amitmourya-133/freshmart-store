@@ -12,12 +12,26 @@
 
 <!-- HEADER -->
 <header>
-    <div class="logo">FreshMart</div>
+    <div class="site-nav">
+        <div class="logo" onclick="goSection('top')" title="FreshMart Home">FreshMart</div>
+        <button type="button" class="hamburger" id="hamburgerBtn" onclick="toggleMobileNav()" aria-expanded="false" aria-label="Open menu" title="Menu">
+            <span></span>
+            <span></span>
+            <span></span>
+        </button>
+    </div>
 
-    <div class="search-box">
-        <input type="text" id="searchInput" placeholder="Search vegetables, fruits, grocery..." oninput="searchProducts()">
-        <button type="button" id="voiceSearchBtn" onclick="startVoiceSearch()" title="Voice Search">Voice</button>
-        <button type="button" onclick="searchProducts()">Search</button>
+    <div class="center-group">
+        <nav class="nav-links" id="navLinks" aria-label="Primary navigation">
+            <button type="button" class="nav-link" onclick="goSection('top'); closeMobileNav()">Home</button>
+            <button type="button" class="nav-link" onclick="goSection('categories'); closeMobileNav()">Categories</button>
+            <button type="button" class="nav-link" onclick="goSection('products'); closeMobileNav()">Products</button>
+        </nav>
+        <div class="search-box">
+            <input type="text" id="searchInput" placeholder="Search vegetables, fruits, grocery..." oninput="searchProducts()">
+            <button type="button" id="voiceSearchBtn" onclick="startVoiceSearch()" title="Voice Search">Voice</button>
+            <button type="button" onclick="searchProducts()">Search</button>
+        </div>
     </div>
 
     <div class="header-actions">
@@ -76,7 +90,7 @@
 </section>
 
 <!-- CATEGORIES -->
-<section class="categories">
+<section class="categories" id="categories">
     <h2>Shop By Category</h2>
     <div class="category-container">
         <div class="category" onclick="filterCategory('Vegetables')">

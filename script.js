@@ -655,6 +655,40 @@ function scrollToProducts() {
     }
 }
 
+// Navbar section navigation (Home / Categories / Products).
+function goSection(which) {
+    if (which === "top") {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+    }
+    var el = document.getElementById(which);
+    if (el) el.scrollIntoView({ behavior: "smooth" });
+}
+
+// Mobile nav menu toggle (hamburger).
+function toggleMobileNav() {
+    var nav = document.getElementById("navLinks");
+    if (!nav) return;
+    var open = nav.classList.toggle("open");
+    var btn = document.getElementById("hamburgerBtn");
+    if (btn) btn.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function closeMobileNav() {
+    var nav = document.getElementById("navLinks");
+    if (!nav) return;
+    nav.classList.remove("open");
+    var btn = document.getElementById("hamburgerBtn");
+    if (btn) btn.setAttribute("aria-expanded", "false");
+}
+
+document.addEventListener("click", function (e) {
+    var nav = document.getElementById("navLinks");
+    if (!nav || !nav.classList.contains("open")) return;
+    if (e.target.closest(".hamburger") || e.target.closest("#navLinks")) return;
+    closeMobileNav();
+});
+
 // ===============================
 // CATALOG FILTERS (category + search + price + sort)
 // ===============================
