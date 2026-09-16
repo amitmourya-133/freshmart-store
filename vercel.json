@@ -46,7 +46,11 @@
       "destination": "/__freshmart_blocked__"
     },
     {
-      "source": "/(FRESHMART_TASK[0-9]_REPORT.md)",
+      "source": "/FRESHMART_TASK3_REPORT.md",
+      "destination": "/__freshmart_blocked__"
+    },
+    {
+      "source": "/FRESHMART_TASK4_REPORT.md",
       "destination": "/__freshmart_blocked__"
     }
   ]
