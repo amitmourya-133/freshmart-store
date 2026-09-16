@@ -6,6 +6,7 @@ const crypto = require("crypto");
 const Order = require("../models/Order");
 const Product = require("../models/Product");
 const User = require("../models/User");
+const Settings = require("../models/Settings");
 const Razorpay = require("razorpay");
 const { getMultFromWeight, round2 } = require("../utils/pricing");
 
@@ -50,6 +51,15 @@ function validateCustomer(c) {
 function pushHistory(order, status, by) {
     if (!Array.isArray(order.statusHistory)) order.statusHistory = [];
     order.statusHistory.push({ status: status, by: by || null, at: new Date() });
+}
+
+// Delivery policy from the DB-backed settings (fallbacks: Rs.20 fee, free >= Rs.500).
+async function deliveryPolicy() {
+    const doc = await Settings.getSettings();
+    return {
+        charge: Number(doc.deliveryCharge) >= 0 ? Number(doc.deliveryCharge) : 20,
+        freeThreshold: Number(doc.freeDeliveryThreshold) >= 0 ? Number(doc.freeDeliveryThreshold) : 500
+    };
 }
 
 // Server-authoritative totals. Products are re-priced from MongoDB whenever a
@@ -104,7 +114,8 @@ async function computeServerTotals(items) {
     if (subtotal < 1) {
         throw { status: 400, message: "Minimum order amount is Rs.1. Please add more items." };
     }
-    const delivery = subtotal >= 500 ? 0 : 20;
+    const policy = await deliveryPolicy();
+    const delivery = subtotal >= policy.freeThreshold ? 0 : policy.charge;
     return { items: normalized, subtotal: subtotal, delivery: delivery, total: round2(subtotal + delivery) };
 }
 
@@ -356,7 +367,9 @@ exports.getOrders = async (req, res) => {
 // ===============================
 exports.getOverview = async (req, res) => {
     try {
-        const threshold = Math.max(0, parseInt(req.query.threshold, 10) || 5);
+        const settings = await Settings.getSettings();
+        const defaultThreshold = settings.lowStockThreshold >= 1 ? settings.lowStockThreshold : 20;
+        const threshold = Math.max(0, parseInt(req.query.threshold, 10) || defaultThreshold);
         const [totalProducts, totalCustomers, totalOrders, deliveredOrders, cancelledOrders, paidOrders, preparingOrders, salesAgg, activeAgg] = await Promise.all([
             Product.countDocuments(),
             User.countDocuments({ role: "customer" }),

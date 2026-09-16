@@ -188,6 +188,39 @@ function cartItemProductId(item) {
     return null;
 }
 
+function getProductById(id) {
+    if (!id) return null;
+    if ((products || []).length) {
+        for (var i = 0; i < products.length; i++) {
+            if (String(products[i]._id) === String(id)) return products[i];
+        }
+    }
+    return null;
+}
+
+function findProductByName(name) {
+    if (!name) return null;
+    if ((products || []).length) {
+        for (var i = 0; i < products.length; i++) {
+            if (products[i].name === name) return products[i];
+        }
+    }
+    return null;
+}
+
+// Server-known stock for a cart item (from catalog + refreshed cart prices).
+// Returns undefined when the stock is unknown (backward-compatible fallback).
+function getProductStock(item) {
+    if (!item) return undefined;
+    if (typeof item.stock === "number") return Math.max(0, item.stock);
+    if (typeof item.active !== "undefined" && item.active === false && typeof item.stock === "number") return Math.max(0, item.stock);
+    var byId = getProductById(cartItemProductId(item));
+    if (byId && typeof byId.stock === "number") return Math.max(0, byId.stock);
+    var byName = findProductByName(item.name);
+    if (byName && typeof byName.stock === "number") return Math.max(0, byName.stock);
+    return undefined;
+}
+
 // Map a weight chip label back to its multiplier (mirrors utils/pricing.js)
 function getMultForWeight(weight, unit) {
     if (!weight) return 1;
@@ -566,7 +599,21 @@ function updateCart() {
     } else {
         cart.forEach(function(item, index) {
             var itemLabel = item.name + (item.qtyLabel ? " (" + item.qtyLabel + ")" : "");
-            cartItems.innerHTML += '<div class="cart-item"><div class="cart-item-info"><strong>' + itemLabel + '</strong><br><span class="cart-item-price">₹' + item.price + ' × ' + item.quantity + ' = ₹' + (item.price * item.quantity) + '</span></div><div class="cart-item-actions"><button onclick="decreaseQuantity(' + index + ')">−</button><strong class="cart-item-qty">' + item.quantity + '</strong><button onclick="increaseQuantity(' + index + ')">+</button><button class="cart-item-remove" onclick="removeItem(' + index + ')">✕</button></div></div>';
+            var stock = getProductStock(item);
+            var stockInfo = "";
+            var plusDisabled = "";
+            if (typeof stock === "number") {
+                if (stock <= 0) {
+                    stockInfo = '<div class="cart-stock-info out">❌ Out of stock</div>';
+                    plusDisabled = ' disabled';
+                } else if (item.quantity >= stock) {
+                    stockInfo = '<div class="cart-stock-info low">Only ' + stock + ' available</div>';
+                    plusDisabled = ' disabled';
+                } else if (stock <= 20) {
+                    stockInfo = '<div class="cart-stock-info low">Only ' + stock + ' left</div>';
+                }
+            }
+            cartItems.innerHTML += '<div class="cart-item"><div class="cart-item-info"><strong>' + itemLabel + '</strong><br><span class="cart-item-price">₹' + item.price + ' × ' + item.quantity + ' = ₹' + (item.price * item.quantity) + '</span>' + stockInfo + '</div><div class="cart-item-actions"><button onclick="decreaseQuantity(' + index + ')">−</button><strong class="cart-item-qty">' + item.quantity + '</strong><button onclick="increaseQuantity(' + index + ')"' + plusDisabled + '>+</button><button class="cart-item-remove" onclick="removeItem(' + index + ')">✕</button></div></div>';
         });
     }
 
@@ -834,10 +881,17 @@ function productCardHTML(index) {
     var inCart = cart.find(function(c) { return c.name === product.name; });
     var qty = inCart ? inCart.quantity : 0;
     var safeName = product.name.replace(/'/g, "\\'");
+    var stock = (typeof product.stock === "number") ? Math.max(0, product.stock) : undefined;
+    var out = (typeof stock === "number" && stock <= 0);
+    var stockBadge = "";
+    if (out) {
+        stockBadge = '<span class="stock-badge out">Out of Stock</span>';
+    }
 
     return '<div class="product" data-category="' + product.category + '" onclick="openProductDetail(' + index + ')">' +
         '<button type="button" class="card-menu-btn" aria-label="More options" onclick="event.stopPropagation(); openCardActionsMenu(this,\'' + safeName + '\',' + product.price + ',\'' + product.unit + '\',' + index + ')">⋮</button>' +
         '<div class="product-image" style="' + imageStyle(product.name, product.gradient) + '">' + productImgHTML(product.name) + '</div>' +
+        stockBadge +
         '<h3>' + product.name + '</h3>' +
         starHTML(r.rating) +
         '<span class="rating-count">(' + r.count + ')</span>' +
@@ -1379,6 +1433,9 @@ function loadMoreProducts() {
 function cartControlsHTML(name, price, qty, unit) {
     var options = getQtyOptions(unit || "kg");
     var active = getActiveOption(name, unit || "kg");
+    var product = findProductByName(name.replace(/\\'/g, "'"));
+    var stock = (product && typeof product.stock === "number") ? Math.max(0, product.stock) : undefined;
+    var out = (typeof stock === "number" && stock <= 0);
 
     var chips = '<div class="qty-chips">';
     options.forEach(function(o) {
@@ -1388,12 +1445,16 @@ function cartControlsHTML(name, price, qty, unit) {
     chips += '</div>';
 
     var main;
-    if (qty > 0) {
-        main = '<div class="qty-selector"><button type="button" class="qty-btn qty-minus" onclick="event.stopPropagation(); changeCardQty(\'' + name + '\', -1, ' + price + ')">−</button><span class="qty-value">' + qty + '</span><button type="button" class="qty-btn qty-plus" onclick="event.stopPropagation(); changeCardQty(\'' + name + '\', 1, ' + price + ')">+</button></div>';
+    if (out) {
+        main = '<span class="out-of-stock-label">Out of Stock</span>';
+    } else if (qty > 0) {
+        var atMax = (typeof stock === "number" && qty >= stock);
+        main = '<div class="qty-selector"><button type="button" class="qty-btn qty-minus" onclick="event.stopPropagation(); changeCardQty(\'' + name + '\', -1, ' + price + ')">−</button><span class="qty-value">' + qty + '</span>' +
+            '<button type="button" class="qty-btn qty-plus' + (atMax ? " qty-plus-muted" : "") + '" onclick="event.stopPropagation(); changeCardQty(\'' + name + '\', 1, ' + price + ')"' + (atMax ? ' disabled' : '') + ' title="' + (atMax ? "Only " + stock + " available" : "") + '">+</button></div>';
     } else {
         main = '<button type="button" class="product-add-btn" onclick="event.stopPropagation(); addToCart(\'' + name + '\', ' + price + ',\'' + unit + '\')">Add To Cart</button>';
     }
-    var buy = '<button type="button" class="buy-now-btn" onclick="event.stopPropagation(); buyNow(\'' + name + '\', ' + price + ',\'' + unit + '\')">Buy Now</button>';
+    var buy = '<button type="button" class="buy-now-btn" onclick="event.stopPropagation(); buyNow(\'' + name + '\', ' + price + ',\'' + unit + '\')"' + (out ? ' disabled' : '') + '>Buy Now</button>';
 
     return chips + '<div class="card-btn-row">' + main + buy + '</div>';
 }
@@ -1404,6 +1465,13 @@ function changeCardQty(name, delta, price) {
     if (!existing) {
         cart.push({ name: name, price: price, quantity: 1, qtyLabel: "", mult: 1 });
     } else {
+        var product = findProductByName(name.replace(/\\'/g, "'"));
+        var stock = (product && typeof product.stock === "number") ? Math.max(0, product.stock) : undefined;
+        if (delta > 0 && typeof stock === "number" && existing.quantity >= stock) {
+            showToast("Only " + stock + " units of " + name + " available.", "error");
+            updateAllCartControls();
+            return;
+        }
         existing.quantity += delta;
         if (existing.quantity <= 0) {
             cart = cart.filter(function(item) { return item.name !== name; });
@@ -1439,6 +1507,31 @@ function updateAllCartControls() {
 
 var MIN_ORDER_AMOUNT = 1;
 var qtySelections = {};
+
+// Server-backed delivery policy (fallback defaults keep the app working offline).
+var shippingSettings = { deliveryCharge: 20, freeDeliveryThreshold: 500 };
+var shippingSettingsReady = false;
+function loadShippingSettings(force) {
+    if (shippingSettingsReady && !force) return Promise.resolve(shippingSettings);
+    if (typeof fetchShippingSettings !== "function") return Promise.resolve(shippingSettings);
+    return fetchShippingSettings().then(function(s) {
+        shippingSettings = {
+            deliveryCharge: (typeof s.deliveryCharge === "number" && s.deliveryCharge >= 0) ? s.deliveryCharge : 20,
+            freeDeliveryThreshold: (typeof s.freeDeliveryThreshold === "number" && s.freeDeliveryThreshold >= 0) ? s.freeDeliveryThreshold : 500
+        };
+        shippingSettingsReady = true;
+        return shippingSettings;
+    }).catch(function() {
+        return shippingSettings;
+    });
+}
+
+// Client-side estimate of the delivery fee (mirrors the server rule; the server
+// is always authoritative and recalculates it at order creation).
+function estimatedDelivery(subtotal) {
+    var threshold = shippingSettings.freeDeliveryThreshold;
+    return (subtotal >= threshold) ? 0 : shippingSettings.deliveryCharge;
+}
 
 function getQtyOptions(unit) {
     if (unit === "kg")    return [{ label: "250g", mult: 0.25 }, { label: "500g", mult: 0.5 }, { label: "1kg", mult: 1 }, { label: "2kg", mult: 2 }];
@@ -1556,15 +1649,7 @@ function loadProductDetail() {
                 '<p>' + p.tips + '</p>' +
             '</div>' +
             '<div class="detail-actions">' +
-                '<div class="detail-qty">' +
-                    '<button onclick="detailQtyChange(-1)">−</button>' +
-                    '<span id="detailQty">1</span>' +
-                    '<button onclick="detailQtyChange(1)">+</button>' +
-                '</div>' +
-                '<div class="detail-btn-row">' +
-                    '<button class="detail-add-btn" onclick="addDetailToCart(\'' + safeName + '\', ' + p.price + ')">Add To Cart</button>' +
-                    '<button class="buy-now-btn" onclick="buyNowDetail(\'' + safeName + '\', ' + p.price + ', \'' + p.unit + '\')">⚡ Buy Now</button>' +
-                '</div>' +
+                (detailControlsHTML(p) ) +
             '</div>' +
             reviewsHTML +
         '</div>' +
@@ -1668,6 +1753,34 @@ function reviewsHTMLFor(name, reviews) {
 }
 
 var detailQtyValue = 1;
+
+// Detail-page buy controls: quantity stepper capped at stock, with an
+// out-of-stock state (disabled buttons) when the server knows stock is 0.
+function detailControlsHTML(p) {
+    var stock = (typeof p.stock === "number") ? Math.max(0, p.stock) : undefined;
+    var out = (typeof stock === "number" && stock <= 0);
+    detailQtyValue = 1;
+
+    if (out) {
+        return '<div class="detail-stock-unavailable">' +
+            '<span class="stock-badge out">Out of Stock</span>' +
+            '<p>This product is temporarily unavailable. Please check back soon.</p>' +
+            '<button type="button" class="detail-add-btn" disabled>Add To Cart</button>' +
+            '<button type="button" class="buy-now-btn" disabled>⚡ Buy Now</button>' +
+            '</div>';
+    }
+
+    var atMax = (typeof stock === "number" && stock >= 99);
+    return '<div class="detail-qty">' +
+            '<button onclick="detailQtyChange(-1)">−</button>' +
+            '<span id="detailQty">1</span>' +
+            '<button onclick="detailQtyChange(1)"' + (atMax ? ' disabled title="Limit reached"' : '') + '>+</button>' +
+        '</div>' +
+        '<div class="detail-btn-row">' +
+            '<button class="detail-add-btn" onclick="addDetailToCart(\'' + p.name.replace(/'/g, "\\'") + '\', ' + p.price + ')">Add To Cart</button>' +
+            '<button class="buy-now-btn" onclick="buyNowDetail(\'' + p.name.replace(/'/g, "\\'") + '\', ' + p.price + ', \'' + p.unit + '\')">⚡ Buy Now</button>' +
+        '</div>';
+}
 
 function detailQtyChange(delta) {
     detailQtyValue = Math.max(1, detailQtyValue + delta);
@@ -1825,6 +1938,19 @@ function proceedToCheckout() {
         return;
     }
 
+    // Out-of-stock / overstocked items cannot enter the checkout page.
+    for (var i = 0; i < cart.length; i++) {
+        var stock = getProductStock(cart[i]);
+        if (typeof stock === "number" && stock <= 0) {
+            showToast(cart[i].name + " is out of stock. Please remove it from your cart.", "error");
+            return;
+        }
+        if (typeof stock === "number" && cart[i].quantity > stock) {
+            showToast("Only " + stock + " units of " + cart[i].name + " are available. Please lower the quantity.", "error");
+            return;
+        }
+    }
+
     localStorage.setItem("freshMartCart", JSON.stringify(cart));
     window.location.href = "checkout.html";
 }
@@ -1862,11 +1988,6 @@ function refreshCartPrices() {
 // LOAD CHECKOUT
 // ===============================
 
-function loadCheckout() {
-    refreshCartPrices();
-    renderCheckout();
-}
-
 function renderCheckout() {
     var checkoutItems = document.getElementById("checkoutItems");
     if (!checkoutItems) return;
@@ -1878,19 +1999,29 @@ function renderCheckout() {
 
     checkoutItems.innerHTML = "";
     var subtotal = 0;
+    var outOfStockNames = [];
 
     if (cart.length === 0) {
         checkoutItems.innerHTML = '<div class="cart-empty"><div class="cart-empty-icon">🛒</div><h3>Your cart is empty</h3><p>Please add products before checkout.</p></div>';
     } else {
-        cart.forEach(function(item) {
+        cart.forEach(function(item, idx) {
             var itemTotal = item.price * item.quantity;
             subtotal += itemTotal;
             var itemLabel = item.name + (item.qtyLabel ? " (" + item.qtyLabel + ")" : "");
-            checkoutItems.innerHTML += '<div class="checkout-product"><span>' + itemLabel + ' × ' + item.quantity + '</span><strong>₹' + itemTotal + '</strong></div>';
+            var productStock = getProductStock(item);
+            var isUnavailable = (typeof productStock === "number" && productStock <= 0);
+            if (isUnavailable) outOfStockNames.push(itemLabel);
+            var stockWarn = "";
+            if (isUnavailable) {
+                stockWarn = '<div class="checkout-stock-warning">❌ Out of stock — please remove this item from your cart</div>';
+            } else if (typeof productStock === "number" && item.quantity > productStock) {
+                stockWarn = '<div class="checkout-stock-warning">⚠️ Only <strong>' + productStock + '</strong> available — please lower the quantity before checkout.</div>';
+            }
+            checkoutItems.innerHTML += '<div class="checkout-product"><span>' + itemLabel + ' × ' + item.quantity + '</span><strong>₹' + itemTotal + '</strong></div>' + stockWarn;
         });
     }
 
-    var delivery = (subtotal >= 500) ? 0 : 20;
+    var delivery = estimatedDelivery(subtotal);
 
     var checkoutSubtotal = document.getElementById("checkoutSubtotal");
     if (checkoutSubtotal) checkoutSubtotal.innerText = "₹" + subtotal;
@@ -1900,13 +2031,36 @@ function renderCheckout() {
         deliveryCharge.innerText = "₹" + delivery;
         if (delivery === 0 && subtotal > 0) {
             deliveryCharge.classList.add("free-delivery");
+            deliveryCharge.setAttribute("title", "Free delivery on orders above ₹" + shippingSettings.freeDeliveryThreshold.toLocaleString("en-IN"));
         } else {
             deliveryCharge.classList.remove("free-delivery");
         }
     }
 
+    // Server-backed free-delivery progress note (only the amount, never the charge amount).
+    var freeNote = document.getElementById("freeDeliveryNote");
+    if (freeNote) {
+        if (subtotal > 0 && subtotal < shippingSettings.freeDeliveryThreshold && shippingSettings.deliveryCharge > 0) {
+            var more = Math.ceil(shippingSettings.freeDeliveryThreshold - subtotal);
+            freeNote.style.display = "block";
+            freeNote.innerHTML = '🚚 Add ₹' + more.toLocaleString("en-IN") + ' more to get <strong>FREE delivery</strong> (on orders above ₹' + shippingSettings.freeDeliveryThreshold.toLocaleString("en-IN") + ').';
+        } else {
+            freeNote.style.display = "none";
+        }
+    }
+
     var checkoutTotal = document.getElementById("checkoutTotal");
     if (checkoutTotal) checkoutTotal.innerText = "₹" + (subtotal + delivery);
+
+    // Block checkout while any cart item is out of stock / overstocked.
+    var checkoutBtn = document.getElementById("placeOrderBtn");
+    if (outOfStockNames.length) {
+        if (checkoutBtn) checkoutBtn.disabled = true;
+    } else {
+        if (checkoutBtn) checkoutBtn.disabled = false;
+        var btn = document.getElementById("placeOrderBtn");
+        if (btn) btn.classList.remove("btn-disabled");
+    }
 
     var minOrderNote = document.getElementById("minOrderNote");
     if (minOrderNote) {
@@ -1917,6 +2071,13 @@ function renderCheckout() {
             minOrderNote.style.display = "none";
         }
     }
+}
+
+function loadCheckout() {
+    refreshCartPrices();
+    loadShippingSettings().then(function() {
+        renderCheckout();
+    });
 }
 
 // ===============================
@@ -2018,7 +2179,7 @@ function buildOrderObject() {
 
     var orderNumber = "FM" + Date.now().toString().slice(-6);
     var subtotal = getCartSubtotal();
-    var delivery = (subtotal >= 500) ? 0 : 20;
+    var delivery = estimatedDelivery(subtotal);
 
     return {
         orderNumber: orderNumber,
@@ -3128,6 +3289,65 @@ function formatOrderDate(iso) {
     try { return new Date(iso).toLocaleString(); } catch (e) { return ""; }
 }
 
+// Status flow steps used by the customer tracking visual.
+// DB uses "Preparing"; customers see this stage as "Packing".
+var TRACK_PIPES = [
+    { key: "Placed", label: "Order Placed", icon: "✅" },
+    { key: "Confirmed", label: "Confirmed", icon: "📝" },
+    { key: "Preparing", label: "Packing", icon: "📦" },
+    { key: "Out for Delivery", label: "Out for Delivery", icon: "🛵" },
+    { key: "Delivered", label: "Delivered", icon: "🏠" }
+];
+
+// Customer-friendly status label (maps the DB value, never changes it).
+function friendlyStatus(status) {
+    if (status === "Preparing") return "Packing";
+    return status || "Placed";
+}
+
+// Visual 5-step progress tracker sourced from the (server-backed) status field.
+// Cancelled orders render a dedicated cancelled banner instead of a broken bar.
+function statusTrackerHTML(status, noLabel) {
+    var s = status || "Placed";
+
+    if (s === "Cancelled") {
+        return '<div class="order-tracker cancelled">' +
+            '<div class="tracker-cancelled"><strong>⛔ Order Cancelled</strong></div></div>';
+    }
+
+    var idx = -1;
+    for (var i = 0; i < TRACK_PIPES.length; i++) {
+        if (TRACK_PIPES[i].key === s) { idx = i; break; }
+    }
+    // Unknown status -> treat as Placed so the bar never looks broken.
+    if (idx < 0) idx = 0;
+
+    var steps = TRACK_PIPES.map(function(step, i) {
+        var cls = "track-step";
+        if (i === idx) cls += " current";
+        if (i < idx) cls += " done";
+        if (i > idx) cls += " upcoming";
+        return '<div class="' + cls + '">' +
+            '<div class="track-dot">' + (i < idx ? "✓" : step.icon) + '</div>' +
+            '<div class="track-label">' + step.label + '</div>' +
+            '</div>';
+    }).join("");
+
+    return '<div class="order-tracker"><div class="tracker-steps">' + steps + '</div>' +
+        (noLabel ? "" : '<div class="tracker-current">Current status: <strong>' + friendlyStatus(s) + '</strong></div>') +
+        '</div>';
+}
+
+// Detailed timeline derived from the server status history, newest first.
+function statusTimelineHTML(statusHistory) {
+    if (!Array.isArray(statusHistory) || statusHistory.length === 0) return "";
+    var items = statusHistory.slice().reverse().map(function(h) {
+        var st = h && h.status ? friendlyStatus(h.status) : "Update";
+        return '<li><span class="tl-dot"></span><div><strong>' + st + '</strong><small>' + formatOrderDate(h.at) + '</small></div></li>';
+    }).join("");
+    return '<div class="order-tracker"><div class="tracker-timeline"><h4>Order Timeline</h4><ul>' + items + '</ul></div></div>';
+}
+
 function renderOrdersListHTML(orders, offline) {
     if (!orders || orders.length === 0) {
         return '<div class="empty-orders"><div class="empty-orders-icon">📦</div><h2>No Orders Yet</h2><p>You haven\'t placed any orders yet.</p><button type="button" onclick="window.location.href=\'index.html\'">Start Shopping</button></div>';
@@ -3149,7 +3369,7 @@ function renderOrdersListHTML(orders, offline) {
             productsHTML += '<div class="order-product"><span>' + name + weight + ' × ' + quantity + '</span><strong>₹' + itemTotal + '</strong></div>';
         });
 
-        var delivery = order.delivery !== undefined ? Number(order.delivery) : (Number(order.subtotal) >= 500 ? 0 : 20);
+        var delivery = order.delivery !== undefined ? Number(order.delivery) : estimatedDelivery(Number(order.subtotal) || 0);
         var total = Number(order.total) || (Number(order.subtotal || subtotal) + delivery);
 
         var cancellable = !offline && order._id && !order.isLocal &&
@@ -3165,7 +3385,8 @@ function renderOrdersListHTML(orders, offline) {
 
         var trackLine = order.trackingId ? '<p><strong>Track ID:</strong> ' + order.trackingId + '</p>' : "";
 
-        ordersHTML += '<div class="order-card"><div class="order-header"><div><div class="order-id">' + (order.orderNumber || "Order") + '</div>' + trackLine + '<small>' + formatOrderDate(order.createdAt || order.date) + '</small></div><div class="order-status">' + (order.status || "Placed") + '</div></div>' +
+        ordersHTML += '<div class="order-card"><div class="order-header"><div><div class="order-id">' + (order.orderNumber || "Order") + '</div>' + trackLine + '<small>' + formatOrderDate(order.createdAt || order.date) + '</small></div><div class="order-status">' + friendlyStatus(order.status || "Placed") + '</div></div>' +
+            statusTrackerHTML(order.status || "Placed", true) +
             '<div class="order-pay-row">' + paymentStatusBadge(order.paymentStatus, order.paid, order.paymentMode) + (order.paymentMode === "manual" && order.paymentReference ? '<span class="pay-ref">UPI Ref: ' + order.paymentReference + '</span>' : "") + '</div>' +
             '<h3>Products</h3><div style="margin-top:10px;">' + productsHTML + '</div>' +
             '<div class="summary-row"><span>Subtotal</span><strong>₹' + Number(order.subtotal) + '</strong></div>' +
@@ -3204,18 +3425,16 @@ function trackOrder() {
         var itemsHtml = (data.items || []).map(function(i) {
             return '<div class="order-product"><span>' + i.name + ' × ' + i.quantity + '</span><strong>₹' + (i.price || 0) + '</strong></div>';
         }).join("");
-        var timeline = (data.timeline || []).map(function(h) {
-            return '<li><strong>' + h.status + '</strong> <small>' + formatOrderDate(h.at) + '</small></li>';
-        }).join("");
         out.innerHTML = '<div class="order-card">' +
             '<div class="order-header"><div><div class="order-id">#' + (data.orderNumber || ref) + '</div>' +
             (data.trackingId ? '<p><strong>Track ID:</strong> ' + data.trackingId + '</p>' : "") +
             '<small>' + formatOrderDate(data.date) + '</small></div>' +
-            '<div class="order-status">' + (data.status || "—") + '</div></div>' +
+            '<div class="order-status">' + friendlyStatus(data.status || "—") + '</div></div>' +
+            statusTrackerHTML(data.status || "Placed", true) +
             '<div class="order-pay-row">' + paymentStatusBadge(data.paymentStatus) + '</div>' +
             '<h3>Items</h3>' + itemsHtml +
             '<div class="order-total">Total: ₹' + (data.total || 0) + '</div>' +
-            (timeline ? '<ul class="order-timeline">' + timeline + '</ul>' : "") +
+            statusTimelineHTML(data.timeline || data.statusHistory) +
             '</div>';
     }).catch(function(err) {
         out.innerHTML = '<p style="color:#e74c3c;">' + ((err && err.message) || "Order not found. Check the ID and try again.") + '</p>';

@@ -24,6 +24,7 @@
             <button class="admin-tab" id="tabProductsBtn" onclick="switchTab('products')">🥬 Products</button>
             <button class="admin-tab" id="tabCustomersBtn" onclick="switchTab('customers')">👥 Customers</button>
             <button class="admin-tab" id="tabReviewsBtn" onclick="switchTab('reviews')">⭐ Reviews</button>
+            <button class="admin-tab" id="tabSettingsBtn" onclick="switchTab('settings')">⚙️ Settings</button>
 
             <div class="admin-tabs-actions">
                 <button type="button" class="secondary-btn" onclick="window.location.href='index.html'" title="Back to Store">← Store</button>
@@ -141,6 +142,18 @@
 
             <div id="adminReviewsList" class="admin-list">
                 <p style="text-align:center;color:var(--text-secondary);padding:40px;">Loading reviews...</p>
+            </div>
+
+        </div>
+
+        <div id="adminSettingsSection" class="admin-section" style="display:none;">
+
+            <div class="admin-section-head">
+                <h2>Store Settings</h2>
+            </div>
+
+            <div id="adminSettingsBody">
+                <p style="text-align:center;color:var(--text-secondary);padding:40px;">Loading settings...</p>
             </div>
 
         </div>

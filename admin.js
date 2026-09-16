@@ -10,7 +10,26 @@ var adminReviews = [];
 var adminEditingId = null;
 var activeTab = "orders";
 
+// DB-backed store configuration (delivery + low-stock threshold).
+var adminSettings = { deliveryCharge: 20, freeDeliveryThreshold: 500, lowStockThreshold: 20 };
+var adminSettingsLoaded = false;
+
 var ORDER_STATUSES = ["Placed", "Confirmed", "Preparing", "Out for Delivery", "Delivered", "Cancelled"];
+
+function loadAdminSettings() {
+    if (adminSettingsLoaded || typeof apiGetSettings !== "function") return Promise.resolve(adminSettings);
+    return apiGetSettings().then(function(s) {
+        adminSettings = {
+            deliveryCharge: (typeof s.deliveryCharge === "number" && s.deliveryCharge >= 0) ? s.deliveryCharge : 20,
+            freeDeliveryThreshold: (typeof s.freeDeliveryThreshold === "number" && s.freeDeliveryThreshold >= 0) ? s.freeDeliveryThreshold : 500,
+            lowStockThreshold: (typeof s.lowStockThreshold === "number" && s.lowStockThreshold >= 1) ? s.lowStockThreshold : 20
+        };
+        adminSettingsLoaded = true;
+        return adminSettings;
+    }).catch(function() {
+        return adminSettings;
+    });
+}
 
 function adminLogout() {
     setAuthToken(null);
@@ -26,14 +45,16 @@ function switchTab(tab) {
         orders: "adminOrdersSection",
         products: "adminProductsSection",
         customers: "adminCustomersSection",
-        reviews: "adminReviewsSection"
+        reviews: "adminReviewsSection",
+        settings: "adminSettingsSection"
     };
     var buttons = {
         dashboard: "tabDashboardBtn",
         orders: "tabOrdersBtn",
         products: "tabProductsBtn",
         customers: "tabCustomersBtn",
-        reviews: "tabReviewsBtn"
+        reviews: "tabReviewsBtn",
+        settings: "tabSettingsBtn"
     };
 
     Object.keys(sections).forEach(function(key) {
@@ -48,6 +69,7 @@ function switchTab(tab) {
     else if (tab === "products") loadAdminProducts();
     else if (tab === "customers") loadAdminCustomers();
     else if (tab === "reviews") loadAdminReviews();
+    else if (tab === "settings") renderSettingsTab();
 }
 
 // Helper: resolve the image file for a product (override `image` field wins)
@@ -342,7 +364,10 @@ function loadAdminProducts() {
     var container = document.getElementById("adminProductsList");
     if (!container) return;
 
-    fetchAdminProducts()
+    // The configured low-stock threshold is needed before rendering (used server-side too).
+    loadAdminSettings().then(function() {
+        return fetchAdminProducts();
+    })
         .then(function(products) {
             adminProducts = products;
             renderProducts();
@@ -381,14 +406,15 @@ function renderProducts() {
     else if (sort === "name-asc") filtered = filtered.slice().sort(function(a, b) { return String(a.name || "").localeCompare(String(b.name || "")); });
 
     var totalStock = adminProducts.reduce(function(sum, p) { return sum + (p.stock || 0); }, 0);
-    var lowStock = adminProducts.filter(function(p) { return (p.stock || 0) < 20; }).length;
+    var lowThreshold = adminSettings.lowStockThreshold || 20;
+    var lowStock = adminProducts.filter(function(p) { return (p.stock || 0) < lowThreshold; }).length;
     var activeCount = adminProducts.filter(function(p) { return p.active !== false; }).length;
 
     stats.innerHTML =
         '<div class="stat-box"><strong>' + adminProducts.length + '</strong><span>Total Products</span></div>' +
         '<div class="stat-box"><strong>' + activeCount + '</strong><span>Active</span></div>' +
         '<div class="stat-box"><strong>' + totalStock + '</strong><span>Total Stock</span></div>' +
-        '<div class="stat-box low"><strong>' + lowStock + '</strong><span>Low Stock (&lt;20)</span></div>';
+        '<div class="stat-box low"><strong>' + lowStock + '</strong><span>Low Stock (&lt;' + lowThreshold + ')</span></div>';
 
     if (filtered.length === 0) {
         list.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:30px;">No products found.</p>';
@@ -396,13 +422,18 @@ function renderProducts() {
     }
 
     var html = "";
+    var lowThreshold = adminSettings.lowStockThreshold || 20;
     filtered.forEach(function(p) {
         var inactive = p.active === false;
-        var low = (!inactive) && (p.stock || 0) < 20;
+        var low = (!inactive) && (p.stock || 0) < lowThreshold && (p.stock || 0) > 0;
+        var out = (!inactive) && (p.stock || 0) <= 0;
         var img = adminProductImage(p);
         var imgHtml = img
             ? '<img class="admin-product-img" src="' + img + '" alt="' + (p.name || "") + '" onerror="this.style.display=\'none\'">'
             : '';
+        var stockTag = out ? '<span class="stock-tag out">Out of Stock</span>'
+            : low ? '<span class="stock-tag low" title="Below configured threshold (' + lowThreshold + ')">Low Stock</span>'
+            : "";
 
         html += '<div class="admin-product-card' + (inactive ? " inactive" : "") + '">' +
             '<div class="admin-product-photo">' +
@@ -413,7 +444,7 @@ function renderProducts() {
                 '</div>' +
             '</div>' +
             '<div class="admin-product-info">' +
-                '<div class="admin-product-name">' + (p.name || "Product") + '</div>' +
+                '<div class="admin-product-name">' + (p.name || "Product") + ' ' + stockTag + '</div>' +
                 '<div class="admin-product-meta">' + (p.category || "") + ' â€¢ â‚¹' + (p.price || 0) + ' / ' + (p.unit || "") + '</div>' +
                 '<div class="admin-product-meta">â­ ' + (p.rating || 0).toFixed(1) + ' (' + (p.ratingCount || 0) + ' ratings)</div>' +
                 '<div class="price-row">' +
@@ -426,7 +457,7 @@ function renderProducts() {
                     '<button class="row-btn" onclick="cancelPriceEdit(\'' + p._id + '\')">Cancel</button>' +
                 '</div>' +
                 '<div class="stock-row">' +
-                    '<span class="stock-label' + (low ? " low" : "") + '">Stock: ' + (p.stock || 0) + '</span>' +
+                    '<span class="stock-label' + (low || out ? " low" : "") + '">Stock: ' + (p.stock || 0) + '</span>' +
                     '<input type="number" class="stock-input" min="0" value="' + (p.stock || 0) + '" onchange="quickStock(\'' + p._id + '\', this.value)" title="Update stock">' +
                 '</div>' +
             '</div>' +
@@ -838,6 +869,82 @@ if (typeof showToast === "undefined") {
     function showToast(msg, type) {
         alert(msg);
     }
+}
+
+// ===============================
+// SETTINGS TAB (delivery + low-stock config)
+// ===============================
+
+function renderSettingsTab() {
+    var section = document.getElementById("adminSettingsBody");
+    if (!section) return;
+
+    loadAdminSettings().then(function(s) {
+        section.innerHTML =
+            '<div class="settings-card">' +
+                '<div class="settings-head"><h3>⚙️ Delivery Charge</h3><p>Customise what customers pay for delivery. The server enforces these amounts on every order — they are never taken from client-side values.</p></div>' +
+                '<div class="settings-row">' +
+                    '<label for="setDeliveryCharge">Delivery Charge (₹)</label>' +
+                    '<input type="number" id="setDeliveryCharge" class="stock-input" min="0" step="1" value="' + s.deliveryCharge + '">' +
+                '</div>' +
+                '<div class="settings-row">' +
+                    '<label for="setFreeThreshold">Free-Delivery Threshold (₹)</label>' +
+                    '<input type="number" id="setFreeThreshold" class="stock-input" min="0" step="1" value="' + s.freeDeliveryThreshold + '">' +
+                '</div>' +
+                '<div class="settings-row">' +
+                    '<label for="setLowStock">Low-Stock Warning Threshold (units)</label>' +
+                    '<input type="number" id="setLowStock" class="stock-input" min="1" step="1" value="' + s.lowStockThreshold + '">' +
+                '</div>' +
+                '<p class="settings-hint">Customers automatically get FREE delivery on orders at or above the threshold. Setting the charge to 0 disables delivery fees; setting the threshold to 0 always charges.</p>' +
+                '<button class="row-btn verify settings-save" onclick="saveAdminSettings()">💾 Save Settings</button>' +
+                '<div class="settings-status" id="settingsStatus" style="display:none;"></div>' +
+            '</div>';
+    }).catch(function() {
+        section.innerHTML = '<p style="color:#e74c3c;padding:30px;">Could not load settings. Are you logged in as admin?</p>';
+    });
+}
+
+function saveAdminSettings() {
+    var status = document.getElementById("settingsStatus");
+    var deliveryCharge = parseFloat(document.getElementById("setDeliveryCharge").value);
+    var freeThreshold = parseFloat(document.getElementById("setFreeThreshold").value);
+    var lowStock = parseInt(document.getElementById("setLowStock").value, 10);
+
+    if (isNaN(deliveryCharge) || deliveryCharge < 0) {
+        showToast("Please enter a valid delivery charge.", "error");
+        return;
+    }
+    if (isNaN(freeThreshold) || freeThreshold < 0) {
+        showToast("Please enter a valid free-delivery threshold.", "error");
+        return;
+    }
+    if (isNaN(lowStock) || lowStock < 1) {
+        showToast("Low-stock threshold must be at least 1.", "error");
+        return;
+    }
+    if (typeof apiUpdateSettings !== "function") {
+        showToast("Settings API unavailable.", "error");
+        return;
+    }
+
+    apiUpdateSettings({
+        deliveryCharge: deliveryCharge,
+        freeDeliveryThreshold: freeThreshold,
+        lowStockThreshold: lowStock
+    }).then(function(saved) {
+        adminSettingsLoaded = false;
+        loadAdminSettings().then(function() {
+            if (status) {
+                status.style.display = "block";
+                status.className = "settings-status ok";
+                status.innerHTML = "✅ Settings saved. Delivery fee ₹" + adminSettings.deliveryCharge + " (free above ₹" + adminSettings.freeDeliveryThreshold + "), low-stock warning at " + adminSettings.lowStockThreshold + " units.";
+                setTimeout(function() { status.style.display = "none"; }, 5000);
+            }
+            showToast("Settings saved successfully.", "success");
+        });
+    }).catch(function(err) {
+        showToast((err && err.message) ? err.message : "Could not save settings.", "error");
+    });
 }
 
 document.addEventListener("DOMContentLoaded", initAdminPage);

@@ -139,6 +139,48 @@ function saveOrderLocally(order) {
     });
 }
 
+// ---------- SETTINGS (delivery policy + config) ----------
+
+// Public read-only delivery policy (safe values only — customers can never edit).
+function fetchShippingSettings() {
+    return fetch(API.base + "/settings/shipping", { headers: { "Content-Type": "application/json" } })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed to load delivery settings");
+            return data.data;
+        })
+        .catch(function() {
+            // Offline fallback: keep the historical defaults (fewer surprises on the checkout page).
+            return { deliveryCharge: 20, freeDeliveryThreshold: 500 };
+        });
+}
+
+// Admin: read the full settings (delivery + low-stock threshold)
+function apiGetSettings() {
+    return fetch(API.base + "/settings", {
+        headers: getAuthHeaders()
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed to load settings");
+            return data.data;
+        });
+}
+
+// Admin: update the settings (server-validated)
+function apiUpdateSettings(data) {
+    return fetch(API.base + "/settings", {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data)
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(res) {
+            if (!res.success) throw new Error(res.message || "Failed to update settings");
+            return res.data;
+        });
+}
+
 // ---------- AUTH ----------
 function apiSignup(user) {
     return fetch(API.base + "/users/signup", {
