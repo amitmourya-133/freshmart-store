@@ -294,7 +294,7 @@ function loadDashboardRange() {
 function payBadge(order) {
     var s = order.paymentStatus || (order.paid ? "PAID" : "PENDING");
     var map = {
-        PAID: ["Paid âœ“", "#27ae60"],
+        PAID: ["Paid &#10003;", "#27ae60"],
         PENDING: ["Payment pending", "#f39c12"],
         FAILED: ["Payment failed", "#e74c3c"],
         CANCELLED: ["Not charged", "#7f8c8d"],
@@ -771,6 +771,22 @@ function saveProduct(event) {
 // CUSTOMERS TAB
 // ===============================
 
+// Clean inline icons for the Registered Customers UI (ASCII-only SVG, no emoji)
+var _icOrders = '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" focusable="false" aria-hidden="true"><path d="M19 3h-4.18C14.4 1.84 13.3 1 12 1s-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm2 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>';
+var _icEye = '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" focusable="false" aria-hidden="true"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>';
+var _icUsers = '<svg viewBox="0 0 24 24" width="56" height="56" fill="currentColor" focusable="false" aria-hidden="true"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>';
+var _icBox = '<svg viewBox="0 0 24 24" width="56" height="56" fill="currentColor" focusable="false" aria-hidden="true"><path d="M20 8h-3V4H3c-1.1 0-2 .9-2 2v11h2c0 1.66 1.34 3 3 3s3-1.34 3-3h6c0 1.66 1.34 3 3 3s3-1.34 3-3h2v-5l-3-4zM6 18.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm13.5-9l1.96 2.5H17V9.5h2.5zm-1.5 9c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>';
+var _icWarn = '<svg viewBox="0 0 24 24" width="56" height="56" fill="currentColor" focusable="false" aria-hidden="true"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>';
+
+function esc(s) {
+    return String(s == null ? "" : s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
 function loadAdminCustomers() {
     var container = document.getElementById("adminCustomersList");
     if (!container) return;
@@ -795,7 +811,7 @@ function renderCustomers() {
     if (!container) return;
 
     if (!adminCustomers || adminCustomers.length === 0) {
-        container.innerHTML = '<div class="cart-empty"><div class="cart-empty-icon">ðŸ‘¥</div><h3>No customers yet</h3><p>Registered users will appear here.</p></div>';
+        container.innerHTML = '<div class="cart-empty"><div class="cart-empty-icon">' + _icUsers + '</div><h3>No customers yet</h3><p>Registered users will appear here.</p></div>';
         return;
     }
 
@@ -808,13 +824,18 @@ function renderCustomers() {
         var roleBadge = (u.role === "admin" || u.isAdmin)
             ? '<span class="role-badge admin">Admin</span>'
             : '<span class="role-badge">Customer</span>';
-        var orderCount = (u.orderCount !== undefined) ? u.orderCount : "â€”";
-        var viewBtn = '<button class="row-btn edit" onclick="openCustomerOrders(\'' + u._id + '\')" title="View customer order history">ðŸ‘ï¸ Orders</button>';
+        var orderCount = (u.orderCount !== undefined) ? u.orderCount : "N/A";
+        var viewBtn = '<button type="button" class="row-btn edit" onclick="openCustomerOrders(\'' + u._id + '\')" title="View customer order history">' + _icOrders + ' Orders</button>';
         return '<div class="admin-customer-row">' +
-            '<div class="admin-customer-main"><strong>' + (u.name || "â€”") + '</strong>' + roleBadge +
-                '<div>' + (u.email || "") + (u.phone ? " â€¢ " + u.phone : "") + '</div>' +
-                '<div class="admin-customer-meta">Orders placed: ' + orderCount + '</div>' +
-                '<div class="admin-customer-meta">' + viewBtn + '</div></div>' +
+            '<div class="admin-customer-main">' +
+                '<div class="admin-customer-title"><strong>' + esc(u.name || "N/A") + '</strong>' + roleBadge + '</div>' +
+                '<div class="admin-customer-contact">' +
+                    '<span class="email">' + esc(u.email) + '</span>' +
+                    (u.phone ? '<span class="admin-cust-sep"></span><span class="phone">' + esc(u.phone) + '</span>' : '') +
+                '</div>' +
+                '<div class="admin-customer-orders">Orders placed: ' + orderCount + '</div>' +
+                '<div class="admin-customer-action">' + viewBtn + '</div>' +
+            '</div>' +
             '<div class="admin-customer-date">' + joined + '</div>' +
         '</div>';
     }).join("");
@@ -831,36 +852,35 @@ function openCustomerOrders(userId) {
     var modal = document.getElementById("customerOrdersModal");
     var body = document.getElementById("customerOrdersBody");
     var c = adminCustomers.find(function(u) { return u._id === userId; });
-    document.getElementById("customerOrdersTitle").innerText = "Orders â€” " + ((c && c.name) || "Customer");
+    document.getElementById("customerOrdersTitle").innerText = "Orders for " + ((c && c.name) || "Customer");
     if (modal) modal.style.display = "flex";
     if (body) body.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:30px;">Loading orders...</p>';
     fetchAdminCustomerOrders(userId)
         .then(function(res) {
             var orders = res.data || [];
-            var customers = res.user;
             if (!orders.length) {
-                body.innerHTML = '<div class="cart-empty"><div class="cart-empty-icon">ðŸ“¦</div><h3>No orders yet</h3><p>This customer has not placed any orders.</p></div>';
+                body.innerHTML = '<div class="cart-empty"><div class="cart-empty-icon">' + _icBox + '</div><h3>No orders yet</h3><p>This customer has not placed any orders.</p></div>';
                 return;
             }
             var rows = orders.map(function(o) {
                 var items = (o.items || []).map(function(it) {
-                    return '<span>' + (it.name || "Item") + ' Ã— ' + (it.quantity || 1) + ' â€” â‚¹' + ((it.price || 0) * (it.quantity || 1)) + '</span>';
+                    return '<span>' + esc(it.name || "Item") + ' &times; ' + (it.quantity || 1) + ' &mdash; &#8377;' + ((it.price || 0) * (it.quantity || 1)) + '</span>';
                 }).join("");
                 var statusColor = "#27ae60";
                 if (o.status === "Cancelled") statusColor = "#e74c3c";
                 else if (["Preparing", "Out for Delivery", "Confirmed"].indexOf(o.status) !== -1) statusColor = "#f39c12";
                 return '<div class="admin-order-card">' +
                     '<div class="admin-order-head">' +
-                        '<div><strong>#' + (o.orderNumber || o._id || "N/A") + '</strong>' +
+                        '<div><strong>#' + esc(o.orderNumber || o._id || "N/A") + '</strong>' +
                         '<span class="admin-order-date">' + orderDate(o) + '</span></div>' +
-                        '<span class="order-status-badge" style="background:' + statusColor + ';">' + (o.status || "Placed") + '</span>' +
+                        '<span class="order-status-badge" style="background:' + statusColor + ';">' + esc(o.status || "Placed") + '</span>' +
                     '</div>' +
                     payBadge(o) +
                     '<div class="admin-order-items">' + items + '</div>' +
                     '<div class="admin-order-foot">' +
-                        '<div class="admin-order-total">Total: <strong>â‚¹' + (o.total || 0) + '</strong></div>' +
+                        '<div class="admin-order-total">Total: <strong>&#8377;' + (o.total || 0) + '</strong></div>' +
                         '<div class="admin-order-actions">' +
-                            '<button class="row-btn edit" onclick="viewCustomerOrderDetails(\'' + o._id + '\')" title="View details">ðŸ‘ï¸ View</button>' +
+                            '<button type="button" class="row-btn edit" onclick="viewCustomerOrderDetails(\'' + o._id + '\')" title="View details">' + _icEye + ' View</button>' +
                         '</div>' +
                     '</div>' +
                 '</div>';
@@ -868,8 +888,8 @@ function openCustomerOrders(userId) {
             body.innerHTML = rows;
         })
         .catch(function(err) {
-            body.innerHTML = '<div class="cart-empty"><div class="cart-empty-icon">âš ï¸</div><h3>Failed to load</h3><p>' +
-                (err.message || "Could not load customer orders.") + '</p></div>';
+            body.innerHTML = '<div class="cart-empty"><div class="cart-empty-icon">' + _icWarn + '</div><h3>Failed to load</h3><p>' +
+                esc(err.message) + '</p></div>';
         });
 }
 
