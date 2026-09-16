@@ -4,6 +4,50 @@
     {
       "source": "/api/(.*)",
       "destination": "/api/index"
+    },
+    {
+      "source": "/server.js",
+      "destination": "/__freshmart_blocked__"
+    },
+    {
+      "source": "/app.js",
+      "destination": "/__freshmart_blocked__"
+    },
+    {
+      "source": "/seed.js",
+      "destination": "/__freshmart_blocked__"
+    },
+    {
+      "source": "/seedAdmin.js",
+      "destination": "/__freshmart_blocked__"
+    },
+    {
+      "source": "/testAdmin.js",
+      "destination": "/__freshmart_blocked__"
+    },
+    {
+      "source": "/controllers/:path*",
+      "destination": "/__freshmart_blocked__"
+    },
+    {
+      "source": "/models/:path*",
+      "destination": "/__freshmart_blocked__"
+    },
+    {
+      "source": "/routes/:path*",
+      "destination": "/__freshmart_blocked__"
+    },
+    {
+      "source": "/utils/:path*",
+      "destination": "/__freshmart_blocked__"
+    },
+    {
+      "source": "/middleware/:path*",
+      "destination": "/__freshmart_blocked__"
+    },
+    {
+      "source": "/(FRESHMART_TASK[0-9]_REPORT.md)",
+      "destination": "/__freshmart_blocked__"
     }
   ]
 }
