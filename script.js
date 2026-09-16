@@ -413,9 +413,9 @@ function updateAuthHeader() {
             : "";
         var nameBtnOnclick = isAdminUser ? "window.location.href='admin.html'" : "";
         area.innerHTML = adminBtn +
-            '<button type="button" class="secondary-btn" onclick="window.location.href=\'help.html\'" title="Contact FreshMart Support">🆘 Help Center</button>' +
+            '<button type="button" class="secondary-btn hide-on-mobile-nav" onclick="window.location.href=\'help.html\'" title="Contact FreshMart Support">🆘 Help Center</button>' +
             '<button type="button" class="secondary-btn auth-name-btn" title="' + safeName + '"' + (nameBtnOnclick ? ' onclick="' + nameBtnOnclick + '"' : '') + '>👤 ' + safeName + '</button>' +
-            '<button type="button" class="secondary-btn" onclick="handleLogout()">Logout</button>';
+            '<button type="button" class="secondary-btn hide-on-mobile-nav" onclick="handleLogout()">Logout</button>';
     } else {
         area.innerHTML = '<button type="button" class="secondary-btn" onclick="window.location.href=\'signup.html\'">Create Account</button>' +
             '<button type="button" class="secondary-btn" onclick="window.location.href=\'login.html\'">Login</button>';
@@ -690,7 +690,7 @@ document.addEventListener("click", function (e) {
 });
 
 // ===============================
-// MOBILE BOTTOM NAVIGATION (Home / Categories / Mall / Video Finds / My Orders)
+// MOBILE BOTTOM NAVIGATION (Home / Categories / Help Center / Wishlist / Logout)
 // ===============================
 
 function initBottomNav() {
@@ -702,11 +702,11 @@ function initBottomNav() {
     if (storePages.indexOf(page) === -1) return;
 
     var items = [
-        { id: "home", label: "Home", icon: "🏠", active: page !== "orders" },
+        { id: "home", label: "Home", icon: "🏠", active: page !== "help" },
         { id: "categories", label: "Categories", icon: "🧺", active: false },
-        { id: "mall", label: "Mall", icon: "🏪", active: false },
-        { id: "video", label: "Video Finds", icon: "🎬", active: false },
-        { id: "orders", label: "My Orders", icon: "📦", active: page === "orders" }
+        { id: "help", label: "Help Center", icon: "❓", active: page === "help" },
+        { id: "wishlist", label: "Wishlist", icon: "❤️", active: false },
+        { id: "logout", label: "Logout", icon: "🚪", active: false }
     ];
 
     var nav = document.createElement("nav");
@@ -742,13 +742,17 @@ function handleBottomNavClick(id) {
     } else if (id === "categories") {
         if (page === "home") goSection("categories");
         else window.location.href = "index.html#categories";
-    } else if (id === "mall") {
-        showToast("Mall coming soon — stay tuned!", "info");
-    } else if (id === "video") {
-        showToast("Video Finds coming soon!", "info");
-    } else if (id === "orders") {
-        if (page !== "orders") window.location.href = "orders.html";
+    } else if (id === "help") {
+        if (page !== "help") window.location.href = "help.html";
         else window.scrollTo({ top: 0, behavior: "smooth" });
+    } else if (id === "wishlist") {
+        if (page === "home" && document.getElementById("wishlistModal")) {
+            toggleWishlistPage();
+        } else {
+            window.location.href = "index.html#wishlist";
+        }
+    } else if (id === "logout") {
+        handleLogout();
     }
 }
 
@@ -2506,6 +2510,11 @@ function initializePage() {
         // Bottom-nav "Categories" from another page lands here with #categories.
         if (page === "home" && window.location.hash === "#categories") {
             setTimeout(function() { goSection("categories"); }, 150);
+        }
+
+        // Bottom-nav "Wishlist" from another page lands here with #wishlist.
+        if (page === "home" && window.location.hash === "#wishlist") {
+            setTimeout(function() { toggleWishlistPage(); }, 200);
         }
     });
 
