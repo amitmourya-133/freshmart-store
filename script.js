@@ -766,12 +766,10 @@ function productCardHTML(index) {
     var r = getProductRating(product.name);
     var inCart = cart.find(function(c) { return c.name === product.name; });
     var qty = inCart ? inCart.quantity : 0;
-    var wishClass = isWishlisted(product.name) ? "wishlist-active" : "";
     var safeName = product.name.replace(/'/g, "\\'");
 
     return '<div class="product" data-category="' + product.category + '" onclick="openProductDetail(' + index + ')">' +
-        '<button type="button" class="wishlist-heart ' + wishClass + '" data-name="' + product.name.replace(/"/g, "&quot;") + '" onclick="event.stopPropagation(); toggleWishlist(\'' + safeName + '\')">♥</button>' +
-        '<button type="button" class="whatsapp-share-btn product-share" title="Share on WhatsApp" onclick="event.stopPropagation(); shareOnWhatsApp(\'' + safeName + '\',' + product.price + ',\'' + product.unit + '\',' + index + ')">Share</button>' +
+        '<button type="button" class="card-menu-btn" aria-label="More options" onclick="event.stopPropagation(); openCardActionsMenu(this,\'' + safeName + '\',' + product.price + ',\'' + product.unit + '\',' + index + ')">⋮</button>' +
         '<div class="product-image" style="' + imageStyle(product.name, product.gradient) + '">' + productImgHTML(product.name) + '</div>' +
         '<h3>' + product.name + '</h3>' +
         starHTML(r.rating) +
@@ -1190,6 +1188,76 @@ function shareOnWhatsApp(name, price, unit, id) {
                "Yahan se order karo: " + getStoreUrl() + "/product-detail.html?id=" + id;
     var url = "https://wa.me/?text=" + encodeURIComponent(text);
     window.open(url, "_blank");
+}
+
+// ===============================
+// PRODUCT CARD ACTIONS MENU (⋮ : Share + Wishlist)
+// ===============================
+
+var cardActionsMenuEl = null;
+
+function buildCardActionsMenu() {
+    var menu = document.createElement("div");
+    menu.className = "card-actions-menu";
+    menu.innerHTML =
+        '<button type="button" class="card-action-item" data-action="share"><span class="card-action-icon">📤</span><span class="card-action-label">Share</span></button>' +
+        '<button type="button" class="card-action-item" data-action="wishlist"><span class="card-action-icon">❤️</span><span class="card-action-label"></span></button>';
+    document.body.appendChild(menu);
+    cardActionsMenuEl = menu;
+
+    menu.addEventListener("click", function(e) {
+        var item = e.target.closest(".card-action-item");
+        if (!item || !cardActionsMenuEl) return;
+        var action = item.getAttribute("data-action");
+        var name = cardActionsMenuEl.getAttribute("data-name");
+        var price = parseFloat(cardActionsMenuEl.getAttribute("data-price"));
+        var unit = cardActionsMenuEl.getAttribute("data-unit");
+        var id = parseInt(cardActionsMenuEl.getAttribute("data-id"), 10);
+        closeCardActionsMenu();
+        if (action === "share") {
+            shareOnWhatsApp(name, price, unit, id);
+        } else if (action === "wishlist") {
+            toggleWishlist(name);
+        }
+    });
+
+    document.addEventListener("click", function(e) {
+        if (!cardActionsMenuEl || !cardActionsMenuEl.classList.contains("open")) return;
+        if (e.target.closest(".card-actions-menu") || e.target.closest(".card-menu-btn")) return;
+        closeCardActionsMenu();
+    });
+    window.addEventListener("scroll", closeCardActionsMenu, { passive: true });
+    window.addEventListener("resize", closeCardActionsMenu);
+    return menu;
+}
+
+function openCardActionsMenu(btn, name, price, unit, id) {
+    var menu = cardActionsMenuEl || buildCardActionsMenu();
+    var wishLabel = menu.querySelector('[data-action="wishlist"] .card-action-label');
+    if (wishLabel) wishLabel.textContent = isWishlisted(name) ? "Remove from Wishlist" : "Add to Wishlist";
+    menu.setAttribute("data-name", name);
+    menu.setAttribute("data-price", String(price));
+    menu.setAttribute("data-unit", unit);
+    menu.setAttribute("data-id", String(id));
+
+    var rect = btn.getBoundingClientRect();
+    menu.classList.add("open");
+    var menuW = menu.offsetWidth || 160;
+    var menuH = menu.offsetHeight || 96;
+    var vw = window.innerWidth;
+    var vh = window.innerHeight;
+    var left = rect.right - menuW;
+    var top = rect.bottom + 6;
+    if (left < 8) left = 8;
+    if (left + menuW > vw - 8) left = vw - menuW - 8;
+    if (top + menuH > vh - 8) top = rect.top - menuH - 6;
+    if (top < 8) top = 8;
+    menu.style.left = left + "px";
+    menu.style.top = top + "px";
+}
+
+function closeCardActionsMenu() {
+    if (cardActionsMenuEl) cardActionsMenuEl.classList.remove("open");
 }
 
 // ===============================

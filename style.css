@@ -1781,6 +1781,114 @@ body.dark-mode .skeleton-text {
     opacity: 1;
 }
 
+/* ---------- PRODUCT CARD ACTIONS MENU ---------- */
+.card-menu-btn {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 34px;
+    height: 34px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.92);
+    color: #556;
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    transition: all 0.25s;
+}
+
+.card-menu-btn:hover {
+    background: #fff;
+    color: #333;
+}
+
+.card-actions-menu {
+    display: none;
+    position: fixed;
+    z-index: 1200;
+    min-width: 168px;
+    background: #fff;
+    border: 1px solid rgba(0,0,0,0.08);
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+    padding: 6px;
+}
+
+.card-actions-menu.open {
+    display: block;
+    animation: cardMenuFade 0.15s ease;
+}
+
+@keyframes cardMenuFade {
+    from { opacity: 0; transform: translateY(-2px); }
+    to   { opacity: 1; transform: none; }
+}
+
+.card-action-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 12px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: #333;
+    font-size: 14px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.card-action-item:hover {
+    background: #f2f7f4;
+}
+
+.card-action-icon {
+    flex-shrink: 0;
+    font-size: 15px;
+    width: 22px;
+    text-align: center;
+}
+
+.card-action-label {
+    flex: 1;
+    min-width: 0;
+}
+
+body.dark-mode .card-menu-btn {
+    background: rgba(30,40,35,0.92);
+    color: #aab;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+
+body.dark-mode .card-menu-btn:hover {
+    background: #2a3a30;
+    color: #dde;
+}
+
+body.dark-mode .card-actions-menu {
+    background: var(--bg-secondary);
+    border-color: var(--border-color);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+}
+
+body.dark-mode .card-action-item {
+    color: var(--text-primary);
+}
+
+body.dark-mode .card-action-item:hover {
+    background: var(--bg-tertiary);
+}
+
 .wishlist-btn-header {
     position: relative;
 }
