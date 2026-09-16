@@ -2551,6 +2551,33 @@ body.dark-mode .review-form h4 { color: var(--text-primary); }
     border-bottom-color: var(--green-primary);
 }
 
+.admin-tabs-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.admin-tabs-actions button {
+    height: 40px;
+    padding: 0 16px;
+    font-size: 13px;
+    font-weight: bold;
+    border-radius: var(--radius-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+}
+
+.admin-tabs-actions .dark-mode-toggle {
+    padding: 0;
+    width: 40px;
+    font-size: 18px;
+    border: 2px solid var(--border-color);
+    background: none;
+}
+
 .admin-section-head {
     display: flex;
     align-items: center;
@@ -3134,6 +3161,12 @@ body.dark-mode .review-form h4 { color: var(--text-primary); }
     .admin-products-grid { grid-template-columns: 1fr; }
     .admin-order-foot { flex-direction: column; align-items: flex-start; gap: 10px; }
     .admin-tabs { flex-direction: column; }
+    .admin-tabs-actions {
+        width: 100%;
+        margin-left: 0;
+        padding: 12px 0 16px;
+        border-top: 1px solid var(--border-color);
+    }
     .filter-row { gap: 14px; padding: 12px; }
 }
 
