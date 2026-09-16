@@ -167,10 +167,60 @@ function i18n(key) {
 var voiceRecognition = null;
 var voiceListening = false;
 
+// Natural-language phrases stripped from the front of a spoken query so
+// only the product name is passed to the existing search system.
+var VOICE_COMMAND_PREFIXES = [
+    "i would like to buy", "could you show me", "can you show me",
+    "please show me", "i want to buy", "please search for",
+    "please find me", "search for", "show me", "please find",
+    "please search", "can i get", "look for", "i would like",
+    "i want", "find me", "get me", "give me", "i need",
+    "search", "find", "show", "buy", "purchase", "order", "to buy"
+].sort(function(a, b) { return b.length - a.length; });
+
+var VOICE_FILLER_PHRASES = ["please", "now", "thanks", "thank you", "okay", "ok", "show", "find", "search", "buy", "purchase", "order", "get", "give", "want", "need", "please show me", "show me", "find me", "please find", "search for", "look for", "i want", "i need"];
+
+var SING_EXCEPTIONS = { chillies: "chilli", chillis: "chilli" };
+
+function singularizeWord(w) {
+    if (SING_EXCEPTIONS[w]) return SING_EXCEPTIONS[w];
+    if (w.length <= 3) return w;
+    if (/ies$/.test(w) && w.length > 4) return w.slice(0, -3) + "y";
+    if (/oes$/.test(w) && w.length > 3) return w.slice(0, -2);
+    if (/s$/.test(w) && w.length > 3 && !/ss$/.test(w) && !/se$/.test(w) && !/us$/.test(w) && !/is$/.test(w)) return w.slice(0, -1);
+    return w;
+}
+
+function parseVoiceQuery(raw) {
+    var q = String(raw || "").toLowerCase().trim();
+    q = q.replace(/[^a-z0-9\s'-]/g, " ").replace(/\s+/g, " ").trim();
+    if (!q) return "";
+
+    var stable = false;
+    var passes = 0;
+    while (!stable && passes < 4) {
+        stable = true;
+        passes++;
+        for (var i = 0; i < VOICE_COMMAND_PREFIXES.length; i++) {
+            var p = VOICE_COMMAND_PREFIXES[i];
+            if (q === p || q.indexOf(p + " ") === 0) {
+                q = q.slice(p.length).trim();
+                stable = false;
+                break;
+            }
+        }
+    }
+    q = q.replace(/^(the|a|an|some)\s+/, "").replace(/\s+(please|now|thanks|thank you)$/, "").trim();
+    if (!q || VOICE_FILLER_PHRASES.indexOf(q) !== -1) return "";
+
+    var words = q.split(" ").filter(Boolean);
+    return words.map(singularizeWord).join(" ");
+}
+
 function startVoiceSearch() {
     var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-        showToast("Voice search not supported in this browser. Try Chrome.", "error");
+        showToast("Voice search is not supported in this browser.", "error");
         return;
     }
 
@@ -182,22 +232,35 @@ function startVoiceSearch() {
 
     if (!voiceRecognition) {
         voiceRecognition = new SpeechRecognition();
-        voiceRecognition.lang = currentLang === "hi" ? "hi-IN" : "en-IN";
+        voiceRecognition.lang = "en-IN";
         voiceRecognition.interimResults = false;
         voiceRecognition.maxAlternatives = 1;
+        voiceRecognition.continuous = false;
 
         voiceRecognition.onresult = function(event) {
-            var transcript = event.results[0][0].transcript;
+            var transcript = event.results[0][0].transcript || "";
+            var query = parseVoiceQuery(transcript);
+            stopVoiceSearch();
+            if (!query) {
+                showToast("Sorry, I didn't catch a product name. Please try again.", "error");
+                return;
+            }
             var searchInput = document.getElementById("searchInput");
             if (searchInput) {
-                searchInput.value = transcript;
+                searchInput.value = query;
                 searchProducts();
             }
-            stopVoiceSearch();
+            showToast("Searching: " + query, "success");
         };
 
         voiceRecognition.onerror = function(event) {
-            showToast("Voice not recognized. Please try again.", "error");
+            if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+                showToast("Microphone access denied. Please allow microphone access and try again.", "error");
+            } else if (event.error === "no-speech" || event.error === "audio-capture") {
+                showToast("No speech detected. Please try again.", "error");
+            } else {
+                showToast("Voice search error. Please try again.", "error");
+            }
             stopVoiceSearch();
         };
 
@@ -206,16 +269,19 @@ function startVoiceSearch() {
         };
     }
 
+    // Language selector was removed, so voice always recognizes English.
+    voiceRecognition.lang = "en-IN";
     try {
-        voiceRecognition.lang = currentLang === "hi" ? "hi-IN" : "en-IN";
         voiceRecognition.start();
         voiceListening = true;
         if (btn) {
             btn.classList.add("listening");
-            btn.innerHTML = "🔴";
+            btn.setAttribute("aria-pressed", "true");
         }
-        showToast("Listening... speak now", "success");
-    } catch (e) {}
+        showToast("Listening... speak now", "info");
+    } catch (e) {
+        stopVoiceSearch();
+    }
 }
 
 function stopVoiceSearch() {
@@ -223,7 +289,7 @@ function stopVoiceSearch() {
     var btn = document.getElementById("voiceSearchBtn");
     if (btn) {
         btn.classList.remove("listening");
-        btn.innerHTML = "Voice";
+        btn.setAttribute("aria-pressed", "false");
     }
     if (voiceRecognition) {
         try { voiceRecognition.stop(); } catch (e) {}

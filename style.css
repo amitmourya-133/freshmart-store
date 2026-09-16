@@ -228,6 +228,54 @@ header {
     background: var(--green-dark);
 }
 
+.search-box button.voice-btn {
+    background: var(--bg-primary);
+    color: var(--green-primary);
+    border: none;
+    border-left: 1px solid var(--border-color);
+    border-radius: 0;
+    padding: 0 12px;
+    min-width: 46px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.search-box button.voice-btn:hover {
+    background: rgba(21, 148, 71, 0.08);
+    color: var(--green-dark);
+}
+.search-box button.voice-btn:focus-visible {
+    outline: 2px solid var(--green-primary);
+    outline-offset: -2px;
+}
+.search-box button.voice-btn:active {
+    transform: scale(0.95);
+}
+.search-box button.voice-btn.listening {
+    background: var(--green-primary);
+    color: #fff;
+    animation: voice-pulse 1.2s ease-in-out infinite;
+}
+.search-box button.voice-btn svg {
+    width: 18px;
+    height: 18px;
+    fill: currentColor;
+    display: block;
+}
+@keyframes voice-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(21, 148, 71, 0.45); }
+    50% { box-shadow: 0 0 0 7px rgba(21, 148, 71, 0); }
+}
+body.dark-mode .search-box button.voice-btn {
+    background: var(--bg-tertiary);
+    color: var(--green-primary);
+    border-left-color: var(--border-color);
+}
+body.dark-mode .search-box button.voice-btn.listening {
+    background: var(--green-primary);
+    color: #fff;
+}
+
 .cart-btn {
     background: var(--green-primary);
     color: white;
@@ -322,30 +370,12 @@ header {
 
 header .secondary-btn,
 header .cart-btn,
-header .dark-mode-toggle,
-header .lang-toggle {
+header .dark-mode-toggle {
     height: 46px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     white-space: nowrap;
-}
-
-.lang-toggle {
-    background: var(--bg-primary);
-    color: var(--green-primary);
-    border: 1px solid #ccefd7;
-    padding: 0 12px;
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    font-weight: bold;
-    font-size: 13px;
-    transition: all var(--transition);
-}
-
-.lang-toggle:hover {
-    background: var(--green-primary);
-    color: white;
 }
 
 /* ---------- HERO ---------- */
@@ -2373,8 +2403,7 @@ body.dark-mode .review-form h4 { color: var(--text-primary); }
 
     header .secondary-btn,
     header .cart-btn,
-    header .dark-mode-toggle,
-    header .lang-toggle {
+    header .dark-mode-toggle {
         height: 42px;
         padding: 0 12px;
         font-size: 13px;

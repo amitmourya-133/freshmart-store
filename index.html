@@ -29,13 +29,17 @@
         </nav>
         <div class="search-box">
             <input type="text" id="searchInput" placeholder="Search vegetables, fruits, grocery..." oninput="searchProducts()">
-            <button type="button" id="voiceSearchBtn" onclick="startVoiceSearch()" title="Voice Search">Voice</button>
+            <button type="button" id="voiceSearchBtn" class="voice-btn" onclick="startVoiceSearch()" aria-label="Voice Search" title="Voice Search" aria-pressed="false">
+                <svg viewBox="0 0 24 24" width="18" height="18" focusable="false" aria-hidden="true">
+                    <path d="M12 14c1.66 0 3-1.34 3-3V6c0-1.66-1.34-3-3-3S9 4.34 9 6v5c0 1.66 1.34 3 3 3z"></path>
+                    <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21H8v2h8v-2h-3v-3.08c3.39-.49 6-3.39 6-6.92h-2z"></path>
+                </svg>
+            </button>
             <button type="button" onclick="searchProducts()">Search</button>
         </div>
     </div>
 
     <div class="header-actions">
-        <button type="button" class="lang-toggle" id="langToggle" onclick="toggleLanguage(this)" title="Switch language">हिं EN</button>
         <button type="button" class="secondary-btn" onclick="window.location.href='orders.html'">My Orders</button>
         <div class="auth-area" id="authArea"></div>
         <button type="button" class="secondary-btn wishlist-btn-header hide-on-mobile-nav" onclick="toggleWishlistPage()">Wishlist <span id="wishlistCount">0</span></button>
@@ -229,6 +233,7 @@
 
     <script src="./api.js"></script>
     <script src="./script.js"></script>
+    <script src="./features.js"></script>
 
 </body>
 </html>
