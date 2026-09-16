@@ -85,12 +85,15 @@ function submitOrder(order) {
         });
 }
 
-// Get server-validated totals for the payment amount (no order is created)
-function getOrderQuote(items) {
+// Get server-validated totals for the payment amount (no order is created).
+// couponCode is optional; when present the server recomputes the discount.
+function getOrderQuote(items, couponCode) {
+    var body = { items: items };
+    if (couponCode) body.couponCode = couponCode;
     return fetch(API.base + "/orders/quote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items: items })
+        body: JSON.stringify(body)
     })
         .then(function(res) { return res.json(); })
         .then(function(data) {
@@ -707,6 +710,92 @@ function apiDeleteReview(id) {
         .then(function(res) {
             if (!res.success) throw new Error(res.message || "Failed to delete review");
             return res.data;
+        });
+}
+
+// ---------- COUPONS & ADMIN DASHBOARD ----------
+
+// Validate a coupon during checkout (requires login; server computes discount).
+function apiValidateCoupon(code, subtotal) {
+    return fetch(API.base + "/coupons/validate", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ code: code, subtotal: subtotal })
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Coupon validation failed");
+            return data.data;
+        });
+}
+
+// Admin: list all coupons (including usage stats)
+function fetchAdminCoupons() {
+    return fetch(API.base + "/coupons", {
+        headers: getAuthHeaders()
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed to load coupons");
+            return data.data;
+        });
+}
+
+// Admin: create coupon
+function apiCreateCoupon(data) {
+    return fetch(API.base + "/coupons", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data)
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(res) {
+            if (!res.success) throw new Error(res.message || "Failed to create coupon");
+            return res.data;
+        });
+}
+
+// Admin: update coupon
+function apiUpdateCoupon(id, data) {
+    return fetch(API.base + "/coupons/" + encodeURIComponent(id), {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data)
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(res) {
+            if (!res.success) throw new Error(res.message || "Failed to update coupon");
+            return res.data;
+        });
+}
+
+// Admin: delete coupon
+function apiDeleteCoupon(id) {
+    return fetch(API.base + "/coupons/" + encodeURIComponent(id), {
+        method: "DELETE",
+        headers: getAuthHeaders()
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(res) {
+            if (!res.success) throw new Error(res.message || "Failed to delete coupon");
+            return res.data;
+        });
+}
+
+// Admin: sales dashboard analytics
+function fetchAdminDashboard(from, to) {
+    var url = API.base + "/admin/dashboard";
+    var query = [];
+    if (from) query.push("from=" + encodeURIComponent(from));
+    if (to)   query.push("to=" + encodeURIComponent(to));
+    if (query.length) url += "?" + query.join("&");
+    return fetch(url, {
+        headers: getAuthHeaders()
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed to load dashboard");
+            return data.data;
         });
 }
 

@@ -98,4 +98,113 @@ async function sendOtpEmail({ to, otp, purpose }) {
     return sendEmail({ to: to, subject: subject, html: html });
 }
 
-module.exports = { sendOtpEmail, sendEmail };
+// ===============================
+// ORDER NOTIFICATION EMAILS
+// Reuse the same SMTP/Gmail infrastructure as the OTP emails. Never includes
+// OTPs, passwords, tokens or payment secrets. Delivery failures are swallowed
+// and surfaced only as { sent: false } so an email problem never breaks an
+// otherwise successful order.
+// ===============================
+
+function indianDate(d) {
+    try {
+        return new Date(d || Date.now()).toLocaleString("en-IN", {
+            day: "2-digit", month: "short", year: "numeric",
+            hour: "2-digit", minute: "2-digit"
+        });
+    } catch (e) {
+        return "";
+    }
+}
+
+function inr(n) {
+    const v = Number(n) || 0;
+    return "₹" + v.toLocaleString("en-IN");
+}
+
+// Compact, table-free order lines used inside every order email.
+function orderItemsHtml(order) {
+    const items = (order && order.items) || [];
+    if (!items.length) return "<p>No items.</p>";
+    let rows = "";
+    items.forEach(function (i) {
+        const qty = i.quantity || 1;
+        const line = (i.name || "Item") + " × " + qty;
+        rows += '<tr><td style="padding:6px 8px;border-bottom:1px solid #ececec;color:#333;">' + line + '</td>' +
+            '<td style="padding:6px 8px;border-bottom:1px solid #ececec;color:#333;text-align:right;">' + inr((i.price || 0) * qty) + '</td></tr>';
+    });
+    return '<table style="width:100%;border-collapse:collapse;margin:12px 0;">' + rows + '</table>';
+}
+
+// Wrapper: shared email shell (subject + body builder). Returns the sendEmail result.
+async function sendOrderEmail({ to, subject, title, bodyHtml, order }) {
+    const recipient = String((to || "").trim());
+    if (!recipient || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+        return { sent: false, reason: "no_recipient" };
+    }
+    const totals = [
+        ["Subtotal", inr(order.subtotal)],
+        ["Delivery Charge", order.delivery > 0 ? inr(order.delivery) : "FREE"],
+        ["Discount", (order.discount || 0) > 0 ? "− " + inr(order.discount) : "—"],
+        ["Total", inr(order.total)]
+    ];
+    if (order.couponCode) totals.splice(totals.length - 1, 0, ["Coupon", order.couponCode]);
+    let totalsRows = "";
+    totals.forEach(function (row) {
+        totalsRows += '<tr><td style="padding:4px 8px;color:#666;font-size:14px;">' + row[0] + '</td>' +
+            '<td style="padding:4px 8px;color:' + (row[0] === "Total" ? "#0f6e33" : "#333") + ';font-size:' + (row[0] === "Total" ? "17px" : "14px") + ';font-weight:' + (row[0] === "Total" ? "bold" : "normal") + ';text-align:right;">' + row[1] + '</td></tr>';
+    });
+    const ref = order.trackingId || order.orderNumber || "";
+    const html =
+        '<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;padding:24px;border:1px solid #e4e4e4;border-radius:12px;">' +
+        '<h2 style="color:#159447;margin:0 0 4px;">🥬 FreshMart</h2>' +
+        '<p style="color:#333;font-size:15px;font-weight:bold;margin:10px 0 2px;">' + title + '</p>' +
+        '<p style="color:#777;font-size:13px;margin:0 0 12px;">Order ' + (order.orderNumber || "") +
+        (ref ? ' • Tracking: <strong>' + ref + '</strong>' : '') +
+        ' • ' + indianDate(order.createdAt) + '</p>' +
+        '<p style="color:#333;font-size:14px;">Status: <strong>' + (order.status || "Placed") + '</strong> &nbsp;•&nbsp; Payment: ' +
+        (order.payment || "Cash On Delivery") + ' (' + (order.paymentStatus || "PENDING") + ')</p>' +
+        orderItemsHtml(order) +
+        '<table style="width:100%;border-collapse:collapse;">' + totalsRows + '</table>' +
+        bodyHtml +
+        '<p style="color:#999;font-size:12px;margin-top:18px;">Need help? Reply to this email or visit the FreshMart store. Do not share your order reference with strangers.</p>' +
+        '</div>';
+    return sendEmail({ to: recipient, subject: subject, html: html });
+}
+
+// A. Order confirmation (sent after a successful order is persisted).
+async function sendOrderConfirmation({ to, order }) {
+    return sendOrderEmail({
+        to: to,
+        order: order,
+        subject: "Order Confirmed - FreshMart #" + (order.orderNumber || ""),
+        title: "✅ Your order has been confirmed!",
+        bodyHtml: '<p style="color:#333;font-size:14px;">Thank you for shopping with FreshMart. We have received your order and will update its status as it moves towards delivery.</p>'
+    });
+}
+
+// B. General status change notification (Placed/Confirmed/Packing→Preparing/Out for Delivery).
+async function sendOrderStatusUpdate({ to, order, previousStatus }) {
+    return sendOrderEmail({
+        to: to,
+        order: order,
+        subject: "Order " + (order.status || "") + " - FreshMart #" + (order.orderNumber || ""),
+        title: "🚚 Your order status has changed",
+        bodyHtml: '<p style="color:#333;font-size:14px;">Your order status changed from <strong>' + (previousStatus || "") + '</strong> to <strong>' + (order.status || "") + '</strong>.</p>' +
+            '<p style="color:#666;font-size:13px;">You can track the latest status anytime on the FreshMart Orders page and the order tracking section.</p>'
+    });
+}
+
+// C. Dedicated delivery confirmation (sent only once when status becomes Delivered).
+async function sendDeliveryConfirmation({ to, order }) {
+    return sendOrderEmail({
+        to: to,
+        order: order,
+        subject: "Delivered - FreshMart #" + (order.orderNumber || ""),
+        title: "📦 Your order has been delivered!",
+        bodyHtml: '<p style="color:#333;font-size:14px;">Your FreshMart order has been delivered to the provided address. Enjoy your fresh produce!</p>' +
+            '<p style="color:#666;font-size:13px;">If everything looks good, a review helps other customers. If anything is wrong, please reach out and we will sort it out.</p>'
+    });
+}
+
+module.exports = { sendOtpEmail, sendEmail, sendOrderConfirmation, sendOrderStatusUpdate, sendDeliveryConfirmation };

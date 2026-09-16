@@ -18,6 +18,8 @@ const paymentRoutes = require("./routes/paymentRoutes");
 const cartRoutes = require("./routes/cartRoutes");
 const reviewRoutes = require("./routes/reviewRoutes");
 const settingsRoutes = require("./routes/settingsRoutes");
+const couponRoutes = require("./routes/couponRoutes");
+const dashboardRoutes = require("./routes/dashboardRoutes");
 
 const app = express();
 
@@ -48,6 +50,8 @@ app.use("/api/payments", paymentRoutes);
 app.use("/api/cart", cartRoutes);
 app.use("/api/reviews", reviewRoutes);
 app.use("/api/settings", settingsRoutes);
+app.use("/api/coupons", couponRoutes);
+app.use("/api/admin/dashboard", dashboardRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {

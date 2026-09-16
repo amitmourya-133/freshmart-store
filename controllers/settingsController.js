@@ -1,6 +1,6 @@
 // ===============================
 // SETTINGS CONTROLLER
-// Store configuration (delivery charges + low-stock threshold).
+// Store configuration (delivery charges + low-stock threshold + min order).
 // GET /api/settings/shipping -> public read-only delivery policy.
 // GET /api/settings          -> admin full config.
 // PUT /api/settings          -> admin update (validated).
@@ -19,7 +19,7 @@ exports.getShippingPolicy = async (req, res) => {
     }
 };
 
-// Admin: full settings (delivery + low-stock threshold).
+// Admin: full settings (delivery + low-stock threshold + minimum order).
 exports.getSettings = async (req, res) => {
     try {
         const doc = await Settings.getSettings();
@@ -28,7 +28,8 @@ exports.getSettings = async (req, res) => {
             data: {
                 deliveryCharge: doc.deliveryCharge,
                 freeDeliveryThreshold: doc.freeDeliveryThreshold,
-                lowStockThreshold: doc.lowStockThreshold
+                lowStockThreshold: doc.lowStockThreshold,
+                minimumOrderValue: Number(doc.minimumOrderValue) > 0 ? Number(doc.minimumOrderValue) : 0
             }
         });
     } catch (error) {
@@ -58,6 +59,14 @@ exports.updateSettings = async (req, res) => {
             updates.freeDeliveryThreshold = Math.round(v * 100) / 100;
         }
 
+        if (req.body.minimumOrderValue !== undefined) {
+            const v = Number(req.body.minimumOrderValue);
+            if (!Number.isFinite(v) || v < 0 || v > 1000000) {
+                return res.status(400).json({ success: false, message: "Minimum order value must be between 0 and 1000000" });
+            }
+            updates.minimumOrderValue = Math.round(v * 100) / 100;
+        }
+
         if (req.body.lowStockThreshold !== undefined) {
             const v = Number(req.body.lowStockThreshold);
             if (!Number.isFinite(v) || v < 1 || v > 100000) {
@@ -74,6 +83,7 @@ exports.updateSettings = async (req, res) => {
             data: {
                 deliveryCharge: doc.deliveryCharge,
                 freeDeliveryThreshold: doc.freeDeliveryThreshold,
+                minimumOrderValue: Number(doc.minimumOrderValue) > 0 ? Number(doc.minimumOrderValue) : 0,
                 lowStockThreshold: doc.lowStockThreshold
             }
         });

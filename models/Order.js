@@ -61,6 +61,10 @@ const orderSchema = new mongoose.Schema(
         },
         subtotal: { type: Number, default: 0 },
         delivery: { type: Number, default: 20 },
+        // Server-computed coupon discount (rupees) subtracted from the final total.
+        discount: { type: Number, default: 0 },
+        // Uppercase coupon code applied to this order (null when none).
+        couponCode: { type: String, default: null, uppercase: true },
         deliverySlot: { type: String, default: "Morning (8-11 AM)" },
         subscription: { type: Boolean, default: false },
         subscriptionPlan: { type: String, default: null },
@@ -78,7 +82,15 @@ const orderSchema = new mongoose.Schema(
                 at: { type: Date, default: Date.now }
             }
         ],
-        user: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null }
+        user: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+        // Recipient address for email notifications (user email when logged in,
+        // may be null for anonymous guest checkouts - notifications are skipped).
+        customerEmail: { type: String, default: null, trim: true, lowercase: true },
+        // Notification delivery tracking (dedupe guards against retries).
+        notifyConfirmSentAt: { type: Date, default: null },
+        notifyStatusSentAt: { type: Date, default: null },
+        notifyStatusFor: { type: String, default: null },
+        notifyDeliveredSentAt: { type: Date, default: null }
     },
     { timestamps: true }
 );

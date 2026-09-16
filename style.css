@@ -3796,3 +3796,64 @@ body.dark-mode .banner-dot.active {
 .stock-tag { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 10px; font-weight: 700; text-transform: uppercase; }
 .stock-tag.low { background: rgba(243, 156, 18, 0.15); color: #e67e22; }
 .stock-tag.out { background: #e74c3c; color: #fff; }
+
+/* ===============================
+   COUPONS (checkout) + MIN ORDER
+   =============================== */
+.coupon-box { display: flex; gap: 8px; margin: 14px 0 4px; }
+.coupon-box input { flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); text-transform: uppercase; }
+.coupon-box button { padding: 10px 16px; border: none; border-radius: var(--radius-sm); background: var(--green-primary); color: #fff; font-weight: 700; cursor: pointer; }
+.coupon-box button:hover { background: var(--green-dark); }
+#removeCouponBtn { background: var(--bg-secondary); color: var(--text-secondary); border: 1px solid var(--border-color); }
+.coupon-status { font-size: 12px; margin: 2px 0 10px; }
+.discount-row strong { color: var(--green-primary) !important; }
+.settings-hint.warn { color: #e74c3c; font-weight: 600; }
+
+/* ===============================
+   ADMIN DASHBOARD (sales analytics)
+   =============================== */
+.admin-dash-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.dash-blocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 18px; }
+.dash-block { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 16px; box-shadow: var(--shadow-sm); }
+.dash-block h4 { margin: 0 0 10px; font-size: 14px; color: var(--text-primary); }
+.dash-block.dash-today { grid-column: 1 / -1; }
+.dash-today-nums { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+.dash-num { background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px; text-align: center; }
+.dash-num strong { display: block; font-size: 20px; color: var(--green-primary); }
+.dash-num span { font-size: 11px; color: var(--text-secondary); }
+.dash-list { display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto; }
+.dash-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: 13px; }
+.dash-item strong { color: var(--text-primary); white-space: nowrap; }
+.dash-empty { font-size: 13px; color: var(--text-secondary); text-align: center; padding: 8px; }
+.dash-range-block { margin-top: 18px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 16px; box-shadow: var(--shadow-sm); }
+.dash-range-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.dash-range-head h4 { margin: 0; font-size: 14px; color: var(--text-primary); }
+.dash-note { font-size: 11px; color: var(--text-secondary); }
+.dash-range-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin-bottom: 12px; }
+.dash-range-controls label { font-size: 13px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 4px; }
+.dash-range-controls input { padding: 8px 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); }
+.dash-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.dash-table th, .dash-table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border-color); }
+.dash-table th { color: var(--text-secondary); font-size: 12px; text-transform: uppercase; }
+.dash-table td { color: var(--text-primary); }
+
+/* ===============================
+   ADMIN COUPONS
+   =============================== */
+.admin-coupon { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px 16px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); margin-bottom: 10px; box-shadow: var(--shadow-sm); }
+.admin-coupon.coupon-inactive { opacity: 0.55; }
+.admin-coupon-main { flex: 1 1 260px; min-width: 0; }
+.admin-coupon-code { font-family: monospace; font-weight: 700; font-size: 17px; color: var(--green-primary); letter-spacing: 1px; }
+.admin-coupon-meta { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+.admin-coupon-badges { display: flex; gap: 6px; }
+.coupon-active-badge { background: rgba(39, 174, 96, 0.15); color: #27ae60; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+.coupon-expired-badge { background: #e74c3c; color: #fff; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+.admin-coupon-actions { display: flex; gap: 8px; }
+
+@media (max-width: 600px) {
+    .coupon-box { flex-direction: column; }
+    .admin-dash-grid { grid-template-columns: repeat(2, 1fr); }
+    .dash-table { font-size: 12px; }
+    .admin-coupon { flex-direction: column; align-items: flex-start; }
+    .dash-range-controls { flex-direction: column; align-items: stretch; }
+}

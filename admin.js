@@ -11,7 +11,7 @@ var adminEditingId = null;
 var activeTab = "orders";
 
 // DB-backed store configuration (delivery + low-stock threshold).
-var adminSettings = { deliveryCharge: 20, freeDeliveryThreshold: 500, lowStockThreshold: 20 };
+var adminSettings = { deliveryCharge: 20, freeDeliveryThreshold: 500, lowStockThreshold: 20, minimumOrderValue: 0 };
 var adminSettingsLoaded = false;
 
 var ORDER_STATUSES = ["Placed", "Confirmed", "Preparing", "Out for Delivery", "Delivered", "Cancelled"];
@@ -22,7 +22,8 @@ function loadAdminSettings() {
         adminSettings = {
             deliveryCharge: (typeof s.deliveryCharge === "number" && s.deliveryCharge >= 0) ? s.deliveryCharge : 20,
             freeDeliveryThreshold: (typeof s.freeDeliveryThreshold === "number" && s.freeDeliveryThreshold >= 0) ? s.freeDeliveryThreshold : 500,
-            lowStockThreshold: (typeof s.lowStockThreshold === "number" && s.lowStockThreshold >= 1) ? s.lowStockThreshold : 20
+            lowStockThreshold: (typeof s.lowStockThreshold === "number" && s.lowStockThreshold >= 1) ? s.lowStockThreshold : 20,
+            minimumOrderValue: (typeof s.minimumOrderValue === "number" && s.minimumOrderValue >= 0) ? s.minimumOrderValue : 0
         };
         adminSettingsLoaded = true;
         return adminSettings;
@@ -46,6 +47,7 @@ function switchTab(tab) {
         products: "adminProductsSection",
         customers: "adminCustomersSection",
         reviews: "adminReviewsSection",
+        coupons: "adminCouponsSection",
         settings: "adminSettingsSection"
     };
     var buttons = {
@@ -54,6 +56,7 @@ function switchTab(tab) {
         products: "tabProductsBtn",
         customers: "tabCustomersBtn",
         reviews: "tabReviewsBtn",
+        coupons: "tabCouponsBtn",
         settings: "tabSettingsBtn"
     };
 
@@ -69,6 +72,7 @@ function switchTab(tab) {
     else if (tab === "products") loadAdminProducts();
     else if (tab === "customers") loadAdminCustomers();
     else if (tab === "reviews") loadAdminReviews();
+    else if (tab === "coupons") loadAdminCoupons();
     else if (tab === "settings") renderSettingsTab();
 }
 
@@ -140,31 +144,150 @@ function loadAdminOverview() {
     });
 }
 
-// Dashboard tab: real DB-backed store metrics
+// Dashboard tab: real DB-backed store metrics + sales analytics
 function loadAdminDashboard() {
     var box = document.getElementById("adminDashboardStats");
     if (!box) return;
     box.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:20px;">Loading dashboard...</p>';
-    fetchAdminOverview().then(function(m) {
-        var cards = [
-            { label: "Total Products", value: m.totalProducts },
-            { label: "Total Customers", value: m.totalCustomers },
-            { label: "Total Orders", value: m.totalOrders },
-            { label: "Pending Orders", value: m.pendingOrders },
-            { label: "Processing Orders", value: m.preparingOrders },
-            { label: "Delivered Orders", value: m.deliveredOrders },
-            { label: "Total Sales", value: "â‚¹" + m.totalSales },
-            { label: "Cancelled", value: m.cancelledOrders },
-            { label: "Paid (Payment)", value: m.paidOrders },
-            { label: "Low Stock (â‰¤" + m.lowStockThreshold + ")", value: m.lowStockProducts, warn: m.lowStockProducts > 0 },
-            { label: "Out of Stock", value: m.outOfStockProducts, warn: m.outOfStockProducts > 0 }
-        ];
-        box.innerHTML = cards.map(function(c) {
+
+    var overviewP = (typeof fetchAdminOverview === "function")
+        ? fetchAdminOverview().catch(function() { return null; })
+        : Promise.resolve(null);
+    var dashP = (typeof fetchAdminDashboard === "function")
+        ? fetchAdminDashboard().catch(function() { return null; })
+        : Promise.resolve(null);
+
+    Promise.all([overviewP, dashP]).then(function(results) {
+        var m = results[0] || {};
+        var d = results[1] || {};
+
+        var cards = [];
+        function card(label, value, warn) {
+            cards.push({ label: label, value: value, warn: !!warn });
+        }
+
+        if (d && d.today && typeof d.today === "object") {
+            card("Today's Sales", "₹" + (d.today.sales || 0).toLocaleString("en-IN"));
+            card("Today's Orders", d.today.orders || 0);
+            card("Pending Orders", d.pendingOrders, (d.pendingOrders || 0) > 0);
+            card("Delivered Orders", d.deliveredOrders);
+            card("Total Sales", "₹" + (d.totalSales || 0).toLocaleString("en-IN"));
+            card("Total Orders", d.totalOrders);
+            card("Total Products", m.totalProducts != null ? m.totalProducts : (d.totalOrders !== undefined ? "" : ""));
+            card("Total Customers", m.totalCustomers != null ? m.totalCustomers : "");
+            card("Cancelled Orders", d.cancelledOrders);
+        } else {
+            // Backwards-compatible overview grid (old endpoint only).
+            card("Total Products", m.totalProducts);
+            card("Total Customers", m.totalCustomers);
+            card("Total Orders", m.totalOrders);
+            card("Pending Orders", m.pendingOrders);
+            card("Processing Orders", m.preparingOrders);
+            card("Delivered Orders", m.deliveredOrders);
+            card("Total Sales", "₹" + (m.totalSales || 0));
+            card("Cancelled", m.cancelledOrders);
+            card("Paid (Payment)", m.paidOrders);
+            card("Low Stock (≤" + m.lowStockThreshold + ")", m.lowStockProducts, m.lowStockProducts > 0);
+            card("Out of Stock", m.outOfStockProducts, m.outOfStockProducts > 0);
+        }
+
+        var statsHtml = cards.map(function(c) {
             return '<div class="admin-stat' + (c.warn ? " stat-warn" : "") + '"><strong>' + c.value + '</strong><span>' + c.label + '</span></div>';
         }).join("");
+
+        var lower = "";
+        if (d && d.today) lower = renderDashboardDetails(d);
+
+        box.innerHTML = '<div class="admin-dash-grid">' + statsHtml + '</div>' + lower;
+        if (d && d.salesDefinition && document.getElementById("dashSalesNote")) {
+            document.getElementById("dashSalesNote").title = d.salesDefinition;
+        }
     }).catch(function(err) {
         box.innerHTML = '<p style="text-align:center;color:#e74c3c;padding:20px;">' +
             (err.message || "Failed to load dashboard") + '</p>';
+    });
+}
+
+// Escape the value shown inside HTML (dashboard numbers/stocks are safe, but
+// product names can contain < > & which must not corrupt the markup).
+function dashEsc(v) {
+    return String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function renderDashboardDetails(d) {
+    var top = (d.topSelling || []).map(function(t) {
+        return '<div class="dash-item"><span>' + dashEsc(t.name) + '</span><strong>' + t.quantity + ' sold</strong></div>';
+    }).join("") || '<p class="dash-empty">No sales recorded.</p>';
+
+    var low = (d.lowStock || []).map(function(p) {
+        return '<div class="dash-item"><span>⚠️ ' + dashEsc(p.name) + '</span><strong>' + p.stock + '</strong></div>';
+    }).join("") || '<p class="dash-empty">No low-stock products.</p>';
+
+    var out = (d.outOfStock || []).map(function(p) {
+        return '<div class="dash-item"><span>❌ ' + dashEsc(p.name) + '</span><strong>0</strong></div>';
+    }).join("") || '<p class="dash-empty">No out-of-stock products.</p>';
+
+    var rows = (d.dateWise || []).map(function(r) {
+        return '<tr><td>' + dashEsc(r.date) + '</td><td>₹' + (r.sales || 0).toLocaleString("en-IN") + '</td><td>' + r.orders + '</td></tr>';
+    }).join("") || '<tr><td colspan="3">No data</td></tr>';
+
+    return '' +
+        '<div class="dash-blocks">' +
+            '<div class="dash-block dash-today">' +
+                '<h4>📅 Today (' + (d.today ? d.today.date : "") + ')</h4>' +
+                '<div class="dash-today-nums">' +
+                    '<div class="dash-num"><strong>₹' + (d.today ? (d.today.sales || 0).toLocaleString("en-IN") : 0) + '</strong><span>Sales</span></div>' +
+                    '<div class="dash-num"><strong>' + (d.today ? d.today.orders : 0) + '</strong><span>Orders</span></div>' +
+                    '<div class="dash-num"><strong>' + d.pendingOrders + '</strong><span>Pending</span></div>' +
+                    '<div class="dash-num"><strong>' + d.deliveredOrders + '</strong><span>Delivered</span></div>' +
+                '</div>' +
+            '</div>' +
+            '<div class="dash-block">' +
+                '<h4>🏆 Top Selling Products</h4>' +
+                '<div class="dash-list">' + top + '</div>' +
+            '</div>' +
+            '<div class="dash-block">' +
+                '<h4>📉 Low Stock (≤ ' + d.lowStockThreshold + ')</h4>' +
+                '<div class="dash-list">' + low + '</div>' +
+            '</div>' +
+            '<div class="dash-block">' +
+                '<h4>💥 Out of Stock</h4>' +
+                '<div class="dash-list">' + out + '</div>' +
+            '</div>' +
+        '</div>' +
+        '<div class="dash-range-block">' +
+            '<div class="dash-range-head">' +
+                '<h4>📊 Date-wise Sales</h4>' +
+                '<span id="dashSalesNote" class="dash-note" title="">Sales = non-cancelled order totals (server-computed)</span>' +
+            '</div>' +
+            '<div class="dash-range-controls">' +
+                '<label>From <input type="date" id="dashFrom" value="' + dashEsc(d.from || "") + '"></label>' +
+                '<label>To <input type="date" id="dashTo" value="' + dashEsc(d.to || "") + '"></label>' +
+                '<button type="button" class="secondary-btn" onclick="loadDashboardRange()">Apply</button>' +
+            '</div>' +
+            '<table class="dash-table"><thead><tr><th>Date</th><th>Sales</th><th>Orders</th></tr></thead>' +
+            '<tbody id="dashDateWiseBody">' + rows + '</tbody></table>' +
+        '</div>';
+}
+
+// Re-fetch the date-wise table with the admin-chosen range.
+function loadDashboardRange() {
+    var fromEl = document.getElementById("dashFrom");
+    var toEl = document.getElementById("dashTo");
+    var body = document.getElementById("dashDateWiseBody");
+    if (!body) return;
+    var from = fromEl ? fromEl.value : "";
+    var to = toEl ? toEl.value : "";
+    body.innerHTML = '<tr><td colspan="3">Loading...</td></tr>';
+    fetchAdminDashboard(from, to).then(function(d) {
+        var rows = (d.dateWise || []).map(function(r) {
+            return '<tr><td>' + dashEsc(r.date) + '</td><td>₹' + (r.sales || 0).toLocaleString("en-IN") + '</td><td>' + r.orders + '</td></tr>';
+        }).join("");
+        body.innerHTML = rows || '<tr><td colspan="3">No data</td></tr>';
+        var note = document.getElementById("dashSalesNote");
+        if (note && d.salesDefinition) note.title = d.salesDefinition;
+    }).catch(function(err) {
+        body.innerHTML = '<tr><td colspan="3">' + dashEsc(err.message || "Failed to load") + '</td></tr>';
     });
 }
 
@@ -880,6 +1003,7 @@ function renderSettingsTab() {
     if (!section) return;
 
     loadAdminSettings().then(function(s) {
+        var badRange = (s.minimumOrderValue > 0 && s.freeDeliveryThreshold > 0 && s.freeDeliveryThreshold < s.minimumOrderValue);
         section.innerHTML =
             '<div class="settings-card">' +
                 '<div class="settings-head"><h3>⚙️ Delivery Charge</h3><p>Customise what customers pay for delivery. The server enforces these amounts on every order — they are never taken from client-side values.</p></div>' +
@@ -892,10 +1016,15 @@ function renderSettingsTab() {
                     '<input type="number" id="setFreeThreshold" class="stock-input" min="0" step="1" value="' + s.freeDeliveryThreshold + '">' +
                 '</div>' +
                 '<div class="settings-row">' +
+                    '<label for="setMinOrder">Minimum Order Value (₹) — 0 = no minimum</label>' +
+                    '<input type="number" id="setMinOrder" class="stock-input" min="0" step="1" value="' + s.minimumOrderValue + '">' +
+                '</div>' +
+                '<div class="settings-row">' +
                     '<label for="setLowStock">Low-Stock Warning Threshold (units)</label>' +
                     '<input type="number" id="setLowStock" class="stock-input" min="1" step="1" value="' + s.lowStockThreshold + '">' +
                 '</div>' +
-                '<p class="settings-hint">Customers automatically get FREE delivery on orders at or above the threshold. Setting the charge to 0 disables delivery fees; setting the threshold to 0 always charges.</p>' +
+                (badRange ? '<p class="settings-hint warn">⚠️ The free-delivery threshold is below the minimum order value. With this combination every order becomes eligible for free delivery — make sure that is intentional.</p>' : '') +
+                '<p class="settings-hint">Customers automatically get FREE delivery on orders at or above the threshold. Setting the charge to 0 disables delivery fees; setting the threshold to 0 always charges. The minimum order value blocks below-threshold checkouts entirely (0 keeps the store fully open).</p>' +
                 '<button class="row-btn verify settings-save" onclick="saveAdminSettings()">💾 Save Settings</button>' +
                 '<div class="settings-status" id="settingsStatus" style="display:none;"></div>' +
             '</div>';
@@ -908,6 +1037,7 @@ function saveAdminSettings() {
     var status = document.getElementById("settingsStatus");
     var deliveryCharge = parseFloat(document.getElementById("setDeliveryCharge").value);
     var freeThreshold = parseFloat(document.getElementById("setFreeThreshold").value);
+    var minOrder = parseFloat(document.getElementById("setMinOrder").value);
     var lowStock = parseInt(document.getElementById("setLowStock").value, 10);
 
     if (isNaN(deliveryCharge) || deliveryCharge < 0) {
@@ -918,6 +1048,10 @@ function saveAdminSettings() {
         showToast("Please enter a valid free-delivery threshold.", "error");
         return;
     }
+    if (isNaN(minOrder) || minOrder < 0) {
+        showToast("Minimum order value must be 0 or more.", "error");
+        return;
+    }
     if (isNaN(lowStock) || lowStock < 1) {
         showToast("Low-stock threshold must be at least 1.", "error");
         return;
@@ -926,10 +1060,14 @@ function saveAdminSettings() {
         showToast("Settings API unavailable.", "error");
         return;
     }
+    if (minOrder > 0 && freeThreshold > 0 && freeThreshold < minOrder) {
+        if (!window.confirm("The free-delivery threshold is below the minimum order value, so every order will ship FREE. Continue?")) return;
+    }
 
     apiUpdateSettings({
         deliveryCharge: deliveryCharge,
         freeDeliveryThreshold: freeThreshold,
+        minimumOrderValue: minOrder,
         lowStockThreshold: lowStock
     }).then(function(saved) {
         adminSettingsLoaded = false;
@@ -937,13 +1075,151 @@ function saveAdminSettings() {
             if (status) {
                 status.style.display = "block";
                 status.className = "settings-status ok";
-                status.innerHTML = "✅ Settings saved. Delivery fee ₹" + adminSettings.deliveryCharge + " (free above ₹" + adminSettings.freeDeliveryThreshold + "), low-stock warning at " + adminSettings.lowStockThreshold + " units.";
-                setTimeout(function() { status.style.display = "none"; }, 5000);
+                status.innerHTML = "✅ Settings saved. Delivery fee ₹" + adminSettings.deliveryCharge + " (free above ₹" + adminSettings.freeDeliveryThreshold + "), minimum order ₹" + adminSettings.minimumOrderValue + ", low-stock warning at " + adminSettings.lowStockThreshold + " units.";
+                setTimeout(function() { status.style.display = "none"; }, 6000);
             }
             showToast("Settings saved successfully.", "success");
         });
     }).catch(function(err) {
         showToast((err && err.message) ? err.message : "Could not save settings.", "error");
+    });
+}
+
+// ===============================
+// COUPONS TAB
+// ===============================
+
+function loadAdminCoupons() {
+    var container = document.getElementById("adminCouponsBody");
+    if (!container) return;
+    container.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:40px;">Loading coupons...</p>';
+    if (typeof fetchAdminCoupons !== "function") {
+        container.innerHTML = '<p style="color:#e74c3c;padding:30px;">Coupon API unavailable.</p>';
+        return;
+    }
+    fetchAdminCoupons().then(function(list) {
+        renderAdminCoupons(list);
+    }).catch(function(err) {
+        container.innerHTML = '<p style="color:#e74c3c;padding:30px;">' + (err.message || "Failed to load coupons") + '</p>';
+    });
+}
+
+function renderAdminCoupons(list) {
+    var container = document.getElementById("adminCouponsBody");
+    if (!container) return;
+    if (!list || list.length === 0) {
+        container.innerHTML = '<div class="cart-empty"><div class="cart-empty-icon">🎟️</div><h3>No coupons yet</h3><p>Create a coupon to start offering discounts.</p></div>';
+        return;
+    }
+    list.sort(function(a, b) { return new Date(b.createdAt) - new Date(a.createdAt); });
+    var html = list.map(function(c) {
+        var typeLabel = c.discountType === "percentage" ? c.discountValue + "% off" : "₹" + c.discountValue + " off";
+        var minNote = c.minimumOrderValue > 0 ? "Min order ₹" + c.minimumOrderValue : "No min order";
+        var usageLabel = c.usageLimit ? (c.usageCount + " / " + c.usageLimit + " used") : (c.usageCount + " used");
+        var expired = c.expiryDate && new Date(c.expiryDate).getTime() < Date.now();
+        var active = c.active && !expired;
+        return '<div class="admin-coupon' + (active ? "" : " coupon-inactive") + '">' +
+            '<div class="admin-coupon-main">' +
+                '<div class="admin-coupon-code">' + dashEsc(c.code) + '</div>' +
+                '<div class="admin-coupon-meta">' + typeLabel + ' • ' + minNote + ' • ' + usageLabel + ' • expires ' + new Date(c.expiryDate).toLocaleDateString() + '</div>' +
+            '</div>' +
+            '<div class="admin-coupon-badges">' +
+                (active
+                    ? '<span class="coupon-active-badge">Active</span>'
+                    : ('<span class="coupon-expired-badge">' + (expired ? "Expired" : "Inactive") + '</span>')) +
+            '</div>' +
+            '<div class="admin-coupon-actions">' +
+                '<button class="row-btn edit" onclick="toggleCoupon(\'' + c._id + '\', ' + (c.active ? 'false' : 'true') + ')" title="' + (c.active ? "Deactivate" : "Activate") + '">' + (c.active ? "⏸" : "▶") + '</button>' +
+                '<button class="row-btn edit" onclick="openCouponModal(' + "'" + c._id + "'" + ')" title="Edit">✏️</button>' +
+                '<button class="row-btn reject" onclick="deleteCoupon(\'' + c._id + '\')" title="Delete">🗑</button>' +
+            '</div>' +
+        '</div>';
+    }).join("");
+    container.innerHTML = html;
+}
+
+var adminCoupons = [];
+function couponById(id) {
+    return adminCoupons.find(function(c) { return String(c._id) === String(id); });
+}
+
+function openCouponModal(id) {
+    var coupon = id ? couponById(id) : null;
+    if (id && !coupon) return;
+    if (typeof fetchAdminCoupons === "function" && id && !coupon) {
+        fetchAdminCoupons().then(function(list) {
+            adminCoupons = list;
+            var found = couponById(id);
+            if (found) fillCouponForm(found);
+        });
+        return;
+    }
+    adminCoupons = adminCoupons || [];
+    fillCouponForm(coupon);
+}
+
+function fillCouponForm(coupon) {
+    document.getElementById("cfId").value = coupon ? coupon._id : "";
+    document.getElementById("cfCode").value = coupon ? coupon.code : "";
+    document.getElementById("cfType").value = coupon ? coupon.discountType : "percentage";
+    document.getElementById("cfValue").value = coupon ? coupon.discountValue : "";
+    document.getElementById("cfMinOrder").value = coupon ? (coupon.minimumOrderValue || 0) : 0;
+    var exp = document.getElementById("cfExpiry");
+    if (coupon && coupon.expiryDate) {
+        var d = new Date(coupon.expiryDate);
+        exp.value = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    } else {
+        exp.value = "";
+    }
+    document.getElementById("cfUsageLimit").value = coupon && coupon.usageLimit ? coupon.usageLimit : "";
+    document.getElementById("cfActive").checked = coupon ? !!coupon.active : true;
+    document.getElementById("couponModalTitle").textContent = coupon ? "Edit Coupon" : "New Coupon";
+    document.getElementById("couponModal").style.display = "flex";
+}
+
+function closeCouponModal() {
+    var el = document.getElementById("couponModal");
+    if (el) el.style.display = "none";
+}
+
+function saveCoupon(event) {
+    if (event) event.preventDefault();
+    var id = document.getElementById("cfId").value;
+    var payload = {
+        code: document.getElementById("cfCode").value,
+        discountType: document.getElementById("cfType").value,
+        discountValue: parseFloat(document.getElementById("cfValue").value),
+        minimumOrderValue: parseFloat(document.getElementById("cfMinOrder").value) || 0,
+        expiryDate: document.getElementById("cfExpiry").value,
+        usageLimit: document.getElementById("cfUsageLimit").value ? parseInt(document.getElementById("cfUsageLimit").value, 10) : null,
+        active: document.getElementById("cfActive").checked
+    };
+    var fn = id && id.length ? apiUpdateCoupon(id, payload) : apiCreateCoupon(payload);
+    fn.then(function() {
+        closeCouponModal();
+        showToast(id ? "Coupon updated." : "Coupon created.", "success");
+        if (typeof fetchAdminCoupons === "function") fetchAdminCoupons().then(function(list) { adminCoupons = list; renderAdminCoupons(list); });
+    }).catch(function(err) {
+        showToast((err && err.message) ? err.message : "Failed to save coupon.", "error");
+    });
+}
+
+function toggleCoupon(id, active) {
+    apiUpdateCoupon(id, { active: active }).then(function(saved) {
+        showToast("Coupon " + (active ? "activated" : "deactivated") + ".", "success");
+        if (typeof fetchAdminCoupons === "function") fetchAdminCoupons().then(function(list) { adminCoupons = list; renderAdminCoupons(list); });
+    }).catch(function(err) {
+        showToast((err && err.message) ? err.message : "Could not update coupon.", "error");
+    });
+}
+
+function deleteCoupon(id) {
+    if (!window.confirm("Delete this coupon permanently?")) return;
+    apiDeleteCoupon(id).then(function() {
+        showToast("Coupon deleted.", "success");
+        if (typeof fetchAdminCoupons === "function") fetchAdminCoupons().then(function(list) { adminCoupons = list; renderAdminCoupons(list); });
+    }).catch(function(err) {
+        showToast((err && err.message) ? err.message : "Could not delete coupon.", "error");
     });
 }
 

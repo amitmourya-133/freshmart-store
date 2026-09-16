@@ -7,8 +7,38 @@ const Order = require("../models/Order");
 const Product = require("../models/Product");
 const User = require("../models/User");
 const Settings = require("../models/Settings");
+const Coupon = require("../models/Coupon");
 const Razorpay = require("razorpay");
 const { getMultFromWeight, round2 } = require("../utils/pricing");
+const { findValidCoupon, computeCouponDiscount, normalizeCode } = require("../utils/coupons");
+const emailService = require("../utils/emailService");
+
+// Best-effort notification sending wrapper. Never throws; never affects the
+// request's order state. Logs a sanitized failure line (no secrets).
+async function notifyCustomer(emailFn, order, extra) {
+    try {
+        const result = await emailFn({ to: order.customerEmail, order: order, ...extra });
+        if (result && result.sent) {
+            return { sent: true };
+        }
+        if (result && result.reason) {
+            console.warn("[email] " + (order.orderNumber || "?") + " " + (extra.tag || "") + " skipped: " + result.reason);
+        }
+        return { sent: false };
+    } catch (e) {
+        console.warn("[email] " + (order.orderNumber || "?") + " " + (extra.tag || "") + " error: " + (e && e.message ? e.message : "unknown"));
+        return { sent: false };
+    }
+}
+
+// Lift email + timestamp flags onto the order document (best-effort).
+async function recordNotify(order, field, at) {
+    try {
+        const patch = {};
+        patch[field] = at || new Date();
+        await Order.updateOne({ _id: order._id }, { $set: patch });
+    } catch (e) { /* non-fatal */ }
+}
 
 const ORDER_STATUSES = ["Placed", "Confirmed", "Preparing", "Out for Delivery", "Delivered", "Cancelled"];
 const STATUS_RANK = { Placed: 0, Confirmed: 1, Preparing: 2, "Out for Delivery": 3, Delivered: 4 };
@@ -53,20 +83,23 @@ function pushHistory(order, status, by) {
     order.statusHistory.push({ status: status, by: by || null, at: new Date() });
 }
 
-// Delivery policy from the DB-backed settings (fallbacks: Rs.20 fee, free >= Rs.500).
+// Delivery + minimum-order policy from the DB-backed settings
+// (fallbacks: Rs.20 fee, free >= Rs.500, no minimum order).
 async function deliveryPolicy() {
     const doc = await Settings.getSettings();
     return {
         charge: Number(doc.deliveryCharge) >= 0 ? Number(doc.deliveryCharge) : 20,
-        freeThreshold: Number(doc.freeDeliveryThreshold) >= 0 ? Number(doc.freeDeliveryThreshold) : 500
+        freeThreshold: Number(doc.freeDeliveryThreshold) >= 0 ? Number(doc.freeDeliveryThreshold) : 500,
+        minimumOrder: Number(doc.minimumOrderValue) > 0 ? Number(doc.minimumOrderValue) : 0
     };
 }
 
 // Server-authoritative totals. Products are re-priced from MongoDB whenever a
 // productId is present; items without a productId use the client price but are
 // still clamped to a positive value and the whole subtotal must be >= 1.
-// Throws { status, message } on validation failure.
-async function computeServerTotals(items) {
+// Coupon discounts are always recomputed from the Coupon document (the client
+// coupon value is never trusted). Throws { status, message } on failure.
+async function computeServerTotals(items, options) {
     if (!Array.isArray(items) || items.length === 0) {
         throw { status: 400, message: "Cart is empty" };
     }
@@ -115,8 +148,36 @@ async function computeServerTotals(items) {
         throw { status: 400, message: "Minimum order amount is Rs.1. Please add more items." };
     }
     const policy = await deliveryPolicy();
+    if (policy.minimumOrder > 0 && subtotal < policy.minimumOrder) {
+        throw {
+            status: 400,
+            message: "Your order is below the minimum order value of ₹" + policy.minimumOrder + ". Add items worth ₹" +
+                (policy.minimumOrder - subtotal) + " more."
+        };
+    }
     const delivery = subtotal >= policy.freeThreshold ? 0 : policy.charge;
-    return { items: normalized, subtotal: subtotal, delivery: delivery, total: round2(subtotal + delivery) };
+
+    // Coupon discount (server-side only)
+    let discount = 0;
+    let couponInfo = null;
+    const rawCode = options && options.couponCode ? options.couponCode : null;
+    if (rawCode && String(rawCode).trim()) {
+        const { coupon } = await findValidCoupon(rawCode);
+        discount = computeCouponDiscount(coupon, subtotal);
+        couponInfo = { _id: coupon._id, code: coupon.code, discountType: coupon.discountType, discountValue: coupon.discountValue, minimumOrderValue: coupon.minimumOrderValue };
+    }
+    const total = round2(subtotal + delivery - discount);
+    return {
+        items: normalized,
+        subtotal: subtotal,
+        delivery: delivery,
+        discount: discount,
+        coupon: couponInfo,
+        minimumOrderValue: policy.minimumOrder,
+        freeDeliveryThreshold: policy.freeThreshold,
+        deliveryCharge: policy.charge,
+        total: total
+    };
 }
 
 function normalizeCustomer(c) {
@@ -201,7 +262,7 @@ async function applyCancellation(order, by) {
 // ===============================
 exports.createOrder = async (req, res) => {
     try {
-        const { customer, items, payment, paymentMethod, paid, deliverySlot, subscription, subscriptionPlan, clientRef, paymentReference } = req.body;
+        const { customer, items, payment, paymentMethod, paid, deliverySlot, subscription, subscriptionPlan, clientRef, paymentReference, couponCode } = req.body;
 
         // Server-side address validation
         const customerError = validateCustomer(customer);
@@ -218,11 +279,18 @@ exports.createOrder = async (req, res) => {
             }
         }
 
-        const totals = await computeServerTotals(items);
+        const totals = await computeServerTotals(items, { couponCode: couponCode });
 
         const orderNumber = generateOrderNumber();
         const trackingId = generateTrackingId();
         const finalPaymentMethod = paymentMethod === "online" ? "online" : "cod";
+
+        // Customer email for notifications: prefer the verified account email,
+        // then an explicitly supplied email on the request. Never an OTP/token.
+        const suppliedEmail = customer && customer.email ? String(customer.email).trim() : "";
+        const customerEmail = req.user && req.user.email
+            ? String(req.user.email).trim()
+            : (suppliedEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(suppliedEmail) ? suppliedEmail : null);
 
         const orderData = {
             orderNumber: orderNumber,
@@ -234,12 +302,15 @@ exports.createOrder = async (req, res) => {
             paymentMethod: finalPaymentMethod,
             subtotal: totals.subtotal,
             delivery: totals.delivery,
+            discount: totals.discount,
+            couponCode: totals.coupon ? totals.coupon.code : null,
             deliverySlot: deliverySlot || "Morning (8-11 AM)",
             subscription: subscription === true,
             subscriptionPlan: subscriptionPlan || null,
             total: totals.total,
             status: "Placed",
-            user: req.user ? req.user._id : null
+            user: req.user ? req.user._id : null,
+            customerEmail: customerEmail
         };
 
         if (finalPaymentMethod === "cod") {
@@ -268,6 +339,26 @@ exports.createOrder = async (req, res) => {
             orderData.paymentMode = "razorpay";
         }
 
+        // Reserve coupon usage BEFORE persisting the order so concurrent orders
+        // cannot overshoot the usage limit. The increment is compensated if the
+        // order creation itself fails immediately afterwards.
+        let reservedCoupon = null;
+        if (totals.coupon) {
+            reservedCoupon = await Coupon.findOneAndUpdate(
+                { _id: totals.coupon._id, active: true, $expr: {
+                    $or: [
+                        { $eq: ["$usageLimit", null] },
+                        { $lt: ["$usageCount", "$usageLimit"] }
+                    ]
+                } },
+                { $inc: { usageCount: 1 } },
+                { new: true }
+            );
+            if (!reservedCoupon) {
+                return res.status(400).json({ success: false, message: "This coupon has reached its usage limit" });
+            }
+        }
+
         // Decrement stock (order created => reservation). Payment success/failure
         // does not touch stock; only cancellation restores it (see cancellation).
         for (const item of totals.items) {
@@ -276,7 +367,16 @@ exports.createOrder = async (req, res) => {
             }
         }
 
-        const order = await Order.create(Object.assign(orderData, { statusHistory: [{ status: "Placed", by: req.user ? "customer:" + String(req.user._id) : "guest", at: new Date() }] }));
+        let order;
+        try {
+            order = await Order.create(Object.assign(orderData, { statusHistory: [{ status: "Placed", by: req.user ? "customer:" + String(req.user._id) : "guest", at: new Date() }] }));
+        } catch (createError) {
+            // Compensate the reserved usage count so retries do not burn the limit.
+            if (reservedCoupon) {
+                try { await Coupon.updateOne({ _id: reservedCoupon._id }, { $inc: { usageCount: -1 } }); } catch (e) { /* non-fatal */ }
+            }
+            throw createError;
+        }
 
         // If Razorpay keys exist and payment is still pending, create the gateway order
         let razorpayOrder = null;
@@ -305,6 +405,16 @@ exports.createOrder = async (req, res) => {
             razorpayOrder: razorpayOrder,
             key_id: (razorpayOrder && razorpayOrder.id) ? (process.env.RAZORPAY_KEY_ID || null) : null
         });
+
+        // Order confirmation email (fire-and-forget; never blocks or fails the
+        // response). The flag is recorded only when the send actually succeeded,
+        // so a retry with a new attempt is not suppressed forever.
+        if (order.customerEmail) {
+            notifyCustomer(emailService.sendOrderConfirmation, order, { tag: "confirmation" })
+                .then(async function (res2) {
+                    if (res2.sent) await recordNotify(order, "notifyConfirmSentAt", new Date());
+                });
+        }
     } catch (error) {
         if (error && error.status) {
             return res.status(error.status).json({ success: false, message: error.message });
@@ -321,10 +431,20 @@ exports.createOrder = async (req, res) => {
 // ===============================
 exports.quoteOrder = async (req, res) => {
     try {
-        const totals = await computeServerTotals(req.body.items);
+        const totals = await computeServerTotals(req.body.items, { couponCode: req.body.couponCode });
         res.json({
             success: true,
-            data: { subtotal: totals.subtotal, delivery: totals.delivery, total: totals.total, minOrderAmount: 1 }
+            data: {
+                subtotal: totals.subtotal,
+                delivery: totals.delivery,
+                deliveryCharge: totals.deliveryCharge,
+                freeDeliveryThreshold: totals.freeDeliveryThreshold,
+                minimumOrderValue: totals.minimumOrderValue,
+                minOrderAmount: totals.minimumOrderValue,
+                discount: totals.discount,
+                coupon: totals.coupon ? { code: totals.coupon.code, discountType: totals.coupon.discountType, discountValue: totals.coupon.discountValue } : null,
+                total: totals.total
+            }
         });
     } catch (error) {
         if (error && error.status) {
@@ -450,6 +570,35 @@ exports.getOrder = async (req, res) => {
 // ===============================
 // UPDATE ORDER STATUS (admin)
 // ===============================
+
+// Fire-and-forget notification on admin/customer status changes.
+// A "Delivered" status sends the dedicated delivery confirmation exactly once
+// (guarded by notifyDeliveredSentAt); other statuses send the generic status
+// update, deduplicated per (status → sentAt) pair by notifyStatusFor.
+function emailOnStatusChange(order, previousStatus) {
+    if (!order.customerEmail) return;
+    if (order.status === "Delivered") {
+        if (order.notifyDeliveredSentAt) return;
+        notifyCustomer(emailService.sendDeliveryConfirmation, order, { tag: "delivery" })
+            .then(async function (r) {
+                if (r.sent) {
+                    await recordNotify(order, "notifyDeliveredSentAt", new Date());
+                    await recordNotify(order, "notifyStatusSentAt", new Date());
+                    await recordNotify(order, "notifyStatusFor", order.status);
+                }
+            });
+        return;
+    }
+    if (order.notifyStatusFor === order.status && order.notifyStatusSentAt) return;
+    notifyCustomer(emailService.sendOrderStatusUpdate, order, { tag: "status", previousStatus: previousStatus })
+        .then(async function (r) {
+            if (r.sent) {
+                await recordNotify(order, "notifyStatusSentAt", new Date());
+                await recordNotify(order, "notifyStatusFor", order.status);
+            }
+        });
+}
+
 exports.updateOrderStatus = async (req, res) => {
     try {
         const { status } = req.body;
@@ -468,10 +617,12 @@ exports.updateOrderStatus = async (req, res) => {
 
         // Prevent nonsensical/backwards transitions
         if (status === "Cancelled") {
+            const previousStatus = order.status;
             const result = await applyCancellation(order, "admin:" + String(req.user._id));
             if (!result.ok) {
                 return res.status(400).json({ success: false, message: result.message });
             }
+            emailOnStatusChange(result.order, previousStatus);
             return res.json({ success: true, data: result.order });
         }
 
@@ -482,9 +633,12 @@ exports.updateOrderStatus = async (req, res) => {
             return res.status(400).json({ success: false, message: "Cannot move status backwards" });
         }
 
+        const previousStatus = order.status;
         order.status = status;
         pushHistory(order, status, "admin:" + String(req.user._id));
         await order.save();
+
+        emailOnStatusChange(order, previousStatus);
 
         res.json({ success: true, data: order });
     } catch (error) {
@@ -511,10 +665,12 @@ exports.cancelOrder = async (req, res) => {
             return res.status(400).json({ success: false, message: "Order can only be cancelled while placed or confirmed" });
         }
 
+        const previousStatus = order.status;
         const result = await applyCancellation(order, "customer:" + String(req.user._id));
         if (!result.ok) {
             return res.status(400).json({ success: false, message: result.message });
         }
+        emailOnStatusChange(result.order, previousStatus);
         res.json({ success: true, data: result.order });
     } catch (error) {
         if (error && error.name === "CastError") {

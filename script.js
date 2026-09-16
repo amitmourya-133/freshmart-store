@@ -622,11 +622,12 @@ function updateCart() {
         cartTotal.innerText = "Total: ₹" + totalPrice;
     }
 
+    var minOrderCart = currentMinOrder();
     var minOrderNoteCart = document.getElementById("minOrderNoteCart");
     if (minOrderNoteCart) {
-        if (totalPrice < MIN_ORDER_AMOUNT && totalPrice > 0) {
+        if (minOrderCart > 0 && totalPrice > 0 && totalPrice < minOrderCart) {
             minOrderNoteCart.style.display = "block";
-            minOrderNoteCart.innerHTML = '⚠️ Minimum order is <strong>₹' + MIN_ORDER_AMOUNT + '</strong>. Add ₹' + (MIN_ORDER_AMOUNT - totalPrice) + ' more.';
+            minOrderNoteCart.innerHTML = '⚠️ Minimum order is <strong>₹' + minOrderCart + '</strong>. Add ₹' + (minOrderCart - totalPrice) + ' more.';
         } else {
             minOrderNoteCart.style.display = "none";
         }
@@ -1508,8 +1509,8 @@ function updateAllCartControls() {
 var MIN_ORDER_AMOUNT = 1;
 var qtySelections = {};
 
-// Server-backed delivery policy (fallback defaults keep the app working offline).
-var shippingSettings = { deliveryCharge: 20, freeDeliveryThreshold: 500 };
+// Server-backed delivery policy + minimum order value (fallback defaults keep the app working offline).
+var shippingSettings = { deliveryCharge: 20, freeDeliveryThreshold: 500, minimumOrderValue: 0 };
 var shippingSettingsReady = false;
 function loadShippingSettings(force) {
     if (shippingSettingsReady && !force) return Promise.resolve(shippingSettings);
@@ -1517,13 +1518,20 @@ function loadShippingSettings(force) {
     return fetchShippingSettings().then(function(s) {
         shippingSettings = {
             deliveryCharge: (typeof s.deliveryCharge === "number" && s.deliveryCharge >= 0) ? s.deliveryCharge : 20,
-            freeDeliveryThreshold: (typeof s.freeDeliveryThreshold === "number" && s.freeDeliveryThreshold >= 0) ? s.freeDeliveryThreshold : 500
+            freeDeliveryThreshold: (typeof s.freeDeliveryThreshold === "number" && s.freeDeliveryThreshold >= 0) ? s.freeDeliveryThreshold : 500,
+            minimumOrderValue: (typeof s.minimumOrderValue === "number" && s.minimumOrderValue >= 0) ? s.minimumOrderValue : 0
         };
         shippingSettingsReady = true;
         return shippingSettings;
     }).catch(function() {
         return shippingSettings;
     });
+}
+
+// Effective minimum order value (0 = no minimum).
+function currentMinOrder() {
+    var v = shippingSettings && typeof shippingSettings.minimumOrderValue === "number" ? shippingSettings.minimumOrderValue : 0;
+    return v > 0 ? v : 0;
 }
 
 // Client-side estimate of the delivery fee (mirrors the server rule; the server
@@ -1933,8 +1941,9 @@ function proceedToCheckout() {
     }
 
     var subTotal = getCartSubtotal();
-    if (subTotal < MIN_ORDER_AMOUNT) {
-        showToast("Minimum order amount is ₹" + MIN_ORDER_AMOUNT + ". Please add more items.", "error");
+    var goMinOrder = currentMinOrder();
+    if (goMinOrder > 0 && subTotal < goMinOrder) {
+        showToast("Minimum order amount is ₹" + goMinOrder + ". Please add items worth ₹" + (goMinOrder - subTotal) + " more.", "error");
         return;
     }
 
@@ -1987,6 +1996,111 @@ function refreshCartPrices() {
 // ===============================
 // LOAD CHECKOUT
 // ===============================
+
+// ===============================
+// COUPON STATE (checkout only)
+// ===============================
+var appliedCoupon = null;     // set by applyCoupon() on success
+var appliedCouponData = null; // server response: {code, discountType, discountValue, discountAmount, minimumOrderValue, expiresAt}
+
+function applyCoupon() {
+    var input = document.getElementById("couponInput");
+    var status = document.getElementById("couponStatus");
+    var code = (input && input.value ? input.value : "").trim();
+    if (!code) { showCouponStatus("Please enter a coupon code", false); return; }
+    var subtotal = getCachedCheckoutSubtotal();
+    if (typeof subtotal !== "number" || subtotal < 0) subtotal = 0;
+    showCouponStatus("Checking...", true);
+    apiValidateCoupon(code, subtotal).then(function(data) {
+        if (!data || !data.valid) { showCouponStatus(data && data.message ? data.message : "Invalid coupon", false); return; }
+        appliedCoupon = data.code;
+        appliedCouponData = data;
+        var removeBtn = document.getElementById("removeCouponBtn");
+        if (removeBtn) removeBtn.style.display = "inline";
+        showCouponStatus("Coupon " + data.code + " applied — " + (data.discountType === "percentage" ? data.discountValue + "% off" : "₹" + data.discountValue + " off"), true);
+        renderCheckoutDiscount(subtotal);
+    }).catch(function(err) {
+        appliedCoupon = null;
+        appliedCouponData = null;
+        showCouponStatus(err && err.message ? err.message : "Invalid coupon", false);
+        renderCheckoutDiscount(subtotal);
+    });
+}
+
+function removeCoupon() {
+    appliedCoupon = null;
+    appliedCouponData = null;
+    var input = document.getElementById("couponInput");
+    if (input) input.value = "";
+    var removeBtn = document.getElementById("removeCouponBtn");
+    if (removeBtn) removeBtn.style.display = "none";
+    showCouponStatus("Coupon removed", true);
+    renderCheckoutDiscount(getCachedCheckoutSubtotal());
+}
+
+function showCouponStatus(msg, success) {
+    var el = document.getElementById("couponStatus");
+    if (!el) return;
+    el.style.display = "block";
+    el.textContent = msg;
+    el.style.color = success ? "#159447" : "#e74c3c";
+}
+
+// Return the cached subtotal from the UI so applyCoupon can pass it to validate
+// without a circular re-render. Falls back to a live recalc when stale.
+function getCachedCheckoutSubtotal() {
+    var el = document.getElementById("checkoutSubtotal");
+    if (!el) return 0;
+    var v = String(el.innerText || "").replace(/[^0-9.]/g, "");
+    return parseFloat(v) || 0;
+}
+
+// Update the discount row in the order summary and the displayed total.
+function renderCheckoutDiscount(subtotal) {
+    var row   = document.getElementById("discountRow");
+    var label = document.getElementById("discountLabel");
+    var amt   = document.getElementById("checkoutDiscount");
+    var total = document.getElementById("checkoutTotal");
+    if (!row || !label || !amt) return;
+    var discount = 0;
+    if (appliedCouponData && appliedCouponData.discountAmount != null) {
+        discount = Number(appliedCouponData.discountAmount) || 0;
+        if (discount > subtotal) discount = subtotal;
+        row.style.display = "flex";
+        label.textContent = appliedCouponData.code || appliedCoupon;
+        amt.textContent = "−₹" + discount;
+    } else {
+        row.style.display = "none";
+        label.textContent = "";
+        amt.textContent = "−₹0";
+    }
+    var delivery = estimatedDelivery(subtotal);
+    if (total) total.innerText = "₹" + Math.max(0, subtotal + delivery - discount);
+    updateCheckoutCouponUI(subtotal);
+}
+
+function updateCheckoutCouponUI(subtotal) {
+    var input = document.getElementById("couponInput");
+    var applyBtn = document.getElementById("applyCouponBtn");
+    var removeBtn = document.getElementById("removeCouponBtn");
+    var box = document.getElementById("couponBox");
+    if (!input || !applyBtn) return;
+    if (appliedCoupon) {
+        input.value = appliedCoupon;
+        input.disabled = true;
+        applyBtn.style.display = "none";
+        if (removeBtn) removeBtn.style.display = "inline";
+    } else {
+        input.disabled = false;
+        applyBtn.style.display = "inline";
+        if (removeBtn) removeBtn.style.display = "none";
+    }
+    if (typeof subtotal !== "number" || subtotal <= 0 || cart.length === 0) {
+        if (box) box.style.display = "none";
+    } else {
+        if (box) box.style.display = "flex";
+    }
+}
 
 function renderCheckout() {
     var checkoutItems = document.getElementById("checkoutItems");
@@ -2049,8 +2163,27 @@ function renderCheckout() {
         }
     }
 
+    var effectiveDiscount = 0;
+    if (appliedCouponData && appliedCouponData.discountAmount != null) {
+        effectiveDiscount = Math.min(Number(appliedCouponData.discountAmount) || 0, subtotal);
+        var discountRow = document.getElementById("discountRow");
+        var discountLabel = document.getElementById("discountLabel");
+        var discountAmt = document.getElementById("checkoutDiscount");
+        if (discountRow) {
+            discountRow.style.display = "flex";
+            if (discountLabel) discountLabel.textContent = appliedCouponData.code || appliedCoupon;
+            if (discountAmt) discountAmt.textContent = "−₹" + effectiveDiscount;
+        }
+    } else {
+        var dr2 = document.getElementById("discountRow");
+        if (dr2) dr2.style.display = "none";
+    }
+
     var checkoutTotal = document.getElementById("checkoutTotal");
-    if (checkoutTotal) checkoutTotal.innerText = "₹" + (subtotal + delivery);
+    if (checkoutTotal) checkoutTotal.innerText = "₹" + Math.max(0, subtotal + delivery - effectiveDiscount);
+
+    // Coupon input visibility + states
+    updateCheckoutCouponUI(subtotal);
 
     // Block checkout while any cart item is out of stock / overstocked.
     var checkoutBtn = document.getElementById("placeOrderBtn");
@@ -2062,11 +2195,13 @@ function renderCheckout() {
         if (btn) btn.classList.remove("btn-disabled");
     }
 
+    // Dynamic minimum order (from server settings; 0 = no minimum)
+    var minOrder = currentMinOrder();
     var minOrderNote = document.getElementById("minOrderNote");
     if (minOrderNote) {
-        if (subtotal < MIN_ORDER_AMOUNT) {
+        if (minOrder > 0 && subtotal > 0 && subtotal < minOrder) {
             minOrderNote.style.display = "block";
-            minOrderNote.innerHTML = '⚠️ Minimum order amount is <strong>₹' + MIN_ORDER_AMOUNT + '</strong>. Add ₹' + (MIN_ORDER_AMOUNT - subtotal) + ' more to place your order.';
+            minOrderNote.innerHTML = '⚠️ Minimum order amount is <strong>₹' + minOrder + '</strong>. Add ₹' + (minOrder - subtotal) + ' more to place your order.';
         } else {
             minOrderNote.style.display = "none";
         }
@@ -2180,13 +2315,20 @@ function buildOrderObject() {
     var orderNumber = "FM" + Date.now().toString().slice(-6);
     var subtotal = getCartSubtotal();
     var delivery = estimatedDelivery(subtotal);
+    var discount = 0;
+    if (appliedCouponData && appliedCouponData.discountAmount != null) {
+        discount = Math.min(Number(appliedCouponData.discountAmount) || 0, subtotal);
+    }
 
     return {
         orderNumber: orderNumber,
         customer: { name: name, phone: phone, address: address, city: city, state: state || undefined, pincode: pincode },
         items: JSON.parse(JSON.stringify(cart)),
         subtotal: subtotal,
-        total: subtotal + delivery,
+        delivery: delivery,
+        discount: discount,
+        total: Math.max(0, subtotal + delivery - discount),
+        couponCode: appliedCoupon || null,
         paymentMethod: getCurrentPaymentMethod(),
         onlineMethod: getSelectedOnlineMethod(),
         deliverySlot: getDeliverySlot(),
@@ -2293,8 +2435,9 @@ function placeOrder() {
     }
 
     var subTotal = getCartSubtotal();
-    if (subTotal < MIN_ORDER_AMOUNT) {
-        showToast("Minimum order amount is ₹" + MIN_ORDER_AMOUNT + ". Please add more items.", "error");
+    var minOrder = currentMinOrder();
+    if (minOrder > 0 && subTotal < minOrder) {
+        showToast("Minimum order amount is ₹" + minOrder + ". Please add items worth ₹" + (minOrder - subTotal) + " more.", "error");
         return;
     }
 
@@ -2314,7 +2457,7 @@ function placeOrder() {
             // then show the QR modal with the exact validated amount pre-filled
             pendingOrder = order;
             pendingOrderConfirmed = false;
-            getOrderQuote(order.items).then(function(quote) {
+            getOrderQuote(order.items, appliedCoupon).then(function(quote) {
                 showQrPaymentModal(order, quote);
             }).catch(function(err) {
                 reenablePlaceOrder();
@@ -2364,7 +2507,8 @@ function placeOnlineOrder(order) {
         payment: "Razorpay - " + onlineMethodLabel(),
         paymentMethod: "online",
         deliverySlot: order.deliverySlot || getDeliverySlot(),
-        paid: false
+        paid: false,
+        couponCode: appliedCoupon || null
     };
 
     return createOrderBackend(payload).then(function(res) {
@@ -2518,6 +2662,7 @@ function finalizeOrder(order, isOnline) {
         paid: false, // the server decides COD-paid vs manual-pending vs razorpay
         deliverySlot: order.deliverySlot || getDeliverySlot()
     };
+    if (appliedCoupon) payload.couponCode = appliedCoupon;
     if (order.paymentMode) payload.paymentMode = order.paymentMode;
     if (order.paymentReference) payload.paymentReference = order.paymentReference;
     if (order.clientRef) payload.clientRef = order.clientRef;
@@ -2583,6 +2728,12 @@ function finishOrderUI(order, isOnline, paymentStatus) {
     cart = [];
     localStorage.removeItem("freshMartCart");
     pendingOrder = null;
+    appliedCoupon = null;
+    appliedCouponData = null;
+    var couponInputEl = document.getElementById("couponInput");
+    if (couponInputEl) couponInputEl.value = "";
+    var couponRemoveBtn = document.getElementById("removeCouponBtn");
+    if (couponRemoveBtn) couponRemoveBtn.style.display = "none";
 
     // Clear the persistent DB cart for logged-in users
     if (typeof isLoggedIn === "function" && isLoggedIn()) {

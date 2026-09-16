@@ -172,6 +172,13 @@
 
             <hr>
 
+            <div class="coupon-box" id="couponBox">
+                <input type="text" id="couponInput" placeholder="Coupon code" maxlength="20" autocomplete="off">
+                <button type="button" id="applyCouponBtn" onclick="applyCoupon()">Apply</button>
+                <button type="button" id="removeCouponBtn" onclick="removeCoupon()" style="display:none;">✕</button>
+            </div>
+            <div id="couponStatus" class="coupon-status" style="display:none;"></div>
+
             <div class="summary-row">
                 <span>Subtotal</span>
                 <strong id="checkoutSubtotal">
@@ -184,6 +191,11 @@
                 <strong id="deliveryCharge">
                     ₹20
                 </strong>
+            </div>
+
+            <div class="summary-row discount-row" id="discountRow" style="display:none;">
+                <span>Discount (<span id="discountLabel"></span>)</span>
+                <strong id="checkoutDiscount" style="color:#159447;">−₹0</strong>
             </div>
 
             <hr>
