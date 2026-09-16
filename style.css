@@ -1889,6 +1889,62 @@ body.dark-mode .card-action-item:hover {
     background: var(--bg-tertiary);
 }
 
+/* ---------- MOBILE BOTTOM NAVIGATION ---------- */
+.mobile-bottom-nav {
+    display: none;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 450;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-color);
+    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.08);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.mobile-bottom-nav .bottom-nav-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 10px 2px;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.2;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: color 0.2s;
+}
+
+.mobile-bottom-nav .bottom-nav-btn.active {
+    color: var(--green-primary);
+}
+
+.mobile-bottom-nav .bottom-nav-icon {
+    font-size: 20px;
+    line-height: 1;
+}
+
+.mobile-bottom-nav .bottom-nav-label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
+body.dark-mode .mobile-bottom-nav {
+    background: var(--bg-secondary);
+    border-top-color: var(--border-color);
+    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.4);
+}
+
 .wishlist-btn-header {
     position: relative;
 }
@@ -2266,6 +2322,26 @@ body.dark-mode .review-form h4 { color: var(--text-primary); }
 @media (max-width: 768px) {
 
     html, body { overflow-x: hidden; }
+
+    /* ---- hide header buttons that duplicate the bottom navigation ---- */
+    .hide-on-mobile-nav {
+        display: none !important;
+    }
+
+    /* ---- mobile bottom navigation ---- */
+    .mobile-bottom-nav {
+        display: flex;
+    }
+    body.has-bottom-nav {
+        padding-bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+    }
+    body.has-bottom-nav .fm-toast {
+        left: 16px;
+        right: 16px;
+        bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+        text-align: center;
+        justify-content: center;
+    }
 
     /* ---- consistent mobile header stacking: logo+hamburger / search / actions ---- */
     header {

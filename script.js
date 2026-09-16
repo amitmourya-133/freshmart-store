@@ -690,6 +690,69 @@ document.addEventListener("click", function (e) {
 });
 
 // ===============================
+// MOBILE BOTTOM NAVIGATION (Home / Categories / Mall / Video Finds / My Orders)
+// ===============================
+
+function initBottomNav() {
+    var page = document.body ? document.body.dataset.page : "";
+    if (!page || page === "login" || page === "signup" || page === "admin") return;
+    if (document.getElementById("mobileBottomNav")) return;
+
+    var storePages = ["home", "orders", "detail", "checkout", "help", "subscription"];
+    if (storePages.indexOf(page) === -1) return;
+
+    var items = [
+        { id: "home", label: "Home", icon: "🏠", active: page !== "orders" },
+        { id: "categories", label: "Categories", icon: "🧺", active: false },
+        { id: "mall", label: "Mall", icon: "🏪", active: false },
+        { id: "video", label: "Video Finds", icon: "🎬", active: false },
+        { id: "orders", label: "My Orders", icon: "📦", active: page === "orders" }
+    ];
+
+    var nav = document.createElement("nav");
+    nav.id = "mobileBottomNav";
+    nav.className = "mobile-bottom-nav";
+    nav.setAttribute("aria-label", "Primary mobile navigation");
+
+    items.forEach(function (item) {
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "bottom-nav-btn" + (item.active ? " active" : "");
+        btn.setAttribute("data-nav", item.id);
+        btn.setAttribute("aria-label", item.label);
+        btn.innerHTML = '<span class="bottom-nav-icon" aria-hidden="true">' + item.icon + '</span><span class="bottom-nav-label">' + item.label + '</span>';
+        nav.appendChild(btn);
+    });
+
+    nav.addEventListener("click", function (e) {
+        var btn = e.target.closest(".bottom-nav-btn");
+        if (!btn) return;
+        handleBottomNavClick(btn.getAttribute("data-nav"));
+    });
+
+    document.body.appendChild(nav);
+    document.body.classList.add("has-bottom-nav");
+}
+
+function handleBottomNavClick(id) {
+    var page = document.body ? document.body.dataset.page : "";
+    if (id === "home") {
+        if (page === "home") window.scrollTo({ top: 0, behavior: "smooth" });
+        else window.location.href = "index.html";
+    } else if (id === "categories") {
+        if (page === "home") goSection("categories");
+        else window.location.href = "index.html#categories";
+    } else if (id === "mall") {
+        showToast("Mall coming soon — stay tuned!", "info");
+    } else if (id === "video") {
+        showToast("Video Finds coming soon!", "info");
+    } else if (id === "orders") {
+        if (page !== "orders") window.location.href = "orders.html";
+        else window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+}
+
+// ===============================
 // CATALOG FILTERS (category + search + price + sort)
 // ===============================
 
@@ -2370,6 +2433,7 @@ function initializePage() {
     initDarkMode();
     loadWishlist();
     updateAuthHeader();
+    initBottomNav();
 
     // Refresh the stored profile with the backend role so the header can show the
     // Admin button for admins (even for sessions created before role was persisted).
@@ -2438,6 +2502,11 @@ function initializePage() {
         renderProducts();
         renderRecentlyViewed();
         runPage();
+
+        // Bottom-nav "Categories" from another page lands here with #categories.
+        if (page === "home" && window.location.hash === "#categories") {
+            setTimeout(function() { goSection("categories"); }, 150);
+        }
     });
 
     bindSignupForm();
