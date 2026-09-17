@@ -129,18 +129,15 @@
                         value="online"
                         onchange="handlePaymentMethodChange(this.value)"
                     >
-                    🏦 Pay Online (UPI / Card / Net Banking)
+                    📱 Pay Online (UPI)
                 </label>
             </div>
 
             <div class="online-methods" id="onlineMethods" style="display:none;">
                 <div class="method-row">
                     <label><input type="radio" name="onlineMethod" value="UPI" checked> 📱 UPI</label>
-                    <label><input type="radio" name="onlineMethod" value="card"> 💳 Card</label>
-                    <label><input type="radio" name="onlineMethod" value="netbanking"> 🏛️ Net Banking</label>
-                    <label><input type="radio" name="onlineMethod" value="wallet"> 👛 Wallet</label>
                 </div>
-                <p class="online-note">Complete your payment online to confirm your order. Your order status updates once payment is confirmed.</p>
+                <p class="online-note">Complete your payment via UPI to confirm your order. Your order status updates once payment is confirmed.</p>
             </div>
 
             <div class="payment-flag" id="paymentFlag" style="display:none;"></div>

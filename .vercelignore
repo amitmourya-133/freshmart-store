@@ -1,0 +1,31 @@
+# FreshMart - files that must NOT be uploaded to Vercel deployments as static
+# public assets. Only NON-RUNTIME files are listed here: nothing in the
+# serverless runtime (api/index.js -> app.js) requires them, so they can be
+# safely excluded from the deployment while remaining in the repository.
+#
+# The runtime backend (app.js, controllers/, models/, routes/, utils/,
+# middleware/) is intentionally NOT listed here - Vercel's function bundler
+# (nft) must trace it from the working tree at build time. Those files are
+# instead blocked at the edge via vercel.json "routes".
+
+# Secrets / local scratch (never uploaded)
+.env
+.env.*
+node-v24.21.0-x64.msi
+safecheck.txt
+
+# Tooling / dependencies
+.vscode/
+.git/
+node_modules/
+*.log
+
+# Local / CLI-only scripts (not part of the serverless runtime)
+server.js
+seed.js
+seedAdmin.js
+testAdmin.js
+
+# Internal documentation / task reports (not required at runtime)
+FRESHMART_TASK3_REPORT.md
+FRESHMART_TASK4_REPORT.md

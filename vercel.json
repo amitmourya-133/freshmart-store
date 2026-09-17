@@ -1,57 +1,59 @@
 {
   "version": 2,
-  "rewrites": [
+  "builds": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api/index"
+      "src": "api/index.js",
+      "use": "@vercel/node"
     },
     {
-      "source": "/server.js",
-      "destination": "/__freshmart_blocked__"
+      "src": "*.html",
+      "use": "@vercel/static"
     },
     {
-      "source": "/app.js",
-      "destination": "/__freshmart_blocked__"
+      "src": "*.css",
+      "use": "@vercel/static"
     },
     {
-      "source": "/seed.js",
-      "destination": "/__freshmart_blocked__"
+      "src": "api.js",
+      "use": "@vercel/static"
     },
     {
-      "source": "/seedAdmin.js",
-      "destination": "/__freshmart_blocked__"
+      "src": "script.js",
+      "use": "@vercel/static"
     },
     {
-      "source": "/testAdmin.js",
-      "destination": "/__freshmart_blocked__"
+      "src": "admin.js",
+      "use": "@vercel/static"
     },
     {
-      "source": "/controllers/:path*",
-      "destination": "/__freshmart_blocked__"
+      "src": "features.js",
+      "use": "@vercel/static"
     },
     {
-      "source": "/models/:path*",
-      "destination": "/__freshmart_blocked__"
+      "src": "help.js",
+      "use": "@vercel/static"
     },
     {
-      "source": "/routes/:path*",
-      "destination": "/__freshmart_blocked__"
+      "src": "subscription.js",
+      "use": "@vercel/static"
     },
     {
-      "source": "/utils/:path*",
-      "destination": "/__freshmart_blocked__"
+      "src": "images/**",
+      "use": "@vercel/static"
     },
     {
-      "source": "/middleware/:path*",
-      "destination": "/__freshmart_blocked__"
+      "src": "groceries/**",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/",
+      "dest": "/index.html"
     },
     {
-      "source": "/FRESHMART_TASK3_REPORT.md",
-      "destination": "/__freshmart_blocked__"
-    },
-    {
-      "source": "/FRESHMART_TASK4_REPORT.md",
-      "destination": "/__freshmart_blocked__"
+      "src": "/api/(.*)",
+      "dest": "/api/index.js"
     }
   ]
 }

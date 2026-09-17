@@ -981,6 +981,18 @@ function deleteReview(reviewId, productName) {
 // ===============================
 
 function initAdminPage() {
+    // API requests cannot work when the HTML file is opened directly from
+    // disk. Send Chrome (and other browsers) to the served version instead.
+    // Use the current origin when served (production-safe); fall back to the
+    // local dev server only when opened from disk (file:).
+    if (window.location.protocol === "file:") {
+        var adminUrl = (window.location.origin && window.location.origin !== "null")
+            ? window.location.origin + "/admin.html"
+            : "http://localhost:5000/admin.html";
+        window.location.replace(adminUrl);
+        return;
+    }
+
     initDarkMode();
 
     var token = getAuthToken();
