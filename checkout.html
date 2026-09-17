@@ -3,9 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Complete your FreshMart grocery order - enter delivery details, choose a delivery slot and pay online to confirm your order.">
 
     <title>Checkout - FreshMart</title>
 
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🥬</text></svg>">
     <link rel="stylesheet" href="style.css">
 </head>
 
@@ -43,6 +45,7 @@
                 type="text"
                 id="customerName"
                 placeholder="Enter your name"
+                autocomplete="name"
             >
 
 
@@ -54,6 +57,7 @@
                 placeholder="Enter mobile number"
                 maxlength="10"
                 pattern="[0-9]{10}"
+                autocomplete="tel"
             >
 
 
@@ -62,6 +66,7 @@
             <textarea
                 id="customerAddress"
                 placeholder="House no, street, area..."
+                autocomplete="street-address"
             ></textarea>
 
 
@@ -71,6 +76,7 @@
                 type="text"
                 id="customerCity"
                 placeholder="Enter city"
+                autocomplete="address-level2"
             >
 
 
@@ -81,6 +87,7 @@
                 id="customerState"
                 placeholder="State (optional)"
                 maxlength="40"
+                autocomplete="address-level1"
             >
 
 
@@ -92,6 +99,7 @@
                 placeholder="Enter pincode"
                 maxlength="6"
                 pattern="[0-9]{6}"
+                autocomplete="postal-code"
                 onblur="detectPincodeInfo()"
             >
 
@@ -132,7 +140,7 @@
                     <label><input type="radio" name="onlineMethod" value="netbanking"> 🏛️ Net Banking</label>
                     <label><input type="radio" name="onlineMethod" value="wallet"> 👛 Wallet</label>
                 </div>
-                <p class="online-note">Secure checkout via Razorpay. You will be redirected to a secure payment page to complete your order.</p>
+                <p class="online-note">Complete your payment online to confirm your order. Your order status updates once payment is confirmed.</p>
             </div>
 
             <div class="payment-flag" id="paymentFlag" style="display:none;"></div>
