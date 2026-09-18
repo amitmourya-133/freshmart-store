@@ -66,7 +66,7 @@
 | Carts | 0 | **0** |
 
 - Test के लिए बनाए 3 temp users (`gate*@x.in`) + उनके carts हटा दिए; `deleteMany/drop` का उपयोग नहीं, सिर्फ नियंत्रित filter-delete।
-- 56 products/images/reviews/cart/wishlist/UPI/QR/Razorpay/COD/order-lifecycle/tracking/cancel-refund/admin — सब untouched।
+- 56 products/images/reviews/cart/wishlist/UPI/QR/COD/order-lifecycle/tracking/cancel-refund/admin — सब untouched।
 
 ## 7. Merk/Remaining Issue
 

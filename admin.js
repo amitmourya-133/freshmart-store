@@ -425,7 +425,6 @@ function showOrderDetail(order, skipReload) {
         return '<option value="' + s + '" ' + (s === order.status ? "selected" : "") + '>' + s + '</option>';
     }).join("");
 
-    var razorpay = order.razorpay || {};
     var refund = order.refund || {};
     var payActions = "";
     if (order.paymentStatus === "PENDING" && order.paymentMode === "manual") {
@@ -451,8 +450,6 @@ function showOrderDetail(order, skipReload) {
             '<p>Method: ' + (order.paymentMethod || order.payment || "â€”") + (order.paymentMode ? " (" + order.paymentMode + ")" : "") + '</p>' +
             (order.paymentReference ? '<p>UPI Ref: ' + order.paymentReference + '</p>' : "") +
             '<p>Order ID: ' + (order.trackingId || order.orderNumber || "â€”") + '</p>' +
-            '<p>Razorpay Order: ' + (razorpay.orderId || "â€”") + '</p>' +
-            '<p>Payment ID: ' + (razorpay.paymentId || "â€”") + '</p>' +
             (refund.id ? '<p>Refund: ' + refund.id + ' (â‚¹' + (refund.amount || order.total || 0) + ')</p>' : (refund.status ? '<p>Refund: ' + refund.status + (refund.reference ? " Â· " + refund.reference : "") + '</p>' : "")) +
             payActions +
         '</div>' +

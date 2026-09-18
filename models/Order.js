@@ -34,7 +34,7 @@ const orderSchema = new mongoose.Schema(
         items: [orderItemSchema],
         payment: { type: String, default: "Cash On Delivery" },
         paymentMethod: { type: String, default: "cod" }, // cod | online
-        paymentMode: { type: String, default: "cod" },   // cod | razorpay | manual
+        paymentMode: { type: String, default: "cod" },   // cod | manual
         // Manual UPI/QR transaction reference supplied by the customer
         paymentReference: { type: String, default: null },
         paid: { type: Boolean, default: false },
@@ -46,12 +46,6 @@ const orderSchema = new mongoose.Schema(
             default: "PENDING"
         },
         paymentAt: { type: Date, default: null },
-        razorpay: {
-            orderId: { type: String, default: null },
-            paymentId: { type: String, default: null },
-            signature: { type: String, default: null },
-            method: { type: String, default: null }
-        },
         refund: {
             id: { type: String, default: null },
             amount: { type: Number, default: 0 },

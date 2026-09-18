@@ -8,7 +8,6 @@ const Product = require("../models/Product");
 const User = require("../models/User");
 const Settings = require("../models/Settings");
 const Coupon = require("../models/Coupon");
-const Razorpay = require("razorpay");
 const { getMultFromWeight, round2 } = require("../utils/pricing");
 const { findValidCoupon, computeCouponDiscount, normalizeCode } = require("../utils/coupons");
 const emailService = require("../utils/emailService");
@@ -201,30 +200,6 @@ async function restoreStockOnce(order) {
     }
 }
 
-// Attempt a gateway refund for a real Razorpay payment. Returns true when a
-// refund was recorded. Never trusts that a refund happened without a gateway id.
-async function attemptGatewayRefund(order) {
-    if (order.paymentMode === "razorpay" && order.razorpay.paymentId &&
-        !String(order.razorpay.paymentId).startsWith("demo") && process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
-        try {
-            const rzp = new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID, key_secret: process.env.RAZORPAY_KEY_SECRET });
-            const refund = await rzp.payments.refund(order.razorpay.paymentId, {
-                amount: Math.round(order.total * 100),
-                notes: { orderNumber: order.orderNumber, reason: "Order cancelled" }
-            });
-            order.refund.id = refund.id;
-            order.refund.amount = order.total;
-            order.refund.status = refund.status || "processed";
-            order.refund.reference = refund.id;
-            order.refund.initiatedAt = new Date();
-            return refund.status !== "failed";
-        } catch (e) {
-            return false;
-        }
-    }
-    return false;
-}
-
 // Shared cancellation logic (admin + customer). Idempotent per order.
 async function applyCancellation(order, by) {
     if (order.status === "Cancelled") return { ok: false, message: "Order is already cancelled" };
@@ -233,20 +208,11 @@ async function applyCancellation(order, by) {
     await restoreStockOnce(order);
 
     if (order.paid || order.paymentStatus === "PAID") {
-        if (order.paymentMode === "razorpay" && order.razorpay.paymentId &&
-            !String(order.razorpay.paymentId).startsWith("demo")) {
-            // Real gateway payment: attempt an actual refund:
-            // REFUNDED only once the gateway confirms a refund id,
-            // otherwise PENDING_REFUND (never a hollow claim).
-            const refunded = await attemptGatewayRefund(order);
-            order.paymentStatus = refunded ? "REFUNDED" : "PENDING_REFUND";
-        } else {
-            // COD / manual payment was never settled through a gateway:
-            // there is no money to "return", so the payment is simply
-            // voided. No fake "REFUNDED" claim.
-            order.paymentStatus = "CANCELLED";
-            order.refund.reference = (order.refund && order.refund.reference) || "STORE-CREDIT";
-        }
+        // COD / UPI-manual payment was never settled through a gateway:
+        // there is no money to "return", so the payment is simply voided.
+        // No fake "REFUNDED" claim.
+        order.paymentStatus = "CANCELLED";
+        order.refund.reference = (order.refund && order.refund.reference) || "STORE-CREDIT";
     } else {
         order.paymentStatus = "CANCELLED";
     }
@@ -298,7 +264,7 @@ exports.createOrder = async (req, res) => {
             clientRef: (clientRef && String(clientRef).trim()) ? String(clientRef).trim() : undefined,
             customer: normalizeCustomer(customer),
             items: totals.items,
-            payment: payment || (finalPaymentMethod === "cod" ? "Cash On Delivery" : "Razorpay - Online"),
+            payment: payment || (finalPaymentMethod === "cod" ? "Cash On Delivery" : "UPI - Online"),
             paymentMethod: finalPaymentMethod,
             subtotal: totals.subtotal,
             delivery: totals.delivery,
@@ -333,10 +299,11 @@ exports.createOrder = async (req, res) => {
             orderData.paymentMode = "manual";
             orderData.paymentReference = (paymentReference && String(paymentReference).trim()) || null;
         } else {
-            // Razorpay flow: unpaid until server-side signature verification
+            // Online (UPI) default: unpaid until admin verifies the transfer
             orderData.paid = false;
             orderData.paymentStatus = "PENDING";
-            orderData.paymentMode = "razorpay";
+            orderData.paymentMode = "manual";
+            orderData.paymentReference = (paymentReference && String(paymentReference).trim()) || null;
         }
 
         // Reserve coupon usage BEFORE persisting the order so concurrent orders
@@ -378,32 +345,9 @@ exports.createOrder = async (req, res) => {
             throw createError;
         }
 
-        // If Razorpay keys exist and payment is still pending, create the gateway order
-        let razorpayOrder = null;
-        if (finalPaymentMethod !== "cod" && orderData.paid !== true &&
-            process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
-            try {
-                const rzp = new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID, key_secret: process.env.RAZORPAY_KEY_SECRET });
-                const rzpOptions = {
-                    amount: Math.round(order.total * 100),
-                    currency: "INR",
-                    receipt: orderNumber,
-                    notes: { orderNumber: orderNumber }
-                };
-                razorpayOrder = await rzp.orders.create(rzpOptions);
-                order.razorpay.orderId = razorpayOrder.id;
-                order.razorpay.method = null;
-                await order.save();
-            } catch (e) {
-                order.paymentMethod = finalPaymentMethod;
-            }
-        }
-
         res.status(201).json({
             success: true,
-            data: order,
-            razorpayOrder: razorpayOrder,
-            key_id: (razorpayOrder && razorpayOrder.id) ? (process.env.RAZORPAY_KEY_ID || null) : null
+            data: order
         });
 
         // Order confirmation email (fire-and-forget; never blocks or fails the
@@ -737,7 +681,7 @@ exports.getOrderByNumber = async (req, res) => {
         if (!order) {
             return res.status(404).json({ success: false, message: "Order not found" });
         }
-        // Tracking-only view: NEVER leak phone, address, payment ids or Razorpay data
+        // Tracking-only view: NEVER leak phone, address, payment ids or refund id
         res.json({
             success: true,
             data: {

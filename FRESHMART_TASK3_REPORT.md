@@ -50,7 +50,7 @@
 
 ### नया
 - 7-state lifecycle: **Placed → Confirmed → Preparing → Out for Delivery → Delivered (पलटना मना)** + Cancelled; हर बदलाव `statusHistory` में logged।
-- COD → तुरंत `PAID`; Online/QR → `PENDING` (manual ref के साथ), admin verify करे तो `PAID`; रिजेक्ट तो `FAILED`; cancel → cod/manual का `CANCELLED` (STORE-CREDIT ref) और रियल Razorpay का `REFUNDED/PENDING_REFUND`।
+- COD → तुरंत `PAID`; Online/QR → `PENDING` (manual ref के साथ), admin verify करे तो `PAID`; रिजेक्ट तो `FAILED`; cancel → cod/manual का `CANCELLED` (STORE-CREDIT ref)।
 - Client जो कीमत भेजता है वो सर्वर-प्राइस से replace होती है (lie-proof): `₹1 Potato → server ₹1`।
 - Tracking id `FM-YYYYMMDD-XXXXXX`, orderNumber `FM#...`.
 - Idempotency: same `clientRef` → same order, stock double-cut नहीं।
@@ -60,7 +60,7 @@
 ## 4. पेमेंट स्टेटस (अलग किया गया)
 
 - `paymentStatus`: `PENDING → PAID / FAILED`; cancel पर `CANCELLED`; refund पर `REFUNDED/PENDING_REFUND`।
-- `paymentMode`: `cod` | `razorpay` | `manual` | `pay-at-delivery`।
+- `paymentMode`: `cod` | `manual`।
 - ऑर्डर स्टेटस और पेमेंट स्टेटस के transition अलग-अलग controller में हैं, आपस में mixed नहीं।
 
 ## 5. ₹50 और ₹125 UPI सटीकता (सर्वर द्वारा)
@@ -93,7 +93,6 @@ quote API से ही सर्वर `subtotal + delivery + total` लौट�
 - सिर्फ `Placed` या `Confirmed` state में; Delivered/Preparing/Out-for-Delivery पर 400।
 - Cancel पर: stock 100% वापस, `statusHistory` में entry, double-cancel blocked।
 - COD/manual-paid cancel → `paymentStatus:"CANCELLED"` + `refund.reference:"STORE-CREDIT"` (झूठा REFUNDED नहीं भेजता)।
-- Real Razorpay keys हों तो gateway refund attempt; demo (बिना keys) में `PENDING_REFUND`।
 
 ## 8. Admin ओवरव्यू + फिल्टर
 
@@ -108,10 +107,10 @@ quote API से ही सर्वर `subtotal + delivery + total` लौट�
 
 ## 10. सुरक्षा
 
-- `utils/rateLimit.js`: auth 30/10min, payment create+verify 60/10min; webhook unlimited।
+- `utils/rateLimit.js`: auth 30/10min।
 - 100 अपराधिक endpoing पर `isBadObjectId` → 404 (crash हटा)।
 - `.env`, controller source files → static middleware से blocked (403/404 tested)।
-- `/payments/config` me secret never; `/users/me` me कोई password/otp hash नहीं।
+- `/users/me` me कोई password/otp hash नहीं।
 - `devOTP` production में बंद।
 - JWT-protected / ownership-checked; customer के पास admin endpoints 403।
 
@@ -119,9 +118,9 @@ quote API से ही सर्वर `subtotal + delivery + total` लौट�
 
 | Suite | Result |
 |---|---|
-| `smoke3.js` (behavioral: address, idempotency, manual pending, razorpay branch, tracking, admin filters, transitions, ownership, cancel+stock, double-cancel) | **34/34 PASS** |
+| `smoke3.js` (behavioral: address, idempotency, manual pending, tracking, admin filters, transitions, ownership, cancel+stock, double-cancel) | **34/34 PASS** |
 | `smoke5.js` (₹1 lie proof, ₹50→70, ₹125→145, min order, qty>stock, guest 401, manual QR PENDING, double-click idempotent) | **10/10 PASS** |
-| `fulltest.js` **A–AF** (81 checks): health; catalog 56 unique; auth/dup/403s/401s; cart set+clamp; address validation; server price; ₹50/125/480/500 totals; `am=145` UPI format; manual PENDING w/ ref; unique tracking; idempotency no double stock; admin filter/search; verify→PAID + guard; forward/backward transitions; ownership 403s; my orders; owner cancel + stock restore + double-cancel block; track by number/trackingId + no PII; overview shape; product update reflects; cod paid; razorpay pending + demo manual; QR image 200 + **SHA-256 unchanged** `878727F41200DD97EFF787641CF2142285635DAA9EF5F36060CD73B058E187FA`; `.env`/source blocked; no duplicate names; reviews lifecycle (add/list/delete/review) | **81/81 PASS** |
+| `fulltest.js` **A–AF** (81 checks): health; catalog 56 unique; auth/dup/403s/401s; cart set+clamp; address validation; server price; ₹50/125/480/500 totals; `am=145` UPI format; manual PENDING w/ ref; unique tracking; idempotency no double stock; admin filter/search; verify→PAID + guard; forward/backward transitions; ownership 403s; my orders; owner cancel + stock restore + double-cancel block; track by number/trackingId + no PII; overview shape; product update reflects; cod paid; manual pending; QR image 200 + **SHA-256 unchanged** `878727F41200DD97EFF787641CF2142285635DAA9EF5F36060CD73B058E187FA`; `.env`/source blocked; no duplicate names; reviews lifecycle (add/list/delete/review) | **81/81 PASS** |
 
 **Total: 125/125 PASS** — backend+API पूरी तरह verified।
 
@@ -139,16 +138,14 @@ Final: Products=56, Users=1 (amitmourya822@gmail.com), Orders=0, Reviews=0,
 
 ## 13. Vercel/Serverless सुरक्षा
 
-- Serverless deploy में in-memory rate limit per-instance ही होगा (anti-DoS मजबूत नहीं, पर stateless)। Webhook `rawBody` की assembly `app.js` में पहले से है।
+- Serverless deploy में in-memory rate limit per-instance ही होगा (anti-DoS मजबूत नहीं, पर stateless)।
 - कोई file-write नहीं; कोई session-store नहीं; सब Mongo-DB (stateless-ok)।
-- प्रोडक्शन पर `.env` में रियल RAZORPAY keys + ADMIN account ही डालना; `NODE_ENV=production` करना (devOTP auto-disable)।
+- प्रोडक्शन पर `.env` में ADMIN account ही डालना; `NODE_ENV=production` करना (devOTP auto-disable)।
 
 ## 14. Limitation / जानबूझकर छोड़ा
 
-- **Razorpay real gateway** बिना keys के नहीं चलाया गया — create-order चालू है (demo path), verification demo पर `PENDING` रहता है; real keys डालते ही real signature check चालू होगा।
 - **UPI app deep-link** असली फोन पर खुलना testable नहीं था — link format + `am=` exact verify किया; manual Ref-ID fallback दे दिया।
 - Rate limit in-memory है (serverless पर प्रति-instance)।
-- कस्टमर cancel के उपर्युक्त गेटवे से पैसा वापस (gateway refund) real keys के बिना केवल code-path verified।
 
 ## 15. REST API संक्षेप
 
@@ -163,8 +160,6 @@ GET  /api/orders/admin/overview
 PATCH /api/orders/:id/status        # admin transitions
 PATCH /api/orders/:id/payment-status# admin verify/reject
 GET  /api/users/admin/list    # customers (with orderCount)
-POST /api/payments/create-order     # razorpay (demo ok)
-POST /api/payments/verify          # signature/demo manual
 ```
 
 ## 16. निष्कर्ष

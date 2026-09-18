@@ -2444,30 +2444,19 @@ function placeOrder() {
     var order = buildOrderObject();
     var method = getCurrentPaymentMethod();
 
-    // Online payment -> real Razorpay Checkout when configured, QR demo flow otherwise
+    // Online payment -> UPI/QR checkout flow (server-validated total;
+    // payment stays MANUAL + PENDING until an admin verifies the UPI transfer)
     if (method === "online") {
         var placeBtn = document.getElementById("placeOrderBtn");
         if (placeBtn) placeBtn.disabled = true;
 
-        apiPaymentConfig().then(function(config) {
-            if (config && config.configured) {
-                return placeOnlineOrder(order);
-            }
-            // Demo mode (no Razorpay keys) -> validate the total server-side first,
-            // then show the QR modal with the exact validated amount pre-filled
-            pendingOrder = order;
-            pendingOrderConfirmed = false;
-            getOrderQuote(order.items, appliedCoupon).then(function(quote) {
-                showQrPaymentModal(order, quote);
-            }).catch(function(err) {
-                reenablePlaceOrder();
-                showToast((err && err.message) ? err.message : "Could not calculate the order total. Please try again.", "error");
-            });
-        }).catch(function() {
-            // Backend unavailable -> use the QR demo flow with the client total
-            pendingOrder = order;
-            pendingOrderConfirmed = false;
-            showQrPaymentModal(order, null);
+        pendingOrder = order;
+        pendingOrderConfirmed = false;
+        getOrderQuote(order.items, appliedCoupon).then(function(quote) {
+            showQrPaymentModal(order, quote);
+        }).catch(function(err) {
+            reenablePlaceOrder();
+            showToast((err && err.message) ? err.message : "Could not calculate the order total. Please try again.", "error");
         });
         return;
     }
@@ -2477,146 +2466,9 @@ function placeOrder() {
     finalizeOrder(order);
 }
 
-// ===============================
-// REAL RAZORPAY CHECKOUT
-// ===============================
-
-function onlineMethodLabel() {
-    var m = getSelectedOnlineMethod();
-    if (m === "card") return "Card";
-    if (m === "netbanking") return "Net Banking";
-    if (m === "wallet") return "Wallet";
-    return "UPI";
-}
-
-// Create the order on the backend (server computes totals + Razorpay order), then open Checkout
-function placeOnlineOrder(order) {
-    pendingOrder = order;
-
-    var payload = {
-        customer: order.customer,
-        items: order.items.map(function(item) {
-            return {
-                name: item.name,
-                price: item.price,
-                quantity: item.quantity || 1,
-                weight: item.qtyLabel || null,
-                productId: cartItemProductId(item)
-            };
-        }),
-        payment: "Razorpay - " + onlineMethodLabel(),
-        paymentMethod: "online",
-        deliverySlot: order.deliverySlot || getDeliverySlot(),
-        paid: false,
-        couponCode: appliedCoupon || null
-    };
-
-    return createOrderBackend(payload).then(function(res) {
-        var savedOrder = res.data;
-        var rzpOrder = res.razorpayOrder;
-        var keyId = res.key_id;
-
-        if (rzpOrder && rzpOrder.id && keyId && String(rzpOrder.id).indexOf("demo_") !== 0) {
-            return openRazorpayCheckout(savedOrder, rzpOrder, keyId);
-        }
-
-        // Server is up but Razorpay isn't configured -> QR demo fallback.
-        // Server order (res.data) carries the validated total for the payment amount.
-        reenablePlaceOrder();
-        pendingOrderConfirmed = false;
-        showQrPaymentModal(order, res.data);
-    }).catch(function(err) {
-        reenablePlaceOrder();
-        showToast((err && err.message) ? err.message : "Could not initialise payment.", "error");
-        // Offline fallback so the checkout still works via the QR demo flow
-        pendingOrderConfirmed = false;
-        showQrPaymentModal(order, null);
-    });
-}
-
 function reenablePlaceOrder() {
     var btn = document.getElementById("placeOrderBtn");
     if (btn) btn.disabled = false;
-}
-
-var razorpayScriptLoading = false;
-
-function loadRazorpayCheckoutScript() {
-    return new Promise(function(resolve, reject) {
-        if (window.Razorpay) return resolve();
-        if (razorpayScriptLoading) {
-            var waited = 0;
-            var iv = setInterval(function() {
-                if (window.Razorpay) { clearInterval(iv); return resolve(); }
-                waited += 50;
-                if (waited > 8000) { clearInterval(iv); return reject(new Error("Payment script timed out")); }
-            }, 50);
-            return;
-        }
-        razorpayScriptLoading = true;
-        var s = document.createElement("script");
-        s.src = "https://checkout.razorpay.com/v1/checkout.js";
-        s.onload = function() { resolve(); };
-        s.onerror = function() { razorpayScriptLoading = false; reject(new Error("Failed to load payment script")); };
-        document.head.appendChild(s);
-    });
-}
-
-function openRazorpayCheckout(savedOrder, rzpOrder, keyId) {
-    return loadRazorpayCheckoutScript().then(function() {
-        return new Promise(function(resolve) {
-            var options = {
-                key: keyId,
-                order_id: rzpOrder.id,
-                amount: rzpOrder.amount,
-                currency: rzpOrder.currency || "INR",
-                name: "FreshMart",
-                description: "FreshMart Order #" + savedOrder.orderNumber,
-                theme: { color: "#159447" },
-                handler: function(response) {
-                    apiVerifyPayment({
-                        orderId: savedOrder._id,
-                        razorpay_order_id: response.razorpay_order_id,
-                        razorpay_payment_id: response.razorpay_payment_id,
-                        razorpay_signature: response.razorpay_signature
-                    }).then(function(verifiedOrder) {
-                        var order = pendingOrder || savedOrder;
-                        order.orderNumber = savedOrder.orderNumber;
-                        order.trackingId = verifiedOrder.trackingId || savedOrder.trackingId;
-                        order.payment = verifiedOrder.payment || ("Razorpay - " + onlineMethodLabel());
-                        order.paymentStatus = verifiedOrder.paymentStatus || (verifiedOrder.paid ? "PAID" : "PENDING");
-                        finishOrderUI(order, true, order.paymentStatus);
-                        resolve();
-                    }).catch(function(err) {
-                        showToast((err && err.message) ? err.message : "Payment verification failed.", "error");
-                        reenablePlaceOrder();
-                        resolve();
-                    });
-                },
-                modal: {
-                    ondismiss: function() {
-                        showToast("Payment cancelled. Your cart is saved.", "warning");
-                        reenablePlaceOrder();
-                        resolve();
-                    }
-                }
-            };
-
-            try {
-                var rzp = new Razorpay(options);
-                rzp.open();
-            } catch (e) {
-                showToast("Could not open the payment window.", "error");
-                reenablePlaceOrder();
-                resolve();
-            }
-        });
-    }).catch(function() {
-        showToast("Could not load the payment gateway. Please try again.", "error");
-        reenablePlaceOrder();
-        pendingOrderConfirmed = false;
-        showQrPaymentModal(pendingOrder, null);
-    });
 }
 
 // Called when user clicks "I have paid". The payment is recorded as MANUAL and
@@ -2659,7 +2511,7 @@ function finalizeOrder(order, isOnline) {
         subtotal: order.subtotal,
         delivery: order.delivery,
         total: order.total,
-        paid: false, // the server decides COD-paid vs manual-pending vs razorpay
+        paid: false, // the server decides COD-paid vs manual-pending (UPI)
         deliverySlot: order.deliverySlot || getDeliverySlot()
     };
     if (appliedCoupon) payload.couponCode = appliedCoupon;

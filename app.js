@@ -14,7 +14,6 @@ const path = require("path");
 const productRoutes = require("./routes/productRoutes");
 const orderRoutes = require("./routes/orderRoutes");
 const userRoutes = require("./routes/userRoutes");
-const paymentRoutes = require("./routes/paymentRoutes");
 const cartRoutes = require("./routes/cartRoutes");
 const reviewRoutes = require("./routes/reviewRoutes");
 const settingsRoutes = require("./routes/settingsRoutes");
@@ -33,10 +32,6 @@ mime.define({ "image/jpeg": ["jfif"] }, true);
 
 app.use(cors());
 
-// Raw body for the Razorpay webhook (needed for HMAC signature verification).
-// Must be mounted BEFORE express.json() so the raw buffer is preserved.
-app.use("/api/payments/webhook", express.raw({ type: "*/*" }));
-
 app.use(express.json());
 
 // ===============================
@@ -46,7 +41,6 @@ app.use(express.json());
 app.use("/api/products", productRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/users", userRoutes);
-app.use("/api/payments", paymentRoutes);
 app.use("/api/cart", cartRoutes);
 app.use("/api/reviews", reviewRoutes);
 app.use("/api/settings", settingsRoutes);
