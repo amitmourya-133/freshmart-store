@@ -326,8 +326,8 @@ function renderOrders() {
         var itemsHtml = "";
         (order.items || []).forEach(function(item) {
             itemsHtml += '<div class="admin-order-item">' +
-                '<span>' + (item.name || item.productName || "Item") + ' Ã— ' + (item.quantity || 1) + '</span>' +
-                '<strong>â‚¹' + ((item.price || 0) * (item.quantity || 1)) + '</strong>' +
+                '<span>' + (item.name || item.productName || "Item") + ' &times; ' + (item.quantity || 1) + '</span>' +
+                '<strong>&#8377;' + ((item.price || 0) * (item.quantity || 1)) + '</strong>' +
                 '</div>';
         });
 
@@ -338,8 +338,8 @@ function renderOrders() {
         // Manual payment awaiting verification -> quick verify / reject buttons
         var payActions = "";
         if (order.paymentStatus === "PENDING" && order.paymentMode === "manual") {
-            payActions = '<button class="row-btn verify" onclick="setOrderPayment(\'' + order._id + '\', \'PAID\')" title="Verify payment">âœ“ Verify</button>' +
-                         '<button class="row-btn reject" onclick="setOrderPayment(\'' + order._id + '\', \'FAILED\', \'Rejected by admin\')" title="Reject payment">âœ• Reject</button>';
+            payActions = '<button class="row-btn verify" onclick="setOrderPayment(\'' + order._id + '\', \'PAID\')" title="Verify payment">&#10003; Verify</button>' +
+                         '<button class="row-btn reject" onclick="setOrderPayment(\'' + order._id + '\', \'FAILED\', \'Rejected by admin\')" title="Reject payment">&#10005; Reject</button>';
         }
 
         html += '<div class="admin-order-card">' +
@@ -351,15 +351,15 @@ function renderOrders() {
             '</div>' +
             payBadge(order) +
             '<div class="admin-order-customer">' +
-                (customer.name || order.name || "Customer") + ' â€¢ ' + (customer.phone || order.phone || "") +
-                (customer.email || (order.user && order.user.email) ? '<div class="admin-order-email">âœ‰ï¸ ' + (customer.email || (order.user && order.user.email)) + '</div>' : "") +
+                (customer.name || order.name || "Customer") + ' &bull; ' + (customer.phone || order.phone || "") +
+                (customer.email || (order.user && order.user.email) ? '<div class="admin-order-email"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-envelope"><path d="M0 4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2V4zM1 3a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h2v1H1V4a1 1 0 0 0-1-1V3z"/></svg> ' + (customer.email || (order.user && order.user.email)) + '</div>' : "") +
                 '<div class="admin-order-address">' + (customer.address || order.address || "") + (customer.city ? ", " + customer.city : "") + (customer.state ? ", " + customer.state : "") + (customer.pincode ? " - " + customer.pincode : "") + '</div>' +
             '</div>' +
             '<div class="admin-order-items">' + itemsHtml + '</div>' +
             '<div class="admin-order-foot">' +
-                '<div class="admin-order-total">Total: <strong>â‚¹' + (order.total || 0) + '</strong></div>' +
+                '<div class="admin-order-total">Total: <strong>&#8377;' + (order.total || 0) + '</strong></div>' +
                 '<div class="admin-order-actions">' +
-                    '<button class="row-btn edit" onclick="openOrderDetail(\'' + order._id + '\')" title="View details">ðŸ‘ï¸</button>' +
+                    '<button class="row-btn edit" onclick="openOrderDetail(\'' + order._id + '\')" title="View details"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-info-circle"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 0 0 8 0a8 8 0 0 0 0 16zM15 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/></svg></button>' +
                     payActions +
                     '<select class="status-select" onchange="changeOrderStatus(\'' + order._id + '\', this.value)">' +
                         ORDER_STATUSES.map(function(s) {
@@ -418,7 +418,7 @@ function showOrderDetail(order, skipReload) {
         var thumb = img
             ? '<img class="order-item-thumb" src="' + img + '" alt="" onerror="this.style.display=\'none\'">'
             : '<span class="order-item-emoji">' + (item.emoji || "ðŸ¥¬") + '</span>';
-        return '<tr><td>' + thumb + (item.name || item.productName || "Item") + '</td><td>' + (item.quantity || 1) + '</td><td>â‚¹' + (item.price || 0) + '</td><td><strong>â‚¹' + ((item.price || 0) * (item.quantity || 1)) + '</strong></td></tr>';
+        return '<tr><td>' + thumb + (item.name || item.productName || "Item") + '</td><td>' + (item.quantity || 1) + '</td><td>&#8377;' + (item.price || 0) + '</td><td><strong>&#8377' + ((item.price || 0) * (item.quantity || 1)) + '</strong></td></tr>';
     }).join("");
 
     var statusOptions = ORDER_STATUSES.map(function(s) {
@@ -428,21 +428,21 @@ function showOrderDetail(order, skipReload) {
     var refund = order.refund || {};
     var payActions = "";
     if (order.paymentStatus === "PENDING" && order.paymentMode === "manual") {
-        payActions = '<div><button class="row-btn verify" onclick="setOrderPayment(\'' + order._id + '\', \'PAID\')">âœ“ Verify Payment</button> ' +
-            '<button class="row-btn reject" onclick="setOrderPayment(\'' + order._id + '\', \'FAILED\', \'Rejected by admin\')">âœ• Reject Payment</button></div>';
+        payActions = '<div><button class="row-btn verify" onclick="setOrderPayment(\'' + order._id + '\', \'PAID\')">&#10003; Verify Payment</button> ' +
+            '<button class="row-btn reject" onclick="setOrderPayment(\'' + order._id + '\', \'FAILED\', \'Rejected by admin\')">&#10005; Reject Payment</button></div>';
     }
 
-    var timeline = (order.statusHistory || []).map(function(h) {
-        return '<li><strong>' + (h.status || "â€”") + '</strong> <small>' + (h.at ? new Date(h.at).toLocaleString() : "") + (h.by ? " Â· " + h.by : "") + '</small></li>';
+var timeline = (order.statusHistory || []).map(function(h) {
+        return '<li><strong>' + (h.status || "&#8212;") + '</strong> <small>' + (h.at ? new Date(h.at).toLocaleString() : "") + (h.by ? " Â· " + h.by : "") + '</small></li>';
     }).join("");
 
     document.getElementById("orderDetailBody").innerHTML =
-        '<div class="order-detail-block">' +
+'<div class="order-detail-block">' +
             '<h4>Customer</h4>' +
-            '<p>' + (customer.name || order.name || "â€”") + '</p>' +
-            '<p>ðŸ“ž ' + (customer.phone || order.phone || "â€”") + '</p>' +
-            '<p>âœ‰ï¸ ' + (customer.email || order.email || (order.user && order.user.email) || "â€”") + '</p>' +
-            '<p>ðŸ“ ' + ((customer.address || order.address || "") + (customer.city ? ", " + customer.city : "") + (customer.state ? ", " + customer.state : "") + (customer.pincode ? " - " + customer.pincode : "")) + '</p>' +
+            '<p>' + (customer.name || order.name || "&#8212;") + '</p>' +
+            '<p><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-telephone"><path d="M1.878 1.013a.945.945 0 1 1 1.654 1.297l-7.857 9.82c-.54.655-1.263.232-1.263-.395l7.53-6.878L1.878 1.013zm1.157 6.059L1.223.76c.331.455.606.77 1.04.893l6.315 3.06c.434.21.703.43.703.633 0 .206-.06.397-.175.557l-5.863 8.575L11.038 5.53c-.161-.455-.375-.77-1.04-.893l-6.282-3.05a.95.95 0 0 1-.052-.311zM3.835 1.808c.187-.35.375-.648.423-.883l.308-.75c.048-.124.073-.253.073-.386 0-.131-.025-.255-.073-.379l-.315.75c-.048.123-.073.252-.073.386 0 .134.025.258.073.381l.312.75c.001.136.01.266.01.395v.025l-.008-.002M5.335 1.575c-.287.08- .534.23.73.437l-.695.655c-.184.173-.353.322-.496.437l-.59 1.47c-.12.31-.189.596-.189.831s.069.52.189.83l.59 1.47c.107.283.266.432.496.437l.695.655c.196-.207.443-.358.73-.437l.695-.655c.287.08.534.23.73.437l.59-1.47c.12-.31.189-.52.189-.831s-.069-.52-.189-.83l-.59-1.47z"/></svg> ' + (customer.phone || order.phone || "") + '</p>' +
+            '<p><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-envelope"><path d="M0 4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2V4zM1 3a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h2v1H1V4a1 1 0 0 0-1-1V3z"/></svg> ' + (customer.email || order.email || (order.user && order.user.email) || "") + '</p>' +
+            '<p>' + ((customer.address || order.address || "") + (customer.city ? ", " + customer.city : "") + (customer.state ? ", " + customer.state : "") + (customer.pincode ? " - " + customer.pincode : "")) + '</p>' +
         '</div>' +
         '<div class="order-detail-block">' +
             '<h4>Payment</h4>' +
