@@ -1174,7 +1174,6 @@ function couponById(id) {
 
 function openCouponModal(id) {
     var coupon = id ? couponById(id) : null;
-    if (id && !coupon) return;
     if (typeof fetchAdminCoupons === "function" && id && !coupon) {
         fetchAdminCoupons().then(function(list) {
             adminCoupons = list;
@@ -1183,6 +1182,7 @@ function openCouponModal(id) {
         });
         return;
     }
+    if (id && !coupon) return;
     adminCoupons = adminCoupons || [];
     fillCouponForm(coupon);
 }
