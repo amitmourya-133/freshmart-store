@@ -131,8 +131,8 @@ function loadAdminOverview() {
             { label: "Delivered", value: m.deliveredOrders },
             { label: "Cancelled", value: m.cancelledOrders },
             { label: "Paid (Payment)", value: m.paidOrders },
-            { label: "Total Sales", value: "â‚¹" + m.totalSales },
-            { label: "Low Stock (â‰¤" + m.lowStockThreshold + ")", value: m.lowStockProducts, warn: m.lowStockProducts > 0 },
+            { label: "Total Sales", value: "&#8377;" + m.totalSales },
+            { label: "Low Stock (&le;" + m.lowStockThreshold + ")", value: m.lowStockProducts, warn: m.lowStockProducts > 0 },
             { label: "Products", value: m.totalProducts },
             { label: "Customers", value: m.totalCustomers }
         ];
@@ -379,7 +379,7 @@ function setOrderPayment(orderId, paymentStatus, reference) {
     if (paymentStatus === "PAID" && !window.confirm("Confirm this manual UPI payment as received?")) return;
     apiSetOrderPaymentStatus(orderId, paymentStatus, reference || "")
         .then(function() {
-            showToast(paymentStatus === "PAID" ? "Payment verified âœ“" : "Payment rejected", "success");
+            showToast(paymentStatus === "PAID" ? "Payment verified &#10003;" : "Payment rejected", "success");
             loadAdminOrders();
         })
         .catch(function(err) {
@@ -450,7 +450,7 @@ var timeline = (order.statusHistory || []).map(function(h) {
             '<p>Method: ' + (order.paymentMethod || order.payment || "â€”") + (order.paymentMode ? " (" + order.paymentMode + ")" : "") + '</p>' +
             (order.paymentReference ? '<p>UPI Ref: ' + order.paymentReference + '</p>' : "") +
             '<p>Order ID: ' + (order.trackingId || order.orderNumber || "â€”") + '</p>' +
-            (refund.id ? '<p>Refund: ' + refund.id + ' (â‚¹' + (refund.amount || order.total || 0) + ')</p>' : (refund.status ? '<p>Refund: ' + refund.status + (refund.reference ? " Â· " + refund.reference : "") + '</p>' : "")) +
+            (refund.id ? '<p>Refund: ' + refund.id + ' (&#8377;' + (refund.amount || order.total || 0) + ')</p>' : (refund.status ? '<p>Refund: ' + refund.status + (refund.reference ? " Â· " + refund.reference : "") + '</p>' : "")) +
             payActions +
         '</div>' +
         '<div class="order-detail-block">' +
@@ -459,9 +459,9 @@ var timeline = (order.statusHistory || []).map(function(h) {
         '</div>' +
         '<div class="order-detail-block">' +
             '<h4>Totals</h4>' +
-            '<p>Subtotal: â‚¹' + (order.subtotal || 0) + '</p>' +
-            '<p>Delivery: â‚¹' + (order.delivery || 0) + '</p>' +
-            '<p class="order-detail-total">Total: â‚¹' + (order.total || 0) + '</p>' +
+            '<p>Subtotal: &#8377;' + (order.subtotal || 0) + '</p>' +
+            '<p>Delivery: &#8377;' + (order.delivery || 0) + '</p>' +
+            '<p class="order-detail-total">Total: &#8377;' + (order.total || 0) + '</p>' +
         '</div>' +
         '<div class="order-detail-block">' +
             '<h4>Status</h4>' +
@@ -565,10 +565,10 @@ function renderProducts() {
             '</div>' +
             '<div class="admin-product-info">' +
                 '<div class="admin-product-name">' + (p.name || "Product") + ' ' + stockTag + '</div>' +
-                '<div class="admin-product-meta">' + (p.category || "") + ' â€¢ â‚¹' + (p.price || 0) + ' / ' + (p.unit || "") + '</div>' +
-                '<div class="admin-product-meta">â­ ' + (p.rating || 0).toFixed(1) + ' (' + (p.ratingCount || 0) + ' ratings)</div>' +
+                '<div class="admin-product-meta">' + (p.category || "") + ' &bull; &#8377;' + (p.price || 0) + ' / ' + (p.unit || "") + '</div>' +
+                '<div class="admin-product-meta">❌ ' + (p.rating || 0).toFixed(1) + ' (' + (p.ratingCount || 0) + ' ratings)</div>' +
                 '<div class="price-row">' +
-                    '<span class="stock-label">Price: â‚¹<span id="priceVal_' + p._id + '">' + (p.price || 0) + '</span></span>' +
+                    '<span class="stock-label">Price: &#8377;<span id="priceVal_' + p._id + '">' + (p.price || 0) + '</span></span>' +
                     '<button class="row-btn edit" onclick="beginPriceEdit(\'' + p._id + '\')" title="Quick edit price">âœï¸ Price</button>' +
                 '</div>' +
                 '<div id="priceEdit_' + p._id + '" style="display:none;" class="price-edit-row">' +
@@ -616,7 +616,7 @@ function savePriceEdit(productId) {
             var val = document.getElementById("priceVal_" + productId);
             if (val) val.textContent = updated.price;
             if (editor) editor.style.display = "none";
-            showToast("Price updated to â‚¹" + updated.price, "success");
+            showToast("Price updated to &#8377;" + updated.price, "success");
         })
         .catch(function(err) {
             showToast(err.message || "Failed to update price", "error");
@@ -933,7 +933,7 @@ function renderReviews() {
     if (!container) return;
 
     if (!adminReviews || adminReviews.length === 0) {
-        container.innerHTML = '<div class="cart-empty"><div class="cart-empty-icon">â­</div><h3>No reviews yet</h3><p>Customer reviews will appear here.</p></div>';
+        container.innerHTML = '<div class="cart-empty"><div class="cart-empty-icon">❌</div><h3>No reviews yet</h3><p>Customer reviews will appear here.</p></div>';
         return;
     }
 

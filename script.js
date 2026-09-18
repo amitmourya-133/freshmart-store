@@ -2564,6 +2564,63 @@ function finishOrderUI(order, isOnline, paymentStatus) {
     var successMessage = document.getElementById("successMessage");
     if (successMessage) successMessage.style.display = "block";
 
+    // --- Populate Order Summary ---
+    var orderSummarySection = document.getElementById("orderSummarySection");
+    var orderSummaryItems = document.getElementById("orderSummaryItems");
+    var summarySubtotal = document.getElementById("summarySubtotal");
+    var summaryDiscountRow = document.getElementById("summaryDiscountRow");
+    var summaryDiscount = document.getElementById("summaryDiscount");
+    var summaryDelivery = document.getElementById("summaryDelivery");
+    var summaryTotal = document.getElementById("summaryTotal");
+
+    if (orderSummarySection && orderSummaryItems && order.items && order.items.length > 0) {
+        orderSummarySection.style.display = "block";
+        orderSummaryItems.innerHTML = "";
+
+        order.items.forEach(function(item, i) {
+            var name = item.name || "Item";
+            var price = item.price || 0;
+            var quantity = item.quantity || 1;
+            var lineTotal = Math.round(price * quantity * 100) / 100;
+            var unit = item.unit || "kg";
+            var truncatedName = name.length > 20 ? name.substring(0, 17) + "..." : name;
+
+            var itemDiv = document.createElement("div");
+            itemDiv.className = "order-summary-item";
+            itemDiv.innerHTML = '<span class="order-summary-name">' + truncatedName + '</span>' +
+                '<span class="order-summary-qty">× ' + quantity + '</span>' +
+                '<span class="order-summary-price">₹' + price + '</span>' +
+                '<span class="order-summary-total">₹' + lineTotal + '</span>';
+            orderSummaryItems.appendChild(itemDiv);
+        });
+
+        // Scrollable if many products
+        if (order.items.length > 4) {
+            orderSummaryItems.style.maxHeight = "120px";
+            orderSummaryItems.style.overflowY = "auto";
+        }
+    } else {
+        orderSummarySection.style.display = "none";
+    }
+
+    // Subtotal
+    if (summarySubtotal) summarySubtotal.innerText = "₹" + (order.subtotal || 0);
+
+    // Discount row - only show if discount > 0 and coupon was applied
+    if (summaryDiscountRow && order.discount && order.discount > 0) {
+        summaryDiscountRow.style.display = "block";
+        if (summaryDiscount) summaryDiscount.innerText = "−₹" + order.discount;
+    } else if (summaryDiscountRow) {
+        summaryDiscountRow.style.display = "none";
+    }
+
+    // Delivery charge
+    if (summaryDelivery) summaryDelivery.innerText = "₹" + (order.delivery || 0);
+
+    // Total
+    if (summaryTotal) summaryTotal.innerText = "₹" + (order.total || 0);
+
+    // --- Receipt / Payment Status (existing logic) ---
     var receiptLine = document.getElementById("successReceipt");
     if (receiptLine) {
         if (isOnline) {
