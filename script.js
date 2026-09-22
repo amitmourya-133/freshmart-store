@@ -2444,12 +2444,85 @@ function placeOrder() {
     var order = buildOrderObject();
     var method = getCurrentPaymentMethod();
 
-    // Online payment -> UPI/QR checkout flow (server-validated total;
-    // payment stays MANUAL + PENDING until an admin verifies the UPI transfer)
-    if (method === "online") {
+    // Review-first: nothing is submitted here. "Place Order" now opens
+    // the "Confirm Order" review; only the Confirm button in that review
+    // actually places the order (online -> existing QR/quote flow,
+    // COD -> existing finalizeOrder path).
+    lastDraftOrder = order;
+    showOrderConfirmModal(order, method);
+}
+
+// Draft being reviewed in the confirm modal (kept in memory only).
+var lastDraftOrder = null;
+
+// Review-first modal: shows exactly what the customer is confirming (delivery
+// details, items, delivery slot, charges, total) BEFORE anything is sent to
+// the backend. The order is only created when "Confirm Order" is clicked.
+function showOrderConfirmModal(order) {
+    if (!order) return;
+    closeOrderConfirmModal();
+    lastDraftOrder = order;
+
+    var method = (order.paymentMethod && order.paymentMethod === "online") ? "online" : "cod";
+
+    var itemsHTML = (order.items || []).map(function(item) {
+        var label = String(item.name || "Item");
+        if (item.qtyLabel) label += " (" + item.qtyLabel + ")";
+        return '<div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;font-size:14px;">' +
+            '<span>' + label + ' × ' + item.quantity + '</span>' +
+            '<strong>₹' + Math.round(item.price * item.quantity * 100) / 100 + '</strong></div>';
+    }).join("");
+
+    var discountHTML = (order.discount && order.discount > 0)
+        ? '<div style="display:flex;justify-content:space-between;"><span>Discount</span><strong style="color:var(--green-primary);">−₹' + order.discount + '</strong></div>'
+        : "";
+
+    var paymentNote = method === "online"
+        ? "You will continue to the payment step after confirming."
+        : "Payment: Cash on Delivery.";
+
+    var customer = order.customer || {};
+    var addressLine = [customer.address, customer.city, customer.state, customer.pincode].filter(function(v) { return v; }).join(", ");
+
+    var modal = document.createElement("div");
+    modal.id = "orderConfirmModal";
+    modal.className = "qr-modal";
+    modal.innerHTML =
+        '<div class="qr-modal-box" style="text-align:left;">' +
+            '<button type="button" class="qr-close" onclick="closeOrderConfirmModal()" aria-label="Close">✕</button>' +
+            '<h3>📋 Confirm Your Order</h3>' +
+            '<p class="qr-amount">Deliver to: <strong>' + customer.name + '</strong> · ' + customer.phone + '</p>' +
+            '<p class="qr-amount" style="margin-top:0;">' + addressLine + '</p>' +
+            '<div class="qr-amount" style="margin:2px 0 8px;">Delivery slot: <strong>' + (order.deliverySlot || "") + '</strong></div>' +
+            '<div style="max-height:200px;overflow-y:auto;border-top:1px solid var(--border-color);border-bottom:1px solid var(--border-color);padding:8px 0;margin:10px 0;">' + itemsHTML + '</div>' +
+            '<div style="display:flex;justify-content:space-between;"><span>Subtotal</span><strong>₹' + order.subtotal + '</strong></div>' +
+            '<div style="display:flex;justify-content:space-between;"><span>Delivery</span><strong>₹' + order.delivery + '</strong></div>' +
+            discountHTML +
+            '<hr>' +
+            '<div style="display:flex;justify-content:space-between;font-weight:700;"><span>Total</span><strong>₹' + order.total + '</strong></div>' +
+            '<button class="paid-btn" onclick="confirmOrderClick()">✅ Confirm Order</button>' +
+            '<button class="pay-cancel-btn" onclick="closeOrderConfirmModal()">Go Back</button>' +
+            '<p class="qr-instruction" style="margin-top:10px;">' + paymentNote + '</p>' +
+        '</div>';
+    document.body.appendChild(modal);
+}
+
+function closeOrderConfirmModal() {
+    var modal = document.getElementById("orderConfirmModal");
+    if (modal) modal.remove();
+}
+
+// Only called from the review modal. Submits the confirmed draft.
+function confirmOrderClick() {
+    var order = lastDraftOrder;
+    closeOrderConfirmModal();
+    if (!order) return;
+
+    if (order.paymentMethod === "online") {
+        // Manual online/UPI draft: reuse the existing quote + QR verification
+        // flow (the backend keeps the order PENDING until an admin verifies).
         var placeBtn = document.getElementById("placeOrderBtn");
         if (placeBtn) placeBtn.disabled = true;
-
         pendingOrder = order;
         pendingOrderConfirmed = false;
         getOrderQuote(order.items, appliedCoupon).then(function(quote) {
@@ -2461,7 +2534,6 @@ function placeOrder() {
         return;
     }
 
-    // COD -> place order directly
     order.payment = "Cash On Delivery";
     finalizeOrder(order);
 }

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Complete your FreshMart grocery order - enter delivery details, choose a delivery slot and pay online to confirm your order.">
+    <meta name="description" content="Complete your FreshMart grocery order - enter delivery details, choose a delivery slot and place your order. Payment is collected on delivery.">
 
     <title>Checkout - FreshMart</title>
 
@@ -115,29 +115,9 @@
                         name="payment"
                         value="cod"
                         checked
-                        onchange="handlePaymentMethodChange(this.value)"
                     >
                     💵 Cash On Delivery
                 </label>
-            </div>
-
-            <div class="payment-option">
-                <label>
-                    <input
-                        type="radio"
-                        name="payment"
-                        value="online"
-                        onchange="handlePaymentMethodChange(this.value)"
-                    >
-                    📱 Pay Online (UPI)
-                </label>
-            </div>
-
-            <div class="online-methods" id="onlineMethods" style="display:none;">
-                <div class="method-row">
-                    <label><input type="radio" name="onlineMethod" value="UPI" checked> 📱 UPI</label>
-                </div>
-                <p class="online-note">Complete your payment via UPI to confirm your order. Your order status updates once payment is confirmed.</p>
             </div>
 
             <div class="payment-flag" id="paymentFlag" style="display:none;"></div>
