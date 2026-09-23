@@ -33,10 +33,10 @@ function loadAdminSettings() {
 }
 
 function adminLogout() {
-    setAuthToken(null);
-    localStorage.removeItem("freshMartLoggedIn");
-    writeStorageValue("freshMartUser", null);
-    window.location.href = "login.html";
+    // Clear the httpOnly session cookie server-side, then wipe local state.
+    apiLogout().then(function() {
+        window.location.href = "login.html";
+    });
 }
 
 function switchTab(tab) {
@@ -115,7 +115,7 @@ function loadAdminOrders() {
         })
         .catch(function(err) {
             container.innerHTML = '<p style="text-align:center;color:#e74c3c;padding:40px;">' +
-                (err.message || "Failed to load orders. Make sure you are logged in as admin.") + '</p>';
+                esc(err.message || "Failed to load orders. Make sure you are logged in as admin.") + '</p>';
         });
 }
 
@@ -192,7 +192,7 @@ function loadAdminDashboard() {
         }
 
         var statsHtml = cards.map(function(c) {
-            return '<div class="admin-stat' + (c.warn ? " stat-warn" : "") + '"><strong>' + c.value + '</strong><span>' + c.label + '</span></div>';
+            return '<div class="admin-stat' + (c.warn ? " stat-warn" : "") + '"><strong>' + esc(c.value) + '</strong><span>' + esc(c.label) + '</span></div>';
         }).join("");
 
         var lower = "";
@@ -204,7 +204,7 @@ function loadAdminDashboard() {
         }
     }).catch(function(err) {
         box.innerHTML = '<p style="text-align:center;color:#e74c3c;padding:20px;">' +
-            (err.message || "Failed to load dashboard") + '</p>';
+            esc(err.message || "Failed to load dashboard") + '</p>';
     });
 }
 
@@ -301,7 +301,7 @@ function payBadge(order) {
         REFUNDED: ["Refunded", "#8e44ad"],
         PENDING_REFUND: ["Refund in progress", "#f39c12"]
     };
-    var m = map[s] || [s, "#f39c12"];
+    var m = map[s] || [esc(s), "#f39c12"];
     return '<span class="pay-badge" style="background:' + m[1] + ';">' + m[0] + '</span>';
 }
 
@@ -326,7 +326,7 @@ function renderOrders() {
         var itemsHtml = "";
         (order.items || []).forEach(function(item) {
             itemsHtml += '<div class="admin-order-item">' +
-                '<span>' + (item.name || item.productName || "Item") + ' &times; ' + (item.quantity || 1) + '</span>' +
+                '<span>' + esc(item.name || item.productName || "Item") + ' &times; ' + (item.quantity || 1) + '</span>' +
                 '<strong>&#8377;' + ((item.price || 0) * (item.quantity || 1)) + '</strong>' +
                 '</div>';
         });
@@ -344,16 +344,16 @@ function renderOrders() {
 
         html += '<div class="admin-order-card">' +
             '<div class="admin-order-head">' +
-                '<div><strong>#' + (order.orderNumber || order._id || "N/A") + '</strong>' +
-                (order.trackingId ? '<div class="admin-order-track">Track: ' + order.trackingId + '</div>' : "") +
+                '<div><strong>#' + esc(order.orderNumber || order._id || "N/A") + '</strong>' +
+                (order.trackingId ? '<div class="admin-order-track">Track: ' + esc(order.trackingId) + '</div>' : "") +
                 '<span class="admin-order-date">' + orderDate(order) + '</span></div>' +
-                '<span class="order-status-badge" style="background:' + statusColor + ';">' + (order.status || "Placed") + '</span>' +
+                '<span class="order-status-badge" style="background:' + statusColor + ';">' + esc(order.status || "Placed") + '</span>' +
             '</div>' +
             payBadge(order) +
             '<div class="admin-order-customer">' +
-                (customer.name || order.name || "Customer") + ' &bull; ' + (customer.phone || order.phone || "") +
-                (customer.email || (order.user && order.user.email) ? '<div class="admin-order-email"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-envelope"><path d="M0 4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2V4zM1 3a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h2v1H1V4a1 1 0 0 0-1-1V3z"/></svg> ' + (customer.email || (order.user && order.user.email)) + '</div>' : "") +
-                '<div class="admin-order-address">' + (customer.address || order.address || "") + (customer.city ? ", " + customer.city : "") + (customer.state ? ", " + customer.state : "") + (customer.pincode ? " - " + customer.pincode : "") + '</div>' +
+                esc(customer.name || order.name || "Customer") + ' &bull; ' + esc(customer.phone || order.phone || "") +
+                (customer.email || (order.user && order.user.email) ? '<div class="admin-order-email"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-envelope"><path d="M0 4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2V4zM1 3a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h2v1H1V4a1 1 0 0 0-1-1V3z"/></svg> ' + esc(customer.email || (order.user && order.user.email)) + '</div>' : "") +
+                '<div class="admin-order-address">' + esc(customer.address || order.address || "") + (customer.city ? ", " + esc(customer.city) : "") + (customer.state ? ", " + esc(customer.state) : "") + (customer.pincode ? " - " + esc(customer.pincode) : "") + '</div>' +
             '</div>' +
             '<div class="admin-order-items">' + itemsHtml + '</div>' +
             '<div class="admin-order-foot">' +
@@ -416,13 +416,13 @@ function showOrderDetail(order, skipReload) {
     var items = (order.items || []).map(function(item) {
         var img = adminProductImage({ name: item.name || item.productName, image: item.image });
         var thumb = img
-            ? '<img class="order-item-thumb" src="' + img + '" alt="" onerror="this.style.display=\'none\'">'
-            : '<span class="order-item-emoji">' + (item.emoji || "ðŸ¥¬") + '</span>';
-        return '<tr><td>' + thumb + (item.name || item.productName || "Item") + '</td><td>' + (item.quantity || 1) + '</td><td>&#8377;' + (item.price || 0) + '</td><td><strong>&#8377' + ((item.price || 0) * (item.quantity || 1)) + '</strong></td></tr>';
+            ? '<img class="order-item-thumb" src="' + esc(img) + '" alt="" onerror="this.style.display=\'none\'">'
+            : '<span class="order-item-emoji">' + esc(item.emoji || "ðŸ¥¬") + '</span>';
+        return '<tr><td>' + thumb + esc(item.name || item.productName || "Item") + '</td><td>' + (item.quantity || 1) + '</td><td>&#8377;' + (item.price || 0) + '</td><td><strong>&#8377' + ((item.price || 0) * (item.quantity || 1)) + '</strong></td></tr>';
     }).join("");
 
     var statusOptions = ORDER_STATUSES.map(function(s) {
-        return '<option value="' + s + '" ' + (s === order.status ? "selected" : "") + '>' + s + '</option>';
+        return '<option value="' + esc(s) + '" ' + (s === order.status ? "selected" : "") + '>' + esc(s) + '</option>';
     }).join("");
 
     var refund = order.refund || {};
@@ -433,24 +433,24 @@ function showOrderDetail(order, skipReload) {
     }
 
 var timeline = (order.statusHistory || []).map(function(h) {
-        return '<li><strong>' + (h.status || "&#8212;") + '</strong> <small>' + (h.at ? new Date(h.at).toLocaleString() : "") + (h.by ? " Â· " + h.by : "") + '</small></li>';
+        return '<li><strong>' + esc(h.status || "&#8212;") + '</strong> <small>' + esc(h.at ? new Date(h.at).toLocaleString() : "") + (h.by ? " Â· " + esc(h.by) : "") + '</small></li>';
     }).join("");
 
     document.getElementById("orderDetailBody").innerHTML =
 '<div class="order-detail-block">' +
             '<h4>Customer</h4>' +
-            '<p>' + (customer.name || order.name || "&#8212;") + '</p>' +
-            '<p><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-telephone"><path d="M1.878 1.013a.945.945 0 1 1 1.654 1.297l-7.857 9.82c-.54.655-1.263.232-1.263-.395l7.53-6.878L1.878 1.013zm1.157 6.059L1.223.76c.331.455.606.77 1.04.893l6.315 3.06c.434.21.703.43.703.633 0 .206-.06.397-.175.557l-5.863 8.575L11.038 5.53c-.161-.455-.375-.77-1.04-.893l-6.282-3.05a.95.95 0 0 1-.052-.311zM3.835 1.808c.187-.35.375-.648.423-.883l.308-.75c.048-.124.073-.253.073-.386 0-.131-.025-.255-.073-.379l-.315.75c-.048.123-.073.252-.073.386 0 .134.025.258.073.381l.312.75c.001.136.01.266.01.395v.025l-.008-.002M5.335 1.575c-.287.08- .534.23.73.437l-.695.655c-.184.173-.353.322-.496.437l-.59 1.47c-.12.31-.189.596-.189.831s.069.52.189.83l.59 1.47c.107.283.266.432.496.437l.695.655c.196-.207.443-.358.73-.437l.695-.655c.287.08.534.23.73.437l.59-1.47c.12-.31.189-.52.189-.831s-.069-.52-.189-.83l-.59-1.47z"/></svg> ' + (customer.phone || order.phone || "") + '</p>' +
-            '<p><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-envelope"><path d="M0 4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2V4zM1 3a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h2v1H1V4a1 1 0 0 0-1-1V3z"/></svg> ' + (customer.email || order.email || (order.user && order.user.email) || "") + '</p>' +
-            '<p>' + ((customer.address || order.address || "") + (customer.city ? ", " + customer.city : "") + (customer.state ? ", " + customer.state : "") + (customer.pincode ? " - " + customer.pincode : "")) + '</p>' +
+            '<p>' + esc(customer.name || order.name || "&#8212;") + '</p>' +
+            '<p><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-telephone"><path d="M1.878 1.013a.945.945 0 1 1 1.654 1.297l-7.857 9.82c-.54.655-1.263.232-1.263-.395l7.53-6.878L1.878 1.013zm1.157 6.059L1.223.76c.331.455.606.77 1.04.893l6.315 3.06c.434.21.703.43.703.633 0 .206-.06.397-.175.557l-5.863 8.575L11.038 5.53c-.161-.455-.375-.77-1.04-.893l-6.282-3.05a.95.95 0 0 1-.052-.311zM3.835 1.808c.187-.35.375-.648.423-.883l.308-.75c.048-.124.073-.253.073-.386 0-.131-.025-.255-.073-.379l-.315.75c-.048.123-.073.252-.073.386 0 .134.025.258.073.381l.312.75c.001.136.01.266.01.395v.025l-.008-.002M5.335 1.575c-.287.08- .534.23.73.437l-.695.655c-.184.173-.353.322-.496.437l-.59 1.47c-.12.31-.189.596-.189.831s.069.52.189.83l.59 1.47c.107.283.266.432.496.437l.695.655c.196-.207.443-.358.73-.437l.695-.655c.287.08.534.23.73.437l.59-1.47c.12-.31.189-.52.189-.831s-.069-.52-.189-.83l-.59-1.47z"/></svg> ' + esc(customer.phone || order.phone || "") + '</p>' +
+            '<p><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-envelope"><path d="M0 4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2V4zM1 3a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h2v1H1V4a1 1 0 0 0-1-1V3z"/></svg> ' + esc(customer.email || order.email || (order.user && order.user.email) || "") + '</p>' +
+            '<p>' + (esc(customer.address || order.address || "") + (customer.city ? ", " + esc(customer.city) : "") + (customer.state ? ", " + esc(customer.state) : "") + (customer.pincode ? " - " + esc(customer.pincode) : "")) + '</p>' +
         '</div>' +
         '<div class="order-detail-block">' +
             '<h4>Payment</h4>' +
             payBadge(order) +
-            '<p>Method: ' + (order.paymentMethod || order.payment || "â€”") + (order.paymentMode ? " (" + order.paymentMode + ")" : "") + '</p>' +
-            (order.paymentReference ? '<p>UPI Ref: ' + order.paymentReference + '</p>' : "") +
-            '<p>Order ID: ' + (order.trackingId || order.orderNumber || "â€”") + '</p>' +
-            (refund.id ? '<p>Refund: ' + refund.id + ' (&#8377;' + (refund.amount || order.total || 0) + ')</p>' : (refund.status ? '<p>Refund: ' + refund.status + (refund.reference ? " Â· " + refund.reference : "") + '</p>' : "")) +
+            '<p>Method: ' + esc(order.paymentMethod || order.payment || "â€”") + (order.paymentMode ? " (" + esc(order.paymentMode) + ")" : "") + '</p>' +
+            (order.paymentReference ? '<p>UPI Ref: ' + esc(order.paymentReference) + '</p>' : "") +
+            '<p>Order ID: ' + esc(order.trackingId || order.orderNumber || "â€”") + '</p>' +
+            (refund.id ? '<p>Refund: ' + esc(refund.id) + ' (&#8377;' + (refund.amount || order.total || 0) + ')</p>' : (refund.status ? '<p>Refund: ' + esc(refund.status) + (refund.reference ? " Â· " + esc(refund.reference) : "") + '</p>' : "")) +
             payActions +
         '</div>' +
         '<div class="order-detail-block">' +
@@ -494,7 +494,7 @@ function loadAdminProducts() {
         })
         .catch(function(err) {
             container.innerHTML = '<p style="text-align:center;color:#e74c3c;padding:40px;">' +
-                (err.message || "Failed to load products.") + '</p>';
+                esc(err.message || "Failed to load products.") + '</p>';
         });
 }
 
@@ -548,8 +548,9 @@ function renderProducts() {
         var low = (!inactive) && (p.stock || 0) < lowThreshold && (p.stock || 0) > 0;
         var out = (!inactive) && (p.stock || 0) <= 0;
         var img = adminProductImage(p);
+        var safeGradient = String(p.gradient || "linear-gradient(135deg,#56ab2f,#a8e063)").replace(/[;"{}<>]|url\(|expression|javascript:/gi, "").slice(0, 200);
         var imgHtml = img
-            ? '<img class="admin-product-img" src="' + img + '" alt="' + (p.name || "") + '" onerror="this.style.display=\'none\'">'
+            ? '<img class="admin-product-img" src="' + esc(img) + '" alt="' + esc(p.name || "") + '" onerror="this.style.display=\'none\'">'
             : '';
         var stockTag = out ? '<span class="stock-tag out">Out of Stock</span>'
             : low ? '<span class="stock-tag low" title="Below configured threshold (' + lowThreshold + ')">Low Stock</span>'
@@ -558,14 +559,14 @@ function renderProducts() {
         html += '<div class="admin-product-card' + (inactive ? " inactive" : "") + '">' +
             '<div class="admin-product-photo">' +
                 imgHtml +
-                '<div class="admin-product-emoji" style="background:' + (p.gradient || "linear-gradient(135deg,#56ab2f,#a8e063)") + ';">' +
-                    (p.emoji || "ðŸ¥¬") +
+                '<div class="admin-product-emoji" style="background:' + safeGradient + ';">' +
+                    esc(p.emoji || "ðŸ¥¬") +
                     (inactive ? '<span class="inactive-tag">Hidden</span>' : '') +
                 '</div>' +
             '</div>' +
             '<div class="admin-product-info">' +
-                '<div class="admin-product-name">' + (p.name || "Product") + ' ' + stockTag + '</div>' +
-                '<div class="admin-product-meta">' + (p.category || "") + ' &bull; &#8377;' + (p.price || 0) + ' / ' + (p.unit || "") + '</div>' +
+                '<div class="admin-product-name">' + esc(p.name || "Product") + ' ' + stockTag + '</div>' +
+                '<div class="admin-product-meta">' + esc(p.category || "") + ' &bull; &#8377;' + (p.price || 0) + ' / ' + esc(p.unit || "") + '</div>' +
                 '<div class="admin-product-meta">❌ ' + (p.rating || 0).toFixed(1) + ' (' + (p.ratingCount || 0) + ' ratings)</div>' +
                 '<div class="price-row">' +
                     '<span class="stock-label">Price: &#8377;<span id="priceVal_' + p._id + '">' + (p.price || 0) + '</span></span>' +
@@ -668,8 +669,9 @@ function updateImagePreview() {
     var url = "";
     if (val) url = val.indexOf("images/") === 0 ? val : "images/" + val;
     else if (name) url = adminProductImage({ name: name });
+    var safeUrl = String(url || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
     wrap.innerHTML = url
-        ? '<img class="admin-img-preview" src="' + url + '" alt="preview" onerror="this.parentNode.innerHTML=\'<span class=admin-img-missing>Image not found: ' + url.replace(/'/g, "") + '</span>\'">'
+        ? '<img class="admin-img-preview" src="' + esc(url) + '" alt="preview" onerror="this.parentNode.innerHTML=\'<span class=admin-img-missing>Image not found: ' + safeUrl + '</span>\'">'
         : "";
 }
 
@@ -799,7 +801,7 @@ function loadAdminCustomers() {
         })
         .catch(function(err) {
             container.innerHTML = '<p style="text-align:center;color:#e74c3c;padding:40px;">' +
-                (err.message || "Failed to load customers.") + '</p>';
+                esc(err.message || "Failed to load customers.") + '</p>';
         });
 }
 
@@ -924,7 +926,7 @@ function loadAdminReviews() {
         })
         .catch(function(err) {
             container.innerHTML = '<p style="text-align:center;color:#e74c3c;padding:40px;">' +
-                (err.message || "Failed to load reviews.") + '</p>';
+                esc(err.message || "Failed to load reviews.") + '</p>';
         });
 }
 
@@ -946,14 +948,14 @@ function renderReviews() {
         }
         html += '<div class="admin-review-card">' +
             '<div class="admin-review-head">' +
-                '<div><strong>' + (rev.productName || "Product") + '</strong>' +
-                '<span class="admin-review-user"> by ' + (rev.userName || "Anonymous") + '</span></div>' +
+                '<div><strong>' + esc(rev.productName || "Product") + '</strong>' +
+                '<span class="admin-review-user"> by ' + esc(rev.userName || "Anonymous") + '</span></div>' +
                 '<div class="admin-review-actions">' +
                     '<span class="admin-review-rating">' + (typeof starHTML === "function" ? starHTML(rev.rating) : ("â˜…".repeat(rev.rating) + "â˜…".repeat(5 - rev.rating))) + '</span>' +
-                    '<button class="row-btn remove" onclick="deleteReview(\'' + rev._id + '\', \'' + String(rev.productName || "").replace(/'/g, "") + '\')" title="Delete review">ðŸ—‘ï¸</button>' +
+                    '<button class="row-btn remove" onclick="deleteReview(\'' + rev._id + '\', \'' + String(rev.productName || "").replace(/[^a-zA-Z0-9 ]/g, "") + '\')" title="Delete review">ðŸ—‘ï¸</button>' +
                 '</div>' +
             '</div>' +
-            '<p class="admin-review-comment">' + (rev.comment || "") + '</p>' +
+            '<p class="admin-review-comment">' + esc(rev.comment || "") + '</p>' +
             '<div class="admin-review-date">' + date + '</div>' +
         '</div>';
     });
@@ -977,6 +979,37 @@ function deleteReview(reviewId, productName) {
 // PAGE LOAD
 // ===============================
 
+// Close admin modals with Escape and trap focus inside the open dialog.
+document.addEventListener("keydown", function(e) {
+    if (e.key !== "Escape") return;
+    var openModals = [
+        ["productModal", closeProductModal],
+        ["orderDetailModal", closeOrderDetail],
+        ["customerOrdersModal", closeCustomerOrders],
+        ["couponModal", closeCouponModal]
+    ];
+    for (var i = 0; i < openModals.length; i++) {
+        var el = document.getElementById(openModals[i][0]);
+        if (el && el.style.display !== "none" && el.style.display !== "") {
+            if (typeof openModals[i][1] === "function") openModals[i][1]();
+            return;
+        }
+    }
+});
+
+// Keep Tab focus inside an open modal (script.js provides trapModalFocus on
+// focusable dialogs; this covers the statically-defined admin modals).
+if (typeof trapModalFocus === "function") {
+    ["productModal", "orderDetailModal", "customerOrdersModal", "couponModal"].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) trapModalFocus(el);
+    });
+}
+
+// ===============================
+// PAGE LOAD
+// ===============================
+
 function initAdminPage() {
     // API requests cannot work when the HTML file is opened directly from
     // disk. Send Chrome (and other browsers) to the served version instead.
@@ -992,8 +1025,9 @@ function initAdminPage() {
 
     initDarkMode();
 
-    var token = getAuthToken();
-    if (!token) {
+    // Local UI flag only - real authorization is enforced by apiGetMe() +
+    // the server-side admin middleware using the httpOnly cookie.
+    if (!hasSession()) {
         showToast("Please login as admin first", "error");
         setTimeout(function() { window.location.href = "login.html"; }, 800);
         return;
@@ -1038,19 +1072,19 @@ function renderSettingsTab() {
                 '<div class="settings-head"><h3>⚙️ Delivery Charge</h3><p>Customise what customers pay for delivery. The server enforces these amounts on every order — they are never taken from client-side values.</p></div>' +
                 '<div class="settings-row">' +
                     '<label for="setDeliveryCharge">Delivery Charge (₹)</label>' +
-                    '<input type="number" id="setDeliveryCharge" class="stock-input" min="0" step="1" value="' + s.deliveryCharge + '">' +
+                    '<input type="number" id="setDeliveryCharge" class="stock-input" min="0" step="1" value="' + esc(s.deliveryCharge) + '">' +
                 '</div>' +
                 '<div class="settings-row">' +
                     '<label for="setFreeThreshold">Free-Delivery Threshold (₹)</label>' +
-                    '<input type="number" id="setFreeThreshold" class="stock-input" min="0" step="1" value="' + s.freeDeliveryThreshold + '">' +
+                    '<input type="number" id="setFreeThreshold" class="stock-input" min="0" step="1" value="' + esc(s.freeDeliveryThreshold) + '">' +
                 '</div>' +
                 '<div class="settings-row">' +
                     '<label for="setMinOrder">Minimum Order Value (₹) — 0 = no minimum</label>' +
-                    '<input type="number" id="setMinOrder" class="stock-input" min="0" step="1" value="' + s.minimumOrderValue + '">' +
+                    '<input type="number" id="setMinOrder" class="stock-input" min="0" step="1" value="' + esc(s.minimumOrderValue) + '">' +
                 '</div>' +
                 '<div class="settings-row">' +
                     '<label for="setLowStock">Low-Stock Warning Threshold (units)</label>' +
-                    '<input type="number" id="setLowStock" class="stock-input" min="1" step="1" value="' + s.lowStockThreshold + '">' +
+                    '<input type="number" id="setLowStock" class="stock-input" min="1" step="1" value="' + esc(s.lowStockThreshold) + '">' +
                 '</div>' +
                 (badRange ? '<p class="settings-hint warn">⚠️ The free-delivery threshold is below the minimum order value. With this combination every order becomes eligible for free delivery — make sure that is intentional.</p>' : '') +
                 '<p class="settings-hint">Customers automatically get FREE delivery on orders at or above the threshold. Setting the charge to 0 disables delivery fees; setting the threshold to 0 always charges. The minimum order value blocks below-threshold checkouts entirely (0 keeps the store fully open).</p>' +
@@ -1104,7 +1138,7 @@ function saveAdminSettings() {
             if (status) {
                 status.style.display = "block";
                 status.className = "settings-status ok";
-                status.innerHTML = "✅ Settings saved. Delivery fee ₹" + adminSettings.deliveryCharge + " (free above ₹" + adminSettings.freeDeliveryThreshold + "), minimum order ₹" + adminSettings.minimumOrderValue + ", low-stock warning at " + adminSettings.lowStockThreshold + " units.";
+                status.innerHTML = "✅ Settings saved. Delivery fee ₹" + esc(adminSettings.deliveryCharge) + " (free above ₹" + esc(adminSettings.freeDeliveryThreshold) + "), minimum order ₹" + esc(adminSettings.minimumOrderValue) + ", low-stock warning at " + esc(adminSettings.lowStockThreshold) + " units.";
                 setTimeout(function() { status.style.display = "none"; }, 6000);
             }
             showToast("Settings saved successfully.", "success");
@@ -1129,7 +1163,7 @@ function loadAdminCoupons() {
     fetchAdminCoupons().then(function(list) {
         renderAdminCoupons(list);
     }).catch(function(err) {
-        container.innerHTML = '<p style="color:#e74c3c;padding:30px;">' + (err.message || "Failed to load coupons") + '</p>';
+        container.innerHTML = '<p style="color:#e74c3c;padding:30px;">' + esc(err.message || "Failed to load coupons") + '</p>';
     });
 }
 
@@ -1142,8 +1176,8 @@ function renderAdminCoupons(list) {
     }
     list.sort(function(a, b) { return new Date(b.createdAt) - new Date(a.createdAt); });
     var html = list.map(function(c) {
-        var typeLabel = c.discountType === "percentage" ? c.discountValue + "% off" : "₹" + c.discountValue + " off";
-        var minNote = c.minimumOrderValue > 0 ? "Min order ₹" + c.minimumOrderValue : "No min order";
+        var typeLabel = c.discountType === "percentage" ? esc(c.discountValue) + "% off" : "₹" + esc(c.discountValue) + " off";
+        var minNote = c.minimumOrderValue > 0 ? "Min order ₹" + esc(c.minimumOrderValue) : "No min order";
         var usageLabel = c.usageLimit ? (c.usageCount + " / " + c.usageLimit + " used") : (c.usageCount + " used");
         var expired = c.expiryDate && new Date(c.expiryDate).getTime() < Date.now();
         var active = c.active && !expired;

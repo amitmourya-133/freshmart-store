@@ -9,7 +9,10 @@
 // ===============================
 
 function featuresImageStyle(name, gradient) {
-    return "background:" + (gradient || "#eaffef");
+    var g = String(gradient || "#eaffef")
+        .replace(/[;"{}<>]|url\(|expression|javascript:/gi, "")
+        .slice(0, 200);
+    return "background:" + g + ";background-position:center;background-size:cover;";
 }
 
 var LANGS = {
@@ -104,10 +107,11 @@ function toggleLanguage(btn) {
 function applyLanguage() {
     var dict = LANGS[currentLang] || LANGS.en;
 
-    // Update elements with data-i18n attributes
+    // Update elements with data-i18n attributes (static developer-authored
+    // strings only; textContent keeps any markup inert).
     document.querySelectorAll("[data-i18n]").forEach(function(el) {
         var key = el.getAttribute("data-i18n");
-        if (dict[key]) el.innerHTML = dict[key];
+        if (dict[key]) el.textContent = dict[key];
     });
 
     // Update placeholders
@@ -378,17 +382,17 @@ function renderRecommendations() {
         var inCart = (window.cart || []).find(function(c) { return c.name === product.name; });
         var qty = inCart ? inCart.quantity : 0;
         var wishClass = isWishlisted(product.name) ? "wishlist-active" : "";
-        var safeName = product.name.replace(/'/g, "\\'");
+        var safeName = jsStr(product.name);
 
         html +=
-            '<div class="product" data-category="' + product.category + '" onclick="openProductDetail(' + index + ')">' +
-                '<button type="button" class="wishlist-heart ' + wishClass + '" data-name="' + product.name.replace(/"/g, "&quot;") + '" onclick="event.stopPropagation(); toggleWishlist(\'' + safeName + '\')">♥</button>' +
+            '<div class="product" data-category="' + escHtml(product.category) + '" onclick="openProductDetail(' + index + ')">' +
+                '<button type="button" class="wishlist-heart ' + wishClass + '" data-name="' + escHtml(product.name) + '" onclick="event.stopPropagation(); toggleWishlist(\'' + safeName + '\')">♥</button>' +
                 '<div class="product-image" style="' + featuresImageStyle(product.name, product.gradient) + '">' + productImgHTML(product.name) + '</div>' +
-                '<h3>' + product.name + '</h3>' +
+                '<h3>' + escHtml(product.name) + '</h3>' +
                 starHTML(r.rating) +
                 '<span class="rating-count">(' + r.count + ')</span>' +
-                '<p class="product-price">₹' + product.price + ' / ' + product.unit + '</p>' +
-                '<span class="product-badge">' + product.category + '</span>' +
+                '<p class="product-price">₹' + product.price + ' / ' + escHtml(product.unit) + '</p>' +
+                '<span class="product-badge">' + escHtml(product.category) + '</span>' +
                 cartControlsHTML(safeName, product.price, qty) +
             '</div>';
     });

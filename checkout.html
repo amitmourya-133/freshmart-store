@@ -13,7 +13,7 @@
 
 <body data-page="checkout">
 
-<header>
+<a class="skip-link" href="#main-content">Skip to content</a><header>
 
     <div class="logo">🥬 FreshMart</div>
 
@@ -22,7 +22,7 @@
             My Orders
         </button>
         <div class="auth-area" id="authArea"></div>
-        <button type="button" class="dark-mode-toggle" id="darkModeToggle" onclick="toggleDarkMode()" title="Toggle Dark Mode">🌙</button>
+        <button type="button" class="dark-mode-toggle" id="darkModeToggle" onclick="toggleDarkMode()" title="Toggle Dark Mode" aria-label="Toggle dark mode">🌙</button>
         <button class="cart-btn" onclick="window.location.href='index.html'">
             ← Continue Shopping
         </button>
@@ -31,7 +31,7 @@
 </header>
 
 
-<section class="checkout-page">
+<section class="checkout-page" id="main-content">
 
     <div class="checkout-container">
 
@@ -39,103 +39,117 @@
 
             <h2>📦 Delivery Details</h2>
 
-            <label>Full Name</label>
+            <fieldset class="checkout-fieldset">
+                <legend class="sr-only">Delivery details</legend>
 
-            <input
-                type="text"
-                id="customerName"
-                placeholder="Enter your name"
-                autocomplete="name"
-            >
+                <label for="customerName">Full Name</label>
 
-
-            <label>Mobile Number</label>
-
-            <input
-                type="tel"
-                id="customerPhone"
-                placeholder="Enter mobile number"
-                maxlength="10"
-                pattern="[0-9]{10}"
-                autocomplete="tel"
-            >
+                <input
+                    type="text"
+                    id="customerName"
+                    placeholder="Enter your name"
+                    autocomplete="name"
+                    maxlength="60"
+                />
 
 
-            <label>Address</label>
+                <label for="customerPhone">Mobile Number</label>
 
-            <textarea
-                id="customerAddress"
-                placeholder="House no, street, area..."
-                autocomplete="street-address"
-            ></textarea>
-
-
-            <label>City</label>
-
-            <input
-                type="text"
-                id="customerCity"
-                placeholder="Enter city"
-                autocomplete="address-level2"
-            >
+                <input
+                    type="tel"
+                    id="customerPhone"
+                    placeholder="Enter mobile number"
+                    maxlength="10"
+                    pattern="[0-9]{10}"
+                    autocomplete="tel"
+                />
 
 
-            <label>State</label>
+                <label for="customerAddress">Address</label>
 
-            <input
-                type="text"
-                id="customerState"
-                placeholder="State (optional)"
-                maxlength="40"
-                autocomplete="address-level1"
-            >
-
-
-            <label>Pincode</label>
-
-            <input
-                type="text"
-                id="customerPincode"
-                placeholder="Enter pincode"
-                maxlength="6"
-                pattern="[0-9]{6}"
-                autocomplete="postal-code"
-                onblur="detectPincodeInfo()"
-            >
-
-            <div id="pincodeHint" class="pincode-hint" style="display:none;"></div>
+                <textarea
+                    id="customerAddress"
+                    placeholder="House no, street, area..."
+                    autocomplete="street-address"
+                    maxlength="200"
+                ></textarea>
 
 
-            <h2>💳 Payment Method</h2>
+                <label for="customerCity">City</label>
 
-            <div class="payment-option">
-                <label>
-                    <input
-                        type="radio"
-                        name="payment"
-                        value="cod"
-                        checked
-                    >
-                    💵 Cash On Delivery
-                </label>
-            </div>
-
-            <div class="payment-flag" id="paymentFlag" style="display:none;"></div>
+                <input
+                    type="text"
+                    id="customerCity"
+                    placeholder="Enter city"
+                    autocomplete="address-level2"
+                    maxlength="60"
+                />
 
 
-            <h2>🕐 Delivery Slot</h2>
+                <label for="customerState">State</label>
 
-            <div class="slot-options" id="slotOptions">
-                <label>
-                    <input type="radio" name="deliverySlot" value="Morning (8-11 AM)" checked>
-                    🌅 Morning <span>(8 - 11 AM)</span>
-                </label>
-                <label>
-                    <input type="radio" name="deliverySlot" value="Evening (5-8 PM)">
-                    🌆 Evening <span>(5 - 8 PM)</span>
-                </label>
-            </div>
-            <p class="online-note">Choose a delivery time slot. We'll deliver within your preferred window.</p>
+                <input
+                    type="text"
+                    id="customerState"
+                    placeholder="State (optional)"
+                    maxlength="40"
+                    autocomplete="address-level1"
+                />
+
+
+                <label for="customerPincode">Pincode</label>
+
+                <input
+                    type="text"
+                    id="customerPincode"
+                    placeholder="Enter pincode"
+                    maxlength="6"
+                    pattern="[0-9]{6}"
+                    autocomplete="postal-code"
+                    onblur="detectPincodeInfo()"
+                />
+
+                <div id="pincodeHint" class="pincode-hint" style="display:none;"></div>
+
+            </fieldset>
+
+
+            <fieldset class="checkout-fieldset">
+                <legend>💳 Payment Method</legend>
+
+                <div class="payment-option">
+                    <label>
+                        <input
+                            type="radio"
+                            name="payment"
+                            value="cod"
+                            checked
+                        >
+                        💵 Cash On Delivery
+                    </label>
+                </div>
+
+                <div class="payment-flag" id="paymentFlag" style="display:none;"></div>
+
+            </fieldset>
+
+
+            <fieldset class="checkout-fieldset">
+                <legend>🕐 Delivery Slot</legend>
+
+                <div class="slot-options" id="slotOptions">
+                    <label>
+                        <input type="radio" name="deliverySlot" value="Morning (8-11 AM)" checked>
+                        🌅 Morning <span>(8 - 11 AM)</span>
+                    </label>
+                    <label>
+                        <input type="radio" name="deliverySlot" value="Evening (5-8 PM)">
+                        🌆 Evening <span>(5 - 8 PM)</span>
+                    </label>
+                </div>
+                <p class="online-note">Choose a delivery time slot. We'll deliver within your preferred window.</p>
+
+            </fieldset>
 
 
             <button
@@ -203,13 +217,13 @@
 </section>
 
 
-<div id="successMessage" class="success-message">
+<div id="successMessage" class="success-message" role="dialog" aria-modal="true" aria-labelledby="successMessageTitle">
 
     <div class="success-box">
 
         <div class="success-icon">✅</div>
 
-        <h2>Order Placed!</h2>
+        <h2 id="successMessageTitle">Order Placed!</h2>
 
         <!-- Order Summary Section -->
         <div class="order-summary-section" id="orderSummarySection">

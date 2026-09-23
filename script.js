@@ -110,7 +110,7 @@ function saveCart() {
 // ===============================
 
 function isLoggedIn() {
-    return readStorageValue("freshMartLoggedIn", "false") === "true" && !!getAuthToken();
+    return hasSession();
 }
 
 var productIdMap = null;
@@ -382,10 +382,10 @@ function authLoginPage() {
     return "login.html";
 }
 
-// Validate the stored JWT against the backend. Rejects on 401-equivalent replies.
+// Verify the httpOnly session cookie against the backend. Rejects on
+// 401-equivalent replies (when no session exists at all).
 function verifySession() {
-    var token = getAuthToken();
-    if (!token) return Promise.reject(new Error("Not authorized"));
+    if (!hasSession()) return Promise.reject(new Error("Not authorized"));
     return apiGetMe();
 }
 
@@ -394,14 +394,14 @@ function gateProtectedPage() {
     var page = document.body ? document.body.dataset.page : "";
     if (!isProtectedPage(page)) return true;
 
-    // No token at all -> straight to Login / Create Account.
-    if (!getAuthToken()) {
+    // No session at all -> straight to Login / Create Account.
+    if (!hasSession()) {
         window.location.replace(authLoginPage());
         return false;
     }
 
-    // Token exists: verify it against the backend while the page renders.
-    // Invalid / expired tokens bounce back to the login page.
+    // Session registered: verify the httpOnly cookie against the backend while
+    // the page renders. Invalid / expired sessions bounce back to the login page.
     if (document.body) document.body.style.visibility = "hidden";
     verifySession().then(function() {
         writeStorageValue("freshMartLoggedIn", "true");
@@ -420,13 +420,15 @@ function gateProtectedPage() {
     return true;
 }
 
-// Logout: wipe the whole session and go back to the auth entry page.
+// Logout: clear the httpOnly session cookie server-side, wipe the local
+// session state and go back to the auth entry page.
 function handleLogout() {
-    clearAuthState();
-    showToast("Logged out successfully.", "success");
-    setTimeout(function() {
-        window.location.href = "login.html";
-    }, 400);
+    apiLogout().then(function() {
+        showToast("Logged out successfully.", "success");
+        setTimeout(function() {
+            window.location.href = "login.html";
+        }, 400);
+    });
 }
 
 // Swap the header auth buttons between "Create Account / Login" and "Hi <name> / Logout".
@@ -488,6 +490,32 @@ function writeStorageValue(key, value) {
 }
 
 // ===============================
+// OUTPUT ESCAPING HELPERS
+// ===============================
+
+// Escape for HTML text/attribute positions (never for JS string literals).
+function escHtml(value) {
+    return String(value == null ? "" : value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+// Escape a string for safe embedding inside a single-quoted JS string literal
+// that lives in an inline onclick attribute. Only backslash and the single
+// quote can break out of that context.
+function jsStr(value) {
+    return String(value == null ? "" : value).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+// Inverse of jsStr: restore a string previously escaped for an inline handler.
+function unescapeJsStr(value) {
+    return String(value == null ? "" : value).replace(/\\\\/g, "\\").replace(/\\'/g, "'");
+}
+
+// ===============================
 // TOAST NOTIFICATION
 // ===============================
 
@@ -513,7 +541,9 @@ function showToast(message, type) {
 
     var toast = document.createElement("div");
     toast.className = "fm-toast";
-    toast.innerHTML = '<span class="fm-toast-icon">' + icon + '</span><span>' + message + '</span>';
+    toast.setAttribute("role", "status");
+    toast.setAttribute("aria-live", "polite");
+    toast.innerHTML = '<span class="fm-toast-icon">' + icon + '</span><span>' + escHtml(message) + '</span>';
     toast.style.background = bgColor;
 
     document.body.appendChild(toast);
@@ -529,6 +559,39 @@ function showToast(message, type) {
         }, 400);
     }, 2500);
 }
+
+// ===============================
+// MODAL ACCESSIBILITY HELPERS
+// ===============================
+
+// Keep Tab/Shift+Tab cycling inside an open modal dialog.
+function trapModalFocus(modal) {
+    modal.addEventListener("keydown", function(e) {
+        if (e.key !== "Tab") return;
+        var focusables = modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+        if (!focusables.length) return;
+        var first = focusables[0];
+        var last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+        }
+    });
+}
+
+// Close front-end popups/dialogs with Escape.
+document.addEventListener("keydown", function(e) {
+    if (e.key !== "Escape") return;
+    var m = document.getElementById("orderConfirmModal");
+    if (m) { closeOrderConfirmModal(); return; }
+    m = document.getElementById("qrModal");
+    if (m) { closeQrModal(); return; }
+    var ok = document.getElementById("successMessage");
+    if (ok && ok.style.display !== "none") { ok.style.display = "none"; return; }
+});
 
 // ===============================
 // ADD TO CART
@@ -598,7 +661,7 @@ function updateCart() {
         cartItems.innerHTML = '<div class="cart-empty"><div class="cart-empty-icon">🛒</div><h3>Your cart is empty</h3><p>Add some fresh products!</p></div>';
     } else {
         cart.forEach(function(item, index) {
-            var itemLabel = item.name + (item.qtyLabel ? " (" + item.qtyLabel + ")" : "");
+            var itemLabel = escHtml(item.name + (item.qtyLabel ? " (" + item.qtyLabel + ")" : ""));
             var stock = getProductStock(item);
             var stockInfo = "";
             var plusDisabled = "";
@@ -613,7 +676,7 @@ function updateCart() {
                     stockInfo = '<div class="cart-stock-info low">Only ' + stock + ' left</div>';
                 }
             }
-            cartItems.innerHTML += '<div class="cart-item"><div class="cart-item-info"><strong>' + itemLabel + '</strong><br><span class="cart-item-price">₹' + item.price + ' × ' + item.quantity + ' = ₹' + (item.price * item.quantity) + '</span>' + stockInfo + '</div><div class="cart-item-actions"><button onclick="decreaseQuantity(' + index + ')">−</button><strong class="cart-item-qty">' + item.quantity + '</strong><button onclick="increaseQuantity(' + index + ')"' + plusDisabled + '>+</button><button class="cart-item-remove" onclick="removeItem(' + index + ')">✕</button></div></div>';
+            cartItems.innerHTML += '<div class="cart-item"><div class="cart-item-info"><strong>' + itemLabel + '</strong><br><span class="cart-item-price">₹' + item.price + ' × ' + item.quantity + ' = ₹' + (item.price * item.quantity) + '</span>' + stockInfo + '</div><div class="cart-item-actions"><button type="button" aria-label="Decrease quantity" onclick="decreaseQuantity(' + index + ')">−</button><strong class="cart-item-qty">' + item.quantity + '</strong><button type="button" aria-label="Increase quantity" onclick="increaseQuantity(' + index + ')"' + plusDisabled + '>+</button><button type="button" class="cart-item-remove" aria-label="Remove item" onclick="removeItem(' + index + ')">✕</button></div></div>';
         });
     }
 
@@ -881,7 +944,7 @@ function productCardHTML(index) {
     var r = getProductRating(product.name);
     var inCart = cart.find(function(c) { return c.name === product.name; });
     var qty = inCart ? inCart.quantity : 0;
-    var safeName = product.name.replace(/'/g, "\\'");
+    var safeName = jsStr(product.name);
     var stock = (typeof product.stock === "number") ? Math.max(0, product.stock) : undefined;
     var out = (typeof stock === "number" && stock <= 0);
     var stockBadge = "";
@@ -889,15 +952,15 @@ function productCardHTML(index) {
         stockBadge = '<span class="stock-badge out">Out of Stock</span>';
     }
 
-    return '<div class="product" data-category="' + product.category + '" onclick="openProductDetail(' + index + ')">' +
-        '<button type="button" class="card-menu-btn" aria-label="More options" onclick="event.stopPropagation(); openCardActionsMenu(this,\'' + safeName + '\',' + product.price + ',\'' + product.unit + '\',' + index + ')">⋮</button>' +
+    return '<div class="product" data-category="' + escHtml(product.category) + '" onclick="openProductDetail(' + index + ')">' +
+        '<button type="button" class="card-menu-btn" aria-label="More options" onclick="event.stopPropagation(); openCardActionsMenu(this,\'' + safeName + '\',' + product.price + ',\'' + jsStr(product.unit) + '\',' + index + ')">⋮</button>' +
         '<div class="product-image" style="' + imageStyle(product.name, product.gradient) + '">' + productImgHTML(product.name) + '</div>' +
         stockBadge +
-        '<h3>' + product.name + '</h3>' +
+        '<h3>' + escHtml(product.name) + '</h3>' +
         starHTML(r.rating) +
         '<span class="rating-count">(' + r.count + ')</span>' +
-        '<p class="product-price">₹' + product.price + ' / ' + product.unit + '</p>' +
-        '<span class="product-badge">' + product.category + '</span>' +
+        '<p class="product-price">₹' + product.price + ' / ' + escHtml(product.unit) + '</p>' +
+        '<span class="product-badge">' + escHtml(product.category) + '</span>' +
         '<div class="card-controls">' + cartControlsHTML(safeName, product.price, qty, product.unit) + '</div>' +
     '</div>';
 }
@@ -1139,9 +1202,9 @@ function toggleWishlistPage() {
             var product = products.find(function(p) { return p.name === name; });
             if (!product) return;
             var r = getProductRating(product.name);
-            var safeName = product.name.replace(/'/g, "\\'");
+            var safeName = jsStr(product.name);
             var id = products.indexOf(product);
-            html += '<div class="wishlist-item"><div class="product-image" style="' + imageStyle(product.name, product.gradient) + '" onclick="openProductDetail(' + id + ')">' + productImgHTML(product.name) + '</div><div class="wishlist-item-info"><h4>' + product.name + '</h4>' + starHTML(r.rating) + '<p class="product-price">₹' + product.price + ' / ' + product.unit + '</p><div class="wishlist-item-actions"><button type="button" class="product-add-btn" onclick="event.stopPropagation(); addToCart(\'' + safeName + '\', ' + product.price + '); toggleWishlist(\'' + safeName + '\'); renderWishlistItems();">Move to Cart</button><button type="button" class="wishlist-remove-btn" onclick="event.stopPropagation(); toggleWishlist(\'' + safeName + '\'); renderWishlistItems();">Remove</button></div></div></div>';
+            html += '<div class="wishlist-item"><div class="product-image" style="' + imageStyle(product.name, product.gradient) + '" onclick="openProductDetail(' + id + ')">' + productImgHTML(product.name) + '</div><div class="wishlist-item-info"><h4>' + escHtml(product.name) + '</h4>' + starHTML(r.rating) + '<p class="product-price">₹' + product.price + ' / ' + escHtml(product.unit) + '</p><div class="wishlist-item-actions"><button type="button" class="product-add-btn" onclick="event.stopPropagation(); addToCart(\'' + safeName + '\', ' + product.price + '); toggleWishlist(\'' + safeName + '\'); renderWishlistItems();">Move to Cart</button><button type="button" class="wishlist-remove-btn" onclick="event.stopPropagation(); toggleWishlist(\'' + safeName + '\'); renderWishlistItems();">Remove</button></div></div></div>';
         });
         items.innerHTML = html;
     }
@@ -1196,7 +1259,7 @@ function renderRecentlyViewed() {
     validIds.forEach(function(id) {
         var product = products[id];
         var r = getProductRating(product.name);
-        html += '<div class="product recent-product" onclick="openProductDetail(' + id + ')"><div class="product-image recent-img" style="' + imageStyle(product.name, product.gradient) + '">' + productImgHTML(product.name) + '</div><h3>' + product.name + '</h3>' + starHTML(r.rating) + '<p class="product-price">₹' + product.price + ' / ' + product.unit + '</p><button type="button" class="product-add-btn" onclick="event.stopPropagation(); addToCart(\'' + product.name.replace(/'/g, "\\'") + '\', ' + product.price + ')">Add To Cart</button></div>';
+        html += '<div class="product recent-product" onclick="openProductDetail(' + id + ')"><div class="product-image recent-img" style="' + imageStyle(product.name, product.gradient) + '">' + productImgHTML(product.name) + '</div><h3>' + escHtml(product.name) + '</h3>' + starHTML(r.rating) + '<p class="product-price">₹' + product.price + ' / ' + escHtml(product.unit) + '</p><button type="button" class="product-add-btn" onclick="event.stopPropagation(); addToCart(\'' + jsStr(product.name) + '\', ' + product.price + ')">Add To Cart</button></div>';
     });
 
     container.innerHTML = html;
@@ -1209,7 +1272,10 @@ function renderRecentlyViewed() {
 
 
 function imageStyle(name, gradient) {
-    return "background:" + (gradient || "#eaffef");
+    var g = String(gradient || "#eaffef")
+        .replace(/[;"{}<>]|url\(|expression|javascript:/gi, "")
+        .slice(0, 200);
+    return "background:" + g + ";background-position:center;background-size:cover;";
 }
 
 // ===============================
@@ -1292,7 +1358,7 @@ function productImgHTML(name) {
     if (!img) {
         return "";
     }
-    return '<img class="product-photo" src="' + img + '" alt="' + name + '">';
+    return '<img class="product-photo" src="' + escHtml(img) + '" alt="' + escHtml(name) + '">';
 }
 
 // ===============================
@@ -1432,16 +1498,20 @@ function loadMoreProducts() {
 // ===============================
 
 function cartControlsHTML(name, price, qty, unit) {
-    var options = getQtyOptions(unit || "kg");
-    var active = getActiveOption(name, unit || "kg");
-    var product = findProductByName(name.replace(/\\'/g, "'"));
+    var realName = unescapeJsStr(name);
+    var realUnit = unescapeJsStr(unit);
+    var options = getQtyOptions(realUnit || "kg");
+    var active = getActiveOption(realName, realUnit || "kg");
+    var product = findProductByName(realName);
     var stock = (product && typeof product.stock === "number") ? Math.max(0, product.stock) : undefined;
     var out = (typeof stock === "number" && stock <= 0);
+    var escName = jsStr(realName);
+    var escUnit = jsStr(realUnit);
 
     var chips = '<div class="qty-chips">';
     options.forEach(function(o) {
         var cls = (o.label === active.label) ? "qty-chip active" : "qty-chip";
-        chips += '<button type="button" class="' + cls + '" onclick="event.stopPropagation(); selectQtyOption(\'' + name + '\',\'' + o.label + '\',' + o.mult + ',\'' + unit + '\')">' + o.label + '</button>';
+        chips += '<button type="button" class="' + cls + '" onclick="event.stopPropagation(); selectQtyOption(\'' + escName + '\',\'' + o.label + '\',' + o.mult + ',\'' + escUnit + '\')">' + o.label + '</button>';
     });
     chips += '</div>';
 
@@ -1450,12 +1520,12 @@ function cartControlsHTML(name, price, qty, unit) {
         main = '<span class="out-of-stock-label">Out of Stock</span>';
     } else if (qty > 0) {
         var atMax = (typeof stock === "number" && qty >= stock);
-        main = '<div class="qty-selector"><button type="button" class="qty-btn qty-minus" onclick="event.stopPropagation(); changeCardQty(\'' + name + '\', -1, ' + price + ')">−</button><span class="qty-value">' + qty + '</span>' +
-            '<button type="button" class="qty-btn qty-plus' + (atMax ? " qty-plus-muted" : "") + '" onclick="event.stopPropagation(); changeCardQty(\'' + name + '\', 1, ' + price + ')"' + (atMax ? ' disabled' : '') + ' title="' + (atMax ? "Only " + stock + " available" : "") + '">+</button></div>';
+        main = '<div class="qty-selector"><button type="button" class="qty-btn qty-minus" onclick="event.stopPropagation(); changeCardQty(\'' + escName + '\', -1, ' + price + ')">−</button><span class="qty-value">' + qty + '</span>' +
+            '<button type="button" class="qty-btn qty-plus' + (atMax ? " qty-plus-muted" : "") + '" onclick="event.stopPropagation(); changeCardQty(\'' + escName + '\', 1, ' + price + ')"' + (atMax ? ' disabled' : '') + ' title="' + (atMax ? "Only " + stock + " available" : "") + '">+</button></div>';
     } else {
-        main = '<button type="button" class="product-add-btn" onclick="event.stopPropagation(); addToCart(\'' + name + '\', ' + price + ',\'' + unit + '\')">Add To Cart</button>';
+        main = '<button type="button" class="product-add-btn" onclick="event.stopPropagation(); addToCart(\'' + escName + '\', ' + price + ',\'' + escUnit + '\')">Add To Cart</button>';
     }
-    var buy = '<button type="button" class="buy-now-btn" onclick="event.stopPropagation(); buyNow(\'' + name + '\', ' + price + ',\'' + unit + '\')"' + (out ? ' disabled' : '') + '>Buy Now</button>';
+    var buy = '<button type="button" class="buy-now-btn" onclick="event.stopPropagation(); buyNow(\'' + escName + '\', ' + price + ',\'' + escUnit + '\')"' + (out ? ' disabled' : '') + '>Buy Now</button>';
 
     return chips + '<div class="card-btn-row">' + main + buy + '</div>';
 }
@@ -1466,7 +1536,7 @@ function changeCardQty(name, delta, price) {
     if (!existing) {
         cart.push({ name: name, price: price, quantity: 1, qtyLabel: "", mult: 1 });
     } else {
-        var product = findProductByName(name.replace(/\\'/g, "'"));
+        var product = findProductByName(unescapeJsStr(name));
         var stock = (product && typeof product.stock === "number") ? Math.max(0, product.stock) : undefined;
         if (delta > 0 && typeof stock === "number" && existing.quantity >= stock) {
             showToast("Only " + stock + " units of " + name + " available.", "error");
@@ -1497,7 +1567,7 @@ function updateAllCartControls() {
         if (!product) return;
         var inCart = cart.find(function(c) { return c.name === nameEl; });
         var qty = inCart ? inCart.quantity : 0;
-        var safeName = nameEl.replace(/'/g, "\\'");
+        var safeName = jsStr(nameEl);
         ctl.innerHTML = cartControlsHTML(safeName, product.price, qty, product.unit);
     });
 }
@@ -1617,7 +1687,7 @@ function loadProductDetail() {
     writeStorageValue("freshMartRecent", JSON.stringify(recent));
 
     var wishClass = isWishlisted(p.name) ? "wishlist-active" : "";
-    var safeName = p.name.replace(/'/g, "\\'");
+    var safeName = jsStr(p.name);
 
     var reviewsHTML = reviewsHTMLFor(p.name, reviews);
 
@@ -1632,29 +1702,29 @@ function loadProductDetail() {
     showRelated.forEach(function(item, i) {
         var origIndex = products.indexOf(item);
         var ir = getProductRating(item.name);
-        var safeRelName = item.name.replace(/'/g, "\\'");
-        relatedHTML += '<div class="product" data-category="' + item.category + '" onclick="window.location.href=\'product-detail.html?id=' + origIndex + '\'"><div class="product-image" style="' + imageStyle(item.name, item.gradient) + '">' + productImgHTML(item.name) + '</div><h3>' + item.name + '</h3>' + starHTML(ir.rating) + '<p class="product-price">₹' + item.price + ' / ' + item.unit + '</p><button type="button" class="product-add-btn" onclick="event.stopPropagation(); addToCart(\'' + safeRelName + '\', ' + item.price + ')">Add To Cart</button></div>';
+        var safeRelName = jsStr(item.name);
+        relatedHTML += '<div class="product" data-category="' + escHtml(item.category) + '" onclick="window.location.href=\'product-detail.html?id=' + origIndex + '\'"><div class="product-image" style="' + imageStyle(item.name, item.gradient) + '">' + productImgHTML(item.name) + '</div><h3>' + escHtml(item.name) + '</h3>' + starHTML(ir.rating) + '<p class="product-price">₹' + item.price + ' / ' + escHtml(item.unit) + '</p><button type="button" class="product-add-btn" onclick="event.stopPropagation(); addToCart(\'' + safeRelName + '\', ' + item.price + ')">Add To Cart</button></div>';
     });
 
     detailContainer.innerHTML = '' +
         '<div class="detail-hero" style="' + imageStyle(p.name, p.gradient) + '">' + productImgHTML(p.name) +
-            '<button type="button" class="wishlist-heart detail-wishlist ' + wishClass + '" data-name="' + p.name.replace(/"/g, "&quot;") + '" onclick="toggleWishlist(\'' + safeName + '\')">♥</button>' +
+            '<button type="button" class="wishlist-heart detail-wishlist ' + wishClass + '" data-name="' + escHtml(p.name) + '" onclick="toggleWishlist(\'' + safeName + '\')">♥</button>' +
         '</div>' +
             '<div class="detail-info">' +
-            '<button type="button" class="whatsapp-share-btn detail-share" onclick="shareOnWhatsApp(\'' + safeName + '\',' + p.price + ',\'' + p.unit + '\',' + id + ')">WhatsApp Share</button>' +
-            '<span class="product-badge">' + p.category + '</span>' +
-            '<h1>' + p.name + '</h1>' +
+            '<button type="button" class="whatsapp-share-btn detail-share" onclick="shareOnWhatsApp(\'' + safeName + '\',' + p.price + ',\'' + jsStr(p.unit) + '\',' + id + ')">WhatsApp Share</button>' +
+            '<span class="product-badge">' + escHtml(p.category) + '</span>' +
+            '<h1>' + escHtml(p.name) + '</h1>' +
             '<div class="detail-rating">' + starHTML(r.rating) + '<span class="rating-count">' + r.rating.toFixed(1) + ' (' + r.count + ' ratings)</span></div>' +
-            '<div class="detail-price">₹' + p.price + ' / ' + p.unit + '</div>' +
-            '<p class="detail-desc">' + p.description + '</p>' +
-            '<div class="detail-origin">' + p.origin + '</div>' +
+            '<div class="detail-price">₹' + p.price + ' / ' + escHtml(p.unit) + '</div>' +
+            '<p class="detail-desc">' + escHtml(p.description) + '</p>' +
+            '<div class="detail-origin">' + escHtml(p.origin) + '</div>' +
             '<div class="detail-section">' +
                 '<h3>Nutrition Facts</h3>' +
-                '<p>' + p.nutrition + '</p>' +
+                '<p>' + escHtml(p.nutrition) + '</p>' +
             '</div>' +
             '<div class="detail-section">' +
                 '<h3>💡 Storage Tips</h3>' +
-                '<p>' + p.tips + '</p>' +
+                '<p>' + escHtml(p.tips) + '</p>' +
             '</div>' +
             '<div class="detail-actions">' +
                 (detailControlsHTML(p) ) +
@@ -1736,8 +1806,8 @@ function reviewsHTMLFor(name, reviews) {
     } else {
         reviews.slice(-4).reverse().forEach(function(rev) {
             html += '<div class="review-item">' +
-                '<div class="review-header"><span class="review-user">👤 ' + rev.user + '</span>' + starHTML(rev.rating) + '<span class="review-date">' + rev.date + '</span></div>' +
-                '<p class="review-comment">' + rev.comment + '</p>' +
+                '<div class="review-header"><span class="review-user">👤 ' + escHtml(rev.user) + '</span>' + starHTML(rev.rating) + '<span class="review-date">' + escHtml(rev.date) + '</span></div>' +
+                '<p class="review-comment">' + escHtml(rev.comment) + '</p>' +
             '</div>';
         });
     }
@@ -1785,8 +1855,8 @@ function detailControlsHTML(p) {
             '<button onclick="detailQtyChange(1)"' + (atMax ? ' disabled title="Limit reached"' : '') + '>+</button>' +
         '</div>' +
         '<div class="detail-btn-row">' +
-            '<button class="detail-add-btn" onclick="addDetailToCart(\'' + p.name.replace(/'/g, "\\'") + '\', ' + p.price + ')">Add To Cart</button>' +
-            '<button class="buy-now-btn" onclick="buyNowDetail(\'' + p.name.replace(/'/g, "\\'") + '\', ' + p.price + ', \'' + p.unit + '\')">⚡ Buy Now</button>' +
+            '<button class="detail-add-btn" onclick="addDetailToCart(\'' + jsStr(p.name) + '\', ' + p.price + ')">Add To Cart</button>' +
+            '<button class="buy-now-btn" onclick="buyNowDetail(\'' + jsStr(p.name) + '\', ' + p.price + ', \'' + jsStr(p.unit) + '\')">⚡ Buy Now</button>' +
         '</div>';
 }
 
@@ -2121,7 +2191,7 @@ function renderCheckout() {
         cart.forEach(function(item, idx) {
             var itemTotal = item.price * item.quantity;
             subtotal += itemTotal;
-            var itemLabel = item.name + (item.qtyLabel ? " (" + item.qtyLabel + ")" : "");
+            var itemLabel = escHtml(item.name + (item.qtyLabel ? " (" + item.qtyLabel + ")" : ""));
             var productStock = getProductStock(item);
             var isUnavailable = (typeof productStock === "number" && productStock <= 0);
             if (isUnavailable) outOfStockNames.push(itemLabel);
@@ -2251,7 +2321,7 @@ function detectPincodeInfo() {
                 cityField.value = district;
             }
 
-            hintBox.innerHTML = '<span class="pincode-hint-ok">📍 ' + name + ', ' + district + ', ' + state + '</span>';
+            hintBox.innerHTML = '<span class="pincode-hint-ok">📍 ' + escHtml(name) + ', ' + escHtml(district) + ', ' + escHtml(state) + '</span>';
         })
         .catch(function() {
             hintBox.innerHTML = '<span class="pincode-hint-error">⚠️ Could not check pincode. Check your connection.</span>';
@@ -2466,8 +2536,8 @@ function showOrderConfirmModal(order) {
     var method = (order.paymentMethod && order.paymentMethod === "online") ? "online" : "cod";
 
     var itemsHTML = (order.items || []).map(function(item) {
-        var label = String(item.name || "Item");
-        if (item.qtyLabel) label += " (" + item.qtyLabel + ")";
+        var label = escHtml(String(item.name || "Item"));
+        if (item.qtyLabel) label += " (" + escHtml(item.qtyLabel) + ")";
         return '<div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;font-size:14px;">' +
             '<span>' + label + ' × ' + item.quantity + '</span>' +
             '<strong>₹' + Math.round(item.price * item.quantity * 100) / 100 + '</strong></div>';
@@ -2482,29 +2552,35 @@ function showOrderConfirmModal(order) {
         : "Payment: Cash on Delivery.";
 
     var customer = order.customer || {};
-    var addressLine = [customer.address, customer.city, customer.state, customer.pincode].filter(function(v) { return v; }).join(", ");
+    var addressLine = [customer.address, customer.city, customer.state, customer.pincode].filter(function(v) { return v; }).map(escHtml).join(", ");
 
     var modal = document.createElement("div");
     modal.id = "orderConfirmModal";
     modal.className = "qr-modal";
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    modal.setAttribute("aria-labelledby", "orderConfirmTitle");
     modal.innerHTML =
         '<div class="qr-modal-box" style="text-align:left;">' +
             '<button type="button" class="qr-close" onclick="closeOrderConfirmModal()" aria-label="Close">✕</button>' +
-            '<h3>📋 Confirm Your Order</h3>' +
-            '<p class="qr-amount">Deliver to: <strong>' + customer.name + '</strong> · ' + customer.phone + '</p>' +
+            '<h3 id="orderConfirmTitle">📋 Confirm Your Order</h3>' +
+            '<p class="qr-amount">Deliver to: <strong>' + escHtml(customer.name) + '</strong> · ' + escHtml(customer.phone) + '</p>' +
             '<p class="qr-amount" style="margin-top:0;">' + addressLine + '</p>' +
-            '<div class="qr-amount" style="margin:2px 0 8px;">Delivery slot: <strong>' + (order.deliverySlot || "") + '</strong></div>' +
+            '<div class="qr-amount" style="margin:2px 0 8px;">Delivery slot: <strong>' + escHtml(order.deliverySlot || "") + '</strong></div>' +
             '<div style="max-height:200px;overflow-y:auto;border-top:1px solid var(--border-color);border-bottom:1px solid var(--border-color);padding:8px 0;margin:10px 0;">' + itemsHTML + '</div>' +
             '<div style="display:flex;justify-content:space-between;"><span>Subtotal</span><strong>₹' + order.subtotal + '</strong></div>' +
             '<div style="display:flex;justify-content:space-between;"><span>Delivery</span><strong>₹' + order.delivery + '</strong></div>' +
             discountHTML +
             '<hr>' +
             '<div style="display:flex;justify-content:space-between;font-weight:700;"><span>Total</span><strong>₹' + order.total + '</strong></div>' +
-            '<button class="paid-btn" onclick="confirmOrderClick()">✅ Confirm Order</button>' +
+            '<button class="paid-btn" id="confirmOrderBtn" onclick="confirmOrderClick()">✅ Confirm Order</button>' +
             '<button class="pay-cancel-btn" onclick="closeOrderConfirmModal()">Go Back</button>' +
             '<p class="qr-instruction" style="margin-top:10px;">' + paymentNote + '</p>' +
         '</div>';
     document.body.appendChild(modal);
+    var confirmBtn = document.getElementById("confirmOrderBtn");
+    if (confirmBtn) confirmBtn.focus();
+    trapModalFocus(modal);
 }
 
 function closeOrderConfirmModal() {
@@ -2515,6 +2591,8 @@ function closeOrderConfirmModal() {
 // Only called from the review modal. Submits the confirmed draft.
 function confirmOrderClick() {
     var order = lastDraftOrder;
+    var confirmBtn = document.getElementById("confirmOrderBtn");
+    if (confirmBtn) confirmBtn.disabled = true;
     closeOrderConfirmModal();
     if (!order) return;
 
@@ -2535,6 +2613,8 @@ function confirmOrderClick() {
     }
 
     order.payment = "Cash On Delivery";
+    var coBtn = document.getElementById("placeOrderBtn");
+    if (coBtn) coBtn.disabled = true;
     finalizeOrder(order);
 }
 
@@ -2599,6 +2679,7 @@ function finalizeOrder(order, isOnline) {
         order.paymentStatus = savedOrder.paymentStatus || (isOnline ? "PENDING" : "PAID");
         finishOrderUI(order, isOnline, order.paymentStatus);
     }).catch(function(err) {
+        reenablePlaceOrder();
         showToast((err && err.message) ? err.message : "Could not save your order. Please try again.", "error");
     });
 }
@@ -2659,7 +2740,7 @@ function finishOrderUI(order, isOnline, paymentStatus) {
 
             var itemDiv = document.createElement("div");
             itemDiv.className = "order-summary-item";
-            itemDiv.innerHTML = '<span class="order-summary-name">' + truncatedName + '</span>' +
+            itemDiv.innerHTML = '<span class="order-summary-name">' + escHtml(truncatedName) + '</span>' +
                 '<span class="order-summary-qty">× ' + quantity + '</span>' +
                 '<span class="order-summary-price">₹' + price + '</span>' +
                 '<span class="order-summary-total">₹' + lineTotal + '</span>';
@@ -2753,7 +2834,7 @@ function initializePage() {
 
     // Auth pages: an already-signed-in user should not see Login / Create Account.
     if (page === "login" || page === "signup") {
-        if (getAuthToken()) {
+        if (hasSession()) {
             window.location.replace("index.html");
             return;
         }
@@ -3412,7 +3493,7 @@ function paymentStatusBadge(paymentStatus, paid, mode) {
         REFUNDED: { label: "Refunded", cls: "pay-refunded" },
         PENDING_REFUND: { label: "Refund in progress", cls: "pay-pending" }
     };
-    var m = map[s] || { label: s, cls: "pay-pending" };
+    var m = map[s] || { label: escHtml(s), cls: "pay-pending" };
     return '<span class="pay-badge ' + m.cls + '">' + m.label + '</span>';
 }
 
@@ -3466,7 +3547,7 @@ function statusTrackerHTML(status, noLabel) {
     }).join("");
 
     return '<div class="order-tracker"><div class="tracker-steps">' + steps + '</div>' +
-        (noLabel ? "" : '<div class="tracker-current">Current status: <strong>' + friendlyStatus(s) + '</strong></div>') +
+        (noLabel ? "" : '<div class="tracker-current">Current status: <strong>' + escHtml(friendlyStatus(s)) + '</strong></div>') +
         '</div>';
 }
 
@@ -3475,7 +3556,7 @@ function statusTimelineHTML(statusHistory) {
     if (!Array.isArray(statusHistory) || statusHistory.length === 0) return "";
     var items = statusHistory.slice().reverse().map(function(h) {
         var st = h && h.status ? friendlyStatus(h.status) : "Update";
-        return '<li><span class="tl-dot"></span><div><strong>' + st + '</strong><small>' + formatOrderDate(h.at) + '</small></div></li>';
+        return '<li><span class="tl-dot"></span><div><strong>' + escHtml(st) + '</strong><small>' + escHtml(formatOrderDate(h.at)) + '</small></div></li>';
     }).join("");
     return '<div class="order-tracker"><div class="tracker-timeline"><h4>Order Timeline</h4><ul>' + items + '</ul></div></div>';
 }
@@ -3498,7 +3579,7 @@ function renderOrdersListHTML(orders, offline) {
             subtotal += itemTotal;
             var name = item.name || item.productName || "Product";
             var weight = item.weight ? " (" + item.weight + ")" : "";
-            productsHTML += '<div class="order-product"><span>' + name + weight + ' × ' + quantity + '</span><strong>₹' + itemTotal + '</strong></div>';
+            productsHTML += '<div class="order-product"><span>' + escHtml(name + weight) + ' × ' + quantity + '</span><strong>₹' + itemTotal + '</strong></div>';
         });
 
         var delivery = order.delivery !== undefined ? Number(order.delivery) : estimatedDelivery(Number(order.subtotal) || 0);
@@ -3507,7 +3588,7 @@ function renderOrdersListHTML(orders, offline) {
         var cancellable = !offline && order._id && !order.isLocal &&
             (order.status === "Placed" || order.status === "Confirmed");
         var cancelBtn = cancellable
-            ? '<button type="button" class="cancel-order-btn" onclick="cancelOrderById(\'' + order._id + '\')">Cancel Order</button>'
+            ? '<button type="button" class="cancel-order-btn" onclick="cancelOrderById(\'' + jsStr(order._id) + '\')">Cancel Order</button>'
             : "";
 
         var helpOrderRef = order.orderNumber || order.trackingId || (order._id || "");
@@ -3515,17 +3596,17 @@ function renderOrdersListHTML(orders, offline) {
             ? '<button type="button" class="help-order-btn" onclick="window.location.href=\'help.html?order=' + encodeURIComponent(helpOrderRef) + '\'" title="Get help for this order">🆘 Help</button>'
             : "";
 
-        var trackLine = order.trackingId ? '<p><strong>Track ID:</strong> ' + order.trackingId + '</p>' : "";
+        var trackLine = order.trackingId ? '<p><strong>Track ID:</strong> ' + escHtml(order.trackingId) + '</p>' : "";
 
-        ordersHTML += '<div class="order-card"><div class="order-header"><div><div class="order-id">' + (order.orderNumber || "Order") + '</div>' + trackLine + '<small>' + formatOrderDate(order.createdAt || order.date) + '</small></div><div class="order-status">' + friendlyStatus(order.status || "Placed") + '</div></div>' +
+        ordersHTML += '<div class="order-card"><div class="order-header"><div><div class="order-id">' + escHtml(order.orderNumber || "Order") + '</div>' + trackLine + '<small>' + escHtml(formatOrderDate(order.createdAt || order.date)) + '</small></div><div class="order-status">' + escHtml(friendlyStatus(order.status || "Placed")) + '</div></div>' +
             statusTrackerHTML(order.status || "Placed", true) +
-            '<div class="order-pay-row">' + paymentStatusBadge(order.paymentStatus, order.paid, order.paymentMode) + (order.paymentMode === "manual" && order.paymentReference ? '<span class="pay-ref">UPI Ref: ' + order.paymentReference + '</span>' : "") + '</div>' +
+            '<div class="order-pay-row">' + paymentStatusBadge(order.paymentStatus, order.paid, order.paymentMode) + (order.paymentMode === "manual" && order.paymentReference ? '<span class="pay-ref">UPI Ref: ' + escHtml(order.paymentReference) + '</span>' : "") + '</div>' +
             '<h3>Products</h3><div style="margin-top:10px;">' + productsHTML + '</div>' +
             '<div class="summary-row"><span>Subtotal</span><strong>₹' + Number(order.subtotal) + '</strong></div>' +
             '<div class="summary-row"><span>Delivery</span><strong>₹' + delivery + '</strong></div>' +
             '<div class="order-total">Total: ₹' + total + '</div>' +
-            '<div class="detail-section"><h3>Delivery Details</h3><p><strong>Name:</strong> ' + ((order.customer && order.customer.name) || "N/A") + '</p><p><strong>Phone:</strong> ' + ((order.customer && order.customer.phone) || "N/A") + '</p><p><strong>Address:</strong> ' + ((order.customer && order.customer.address) || "N/A") + '</p><p><strong>City:</strong> ' + ((order.customer && order.customer.city) || "N/A") + '</p><p><strong>Pincode:</strong> ' + ((order.customer && order.customer.pincode) || "N/A") + '</p></div>' +
-            '<p><strong>Payment:</strong> ' + (order.payment || "Cash On Delivery") + '</p>' + helpBtn + cancelBtn +
+            '<div class="detail-section"><h3>Delivery Details</h3><p><strong>Name:</strong> ' + escHtml((order.customer && order.customer.name) || "N/A") + '</p><p><strong>Phone:</strong> ' + escHtml((order.customer && order.customer.phone) || "N/A") + '</p><p><strong>Address:</strong> ' + escHtml((order.customer && order.customer.address) || "N/A") + '</p><p><strong>City:</strong> ' + escHtml((order.customer && order.customer.city) || "N/A") + '</p><p><strong>Pincode:</strong> ' + escHtml((order.customer && order.customer.pincode) || "N/A") + '</p></div>' +
+            '<p><strong>Payment:</strong> ' + escHtml(order.payment || "Cash On Delivery") + '</p>' + helpBtn + cancelBtn +
             '<button type="button" class="place-order-btn" style="margin-top:20px;" onclick="window.location.href=\'index.html\'">Continue Shopping</button></div>';
     });
     return ordersHTML;
@@ -3555,13 +3636,13 @@ function trackOrder() {
     out.innerHTML = '<p style="color:var(--text-secondary);">Searching...</p>';
     apiTrackOrder(ref).then(function(data) {
         var itemsHtml = (data.items || []).map(function(i) {
-            return '<div class="order-product"><span>' + i.name + ' × ' + i.quantity + '</span><strong>₹' + (i.price || 0) + '</strong></div>';
+            return '<div class="order-product"><span>' + escHtml(i.name) + ' × ' + i.quantity + '</span><strong>₹' + (i.price || 0) + '</strong></div>';
         }).join("");
         out.innerHTML = '<div class="order-card">' +
-            '<div class="order-header"><div><div class="order-id">#' + (data.orderNumber || ref) + '</div>' +
-            (data.trackingId ? '<p><strong>Track ID:</strong> ' + data.trackingId + '</p>' : "") +
-            '<small>' + formatOrderDate(data.date) + '</small></div>' +
-            '<div class="order-status">' + friendlyStatus(data.status || "—") + '</div></div>' +
+            '<div class="order-header"><div><div class="order-id">#' + escHtml(data.orderNumber || ref) + '</div>' +
+            (data.trackingId ? '<p><strong>Track ID:</strong> ' + escHtml(data.trackingId) + '</p>' : "") +
+            '<small>' + escHtml(formatOrderDate(data.date)) + '</small></div>' +
+            '<div class="order-status">' + escHtml(friendlyStatus(data.status || "—")) + '</div></div>' +
             statusTrackerHTML(data.status || "Placed", true) +
             '<div class="order-pay-row">' + paymentStatusBadge(data.paymentStatus) + '</div>' +
             '<h3>Items</h3>' + itemsHtml +
@@ -3569,6 +3650,6 @@ function trackOrder() {
             statusTimelineHTML(data.timeline || data.statusHistory) +
             '</div>';
     }).catch(function(err) {
-        out.innerHTML = '<p style="color:#e74c3c;">' + ((err && err.message) || "Order not found. Check the ID and try again.") + '</p>';
+        out.innerHTML = '<p style="color:#e74c3c;">' + escHtml((err && err.message) || "Order not found. Check the ID and try again.") + '</p>';
     });
 }

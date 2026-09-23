@@ -127,6 +127,28 @@ function generateToken(id) {
     });
 }
 
+// HttpOnly session cookie options. The JWT is delivered in an httpOnly cookie
+// so page JS (and therefore any XSS payload) can never read it; `secure` is
+// detected per-request (Vercel terminates TLS at the proxy -> x-forwarded-proto
+// is https, while local dev runs plain http and would reject a Secure cookie).
+function sessionCookieOptions(req) {
+    const forwardedProto = req.headers["x-forwarded-proto"];
+    const isHttps = forwardedProto ? String(forwardedProto).split(",")[0].trim() === "https" : req.secure;
+    return {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: !!isHttps,
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7d - matches JWT expiry
+    };
+}
+
+// Issue the session as an httpOnly cookie (token still returned in the JSON
+// body for backward compatibility with older clients).
+function setAuthCookie(req, res, userId) {
+    res.cookie("freshmart_token", generateToken(userId), sessionCookieOptions(req));
+}
+
 // Sanitized public representation of a user (never passwords, OTPs, hashes).
 function publicUser(user) {
     return {
@@ -226,6 +248,7 @@ exports.signupVerifyOtp = async (req, res) => {
         if (result === "ok") {
             user.emailVerified = true;
             await user.save();
+            setAuthCookie(req, res, user._id);
             return res.json({
                 success: true,
                 token: generateToken(user._id),
@@ -309,6 +332,7 @@ exports.login = async (req, res) => {
             });
         }
 
+        setAuthCookie(req, res, user._id);
         res.json({
             success: true,
             message: "Login successful.",
@@ -549,6 +573,7 @@ exports.googleLogin = async (req, res) => {
             }
         }
 
+        setAuthCookie(req, res, user._id);
         res.json({
             success: true,
             token: generateToken(user._id),
@@ -557,6 +582,18 @@ exports.googleLogin = async (req, res) => {
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
+};
+
+// LOGOUT: clear the httpOnly session cookie. Works with or without a valid
+// token (idempotent); never touches the DB.
+exports.logout = (req, res) => {
+    res.clearCookie("freshmart_token", {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: req.secure || String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim() === "https"
+    });
+    res.json({ success: true, message: "Logged out." });
 };
 
 function cryptoTimingSafeEqual(a, b) {

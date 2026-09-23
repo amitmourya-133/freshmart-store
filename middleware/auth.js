@@ -5,15 +5,23 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 
-exports.protect = async (req, res, next) => {
-    let token;
-
+// Token source: Authorization: Bearer header first (API clients, older
+// sessions), then the httpOnly session cookie set at login (XSS-immune).
+function readToken(req) {
     if (
         req.headers.authorization &&
         req.headers.authorization.startsWith("Bearer")
     ) {
-        token = req.headers.authorization.split(" ")[1];
+        return req.headers.authorization.split(" ")[1];
     }
+    if (req.cookies && req.cookies.freshmart_token) {
+        return req.cookies.freshmart_token;
+    }
+    return null;
+}
+
+exports.protect = async (req, res, next) => {
+    const token = readToken(req);
 
     if (!token) {
         return res.status(401).json({
@@ -40,16 +48,10 @@ exports.protect = async (req, res, next) => {
     }
 };
 
-// Optional auth: attaches req.user when a valid Bearer token is present,
-// but never blocks the request (guest checkout stays public).
+// Optional auth: attaches req.user when a valid token (header or cookie) is
+// present, but never blocks the request (guest checkout stays public).
 exports.optionalProtect = async (req, res, next) => {
-    let token;
-    if (
-        req.headers.authorization &&
-        req.headers.authorization.startsWith("Bearer")
-    ) {
-        token = req.headers.authorization.split(" ")[1];
-    }
+    const token = readToken(req);
     if (!token) {
         return next();
     }

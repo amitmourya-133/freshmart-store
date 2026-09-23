@@ -9,21 +9,32 @@ const API = {
         : "/api"
 };
 
-// ---------- AUTH TOKEN ----------
+// ---------- AUTH SESSION ----------
+// The session JWT now lives ONLY in an httpOnly cookie set by the backend at
+// login / signup-verify / google-login and cleared at logout. The token is
+// never written to localStorage (javascript / XSS cannot read httpOnly cookies)
+// and it is sent automatically with every same-origin API call — no
+// Authorization header is needed. getAuthToken() intentionally always returns
+// null; remaining call sites use hasSession() for the "am I logged in?" signal.
 function getAuthToken() {
-    return readStorageValue("freshMartToken", null);
+    return null;
 }
 
-function setAuthToken(token) {
-    if (token) writeStorageValue("freshMartToken", token);
-    else localStorage.removeItem("freshMartToken");
+// No-op for backward compatibility: the JWT is delivered via the httpOnly
+// cookie, so there is nothing to persist here. Old callers that invoke
+// setAuthToken(data.token) after login keep working safely.
+function setAuthToken(token) {}
+
+// "Am I logged in?" — driven by the local UI flag, not by localStorage token
+// presence. The actual credential is the httpOnly cookie the server sets.
+function hasSession() {
+    return readStorageValue("freshMartLoggedIn", "false") === "true";
 }
 
 function getAuthHeaders() {
-    var token = getAuthToken();
-    var headers = { "Content-Type": "application/json" };
-    if (token) headers["Authorization"] = "Bearer " + token;
-    return headers;
+    // The httpOnly cookie rides along automatically on same-origin calls; only
+    // the JSON content type is needed (no readable Bearer token exists).
+    return { "Content-Type": "application/json" };
 }
 
 // Check if backend is reachable (returns promise)
@@ -361,6 +372,25 @@ function safeRedirectDestination(fallback) {
     return fallback || "index.html";
 }
 
+// End the session: ask the server to clear the httpOnly cookie AND wipe the
+// local auth state. Safe to call when already logged out (server is
+// idempotent); the local state is always cleared even if the server is down.
+function apiLogout() {
+    return fetch(API.base + "/users/logout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            clearAuthState();
+            return data;
+        })
+        .catch(function() {
+            clearAuthState();
+            return { success: false };
+        });
+}
+
 // Remove every auth artifact from local storage (logout / expired token)
 function clearAuthState() {
     try {
@@ -375,8 +405,7 @@ function clearAuthState() {
 // header can render the Admin shortcut only for real admins. This never grants
 // access on its own - admin.html and every admin API still enforce auth on the server.
 function refreshAuthProfile() {
-    var token = getAuthToken();
-    if (!token) return Promise.resolve(null);
+    if (!hasSession()) return Promise.resolve(null);
     return apiGetMe().then(function(user) {
         var existing = getAuthUser() || {};
         var merged = {

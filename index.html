@@ -10,7 +10,7 @@
 
 <body data-page="home">
 
-<!-- HEADER -->
+<a class="skip-link" href="#main-content">Skip to content</a><!-- HEADER -->
 <header>
     <div class="site-nav">
         <div class="logo" onclick="goSection('top')" title="FreshMart Home">FreshMart</div>
@@ -43,7 +43,7 @@
         <button type="button" class="secondary-btn" onclick="window.location.href='orders.html'">My Orders</button>
         <div class="auth-area" id="authArea"></div>
         <button type="button" class="secondary-btn wishlist-btn-header hide-on-mobile-nav" onclick="toggleWishlistPage()">Wishlist <span id="wishlistCount">0</span></button>
-        <button type="button" class="dark-mode-toggle" id="darkModeToggle" onclick="toggleDarkMode()" title="Toggle Dark Mode">Dark mode</button>
+        <button type="button" class="dark-mode-toggle" id="darkModeToggle" onclick="toggleDarkMode()" title="Toggle Dark Mode" aria-label="Toggle dark mode">Dark mode</button>
         <button type="button" class="cart-btn" onclick="openCart()">
             Cart <span id="cartCount">0</span>
         </button>
@@ -51,7 +51,7 @@
 </header>
 
 <!-- HERO -->
-<section class="hero">
+<section class="hero" id="main-content">
     <div class="hero-content">
         <h1>Freshness Delivered To Your Door</h1>
         <p>Fresh vegetables, fruits and groceries at the best prices.</p>
@@ -210,7 +210,7 @@
 </footer>
 
 <!-- CART MODAL -->
-<div id="cartModal" class="cart-modal">
+<div id="cartModal" class="cart-modal" role="dialog" aria-modal="true" aria-label="Your cart">
     <div class="cart-content">
         <button type="button" class="close-btn" onclick="closeCart()">✕</button>
         <h2>Your Cart</h2>

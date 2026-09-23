@@ -9,6 +9,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
+const cookieParser = require("cookie-parser");
 
 // Import routes
 const productRoutes = require("./routes/productRoutes");
@@ -30,7 +31,54 @@ mime.define({ "image/jpeg": ["jfif"] }, true);
 // MIDDLEWARE
 // ===============================
 
-app.use(cors());
+// Vercel (and any reverse proxy) terminates TLS in front of this app; trust
+// the first proxy hop so req.ip / req.secure reflect the real client connection
+// (required for rate limiting and for Secure cookies behind HTTPS).
+app.set("trust proxy", 1);
+
+// Restrict cross-origin browsers to known origins. The API only needs to be
+// consumed by the deployed site and local dev servers; Vercel preview
+// deployments use *.vercel.app. Anything else (e.g. a malicious page trying
+// to call these APIs) gets no CORS headers.
+const ALLOWED_ORIGINS = [
+    "https://freshmart-store-jet.vercel.app",
+    "http://localhost:5000",
+    "http://127.0.0.1:5000",
+    /^https:\/\/freshmart-store(-\w+)?\.vercel\.app$/
+];
+function isAllowedOrigin(origin) {
+    if (!origin) return true; // non-browser clients (curl, server-to-server)
+    return ALLOWED_ORIGINS.some((rule) => {
+        if (rule instanceof RegExp) return rule.test(origin);
+        return rule === origin;
+    });
+}
+app.use(cors({
+    origin(origin, cb) {
+        cb(null, isAllowedOrigin(origin));
+    },
+    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    maxAge: 86400
+}));
+
+// CSRF defense-in-depth for cookie-authenticated state-changing requests:
+// browsers always attach Origin to non-GET/HEAD/OPTIONS requests, so any
+// cross-site POST/PATCH/DELETE (which would otherwise carry the auth cookie)
+// is rejected before it reaches a route. Requests without an Origin header
+// (curl, server-to-server) are allowed.
+const SAFE_METHODS = ["GET", "HEAD", "OPTIONS"];
+app.use((req, res, next) => {
+    if (SAFE_METHODS.includes(req.method)) return next();
+    const origin = req.headers.origin;
+    if (origin && !isAllowedOrigin(origin)) {
+        return res.status(403).json({ success: false, message: "Origin not allowed" });
+    }
+    next();
+});
+
+// Parses the httpOnly session cookie (freshmart_token) on every request.
+app.use(cookieParser());
 
 app.use(express.json());
 
