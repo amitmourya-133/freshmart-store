@@ -82,6 +82,18 @@ app.use(cookieParser());
 
 app.use(express.json());
 
+// Security headers on every API (and locally-served static) response. On Vercel
+// the edge router also adds these for static files; here they guarantee the
+// API responses always carry them (and give local dev identical behaviour).
+app.use((req, res, next) => {
+    res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.postalpincode.in; font-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    next();
+});
+
 // ===============================
 // ROUTES
 // ===============================
