@@ -316,7 +316,7 @@ function renderOrders() {
     if (!container) return;
 
     if (!adminOrders || adminOrders.length === 0) {
-        container.innerHTML = '<div class="cart-empty"><div class="cart-empty-icon">ðŸ“¦</div><h3>No orders match</h3><p>Customer orders will appear here.</p></div>';
+        container.innerHTML = '<div class="cart-empty"><div class="cart-empty-icon">📦</div><h3>No orders match</h3><p>Customer orders will appear here.</p></div>';
         return;
     }
 
@@ -417,7 +417,7 @@ function showOrderDetail(order, skipReload) {
         var img = adminProductImage({ name: item.name || item.productName, image: item.image });
         var thumb = img
             ? '<img class="order-item-thumb" src="' + esc(img) + '" alt="" onerror="this.style.display=\'none\'">'
-            : '<span class="order-item-emoji">' + esc(item.emoji || "ðŸ¥¬") + '</span>';
+            : '<span class="order-item-emoji">' + esc(item.emoji || "🥬") + '</span>';
         return '<tr><td>' + thumb + esc(item.name || item.productName || "Item") + '</td><td>' + (item.quantity || 1) + '</td><td>&#8377;' + (item.price || 0) + '</td><td><strong>&#8377' + ((item.price || 0) * (item.quantity || 1)) + '</strong></td></tr>';
     }).join("");
 
@@ -433,7 +433,7 @@ function showOrderDetail(order, skipReload) {
     }
 
 var timeline = (order.statusHistory || []).map(function(h) {
-        return '<li><strong>' + esc(h.status || "&#8212;") + '</strong> <small>' + esc(h.at ? new Date(h.at).toLocaleString() : "") + (h.by ? " Â· " + esc(h.by) : "") + '</small></li>';
+        return '<li><strong>' + esc(h.status || "&#8212;") + '</strong> <small>' + esc(h.at ? new Date(h.at).toLocaleString() : "") + (h.by ? " · " + esc(h.by) : "") + '</small></li>';
     }).join("");
 
     document.getElementById("orderDetailBody").innerHTML =
@@ -447,10 +447,10 @@ var timeline = (order.statusHistory || []).map(function(h) {
         '<div class="order-detail-block">' +
             '<h4>Payment</h4>' +
             payBadge(order) +
-            '<p>Method: ' + esc(order.paymentMethod || order.payment || "â€”") + (order.paymentMode ? " (" + esc(order.paymentMode) + ")" : "") + '</p>' +
+            '<p>Method: ' + esc(order.paymentMethod || order.payment || "—") + (order.paymentMode ? " (" + esc(order.paymentMode) + ")" : "") + '</p>' +
             (order.paymentReference ? '<p>UPI Ref: ' + esc(order.paymentReference) + '</p>' : "") +
-            '<p>Order ID: ' + esc(order.trackingId || order.orderNumber || "â€”") + '</p>' +
-            (refund.id ? '<p>Refund: ' + esc(refund.id) + ' (&#8377;' + (refund.amount || order.total || 0) + ')</p>' : (refund.status ? '<p>Refund: ' + esc(refund.status) + (refund.reference ? " Â· " + esc(refund.reference) : "") + '</p>' : "")) +
+            '<p>Order ID: ' + esc(order.trackingId || order.orderNumber || "—") + '</p>' +
+            (refund.id ? '<p>Refund: ' + esc(refund.id) + ' (&#8377;' + (refund.amount || order.total || 0) + ')</p>' : (refund.status ? '<p>Refund: ' + esc(refund.status) + (refund.reference ? " · " + esc(refund.reference) : "") + '</p>' : "")) +
             payActions +
         '</div>' +
         '<div class="order-detail-block">' +
@@ -560,7 +560,7 @@ function renderProducts() {
             '<div class="admin-product-photo">' +
                 imgHtml +
                 '<div class="admin-product-emoji" style="background:' + safeGradient + ';">' +
-                    esc(p.emoji || "ðŸ¥¬") +
+                    esc(p.emoji || "🥬") +
                     (inactive ? '<span class="inactive-tag">Hidden</span>' : '') +
                 '</div>' +
             '</div>' +
@@ -570,7 +570,7 @@ function renderProducts() {
                 '<div class="admin-product-meta">❌ ' + (p.rating || 0).toFixed(1) + ' (' + (p.ratingCount || 0) + ' ratings)</div>' +
                 '<div class="price-row">' +
                     '<span class="stock-label">Price: &#8377;<span id="priceVal_' + p._id + '">' + (p.price || 0) + '</span></span>' +
-                    '<button class="row-btn edit" onclick="beginPriceEdit(\'' + p._id + '\')" title="Quick edit price">âœï¸ Price</button>' +
+                    '<button class="row-btn edit" onclick="beginPriceEdit(\'' + p._id + '\')" title="Quick edit price">✏️ Price</button>' +
                 '</div>' +
                 '<div id="priceEdit_' + p._id + '" style="display:none;" class="price-edit-row">' +
                     '<input type="number" id="priceInput_' + p._id + '" class="stock-input" min="0" step="0.01" value="' + (p.price || 0) + '">' +
@@ -583,10 +583,10 @@ function renderProducts() {
                 '</div>' +
             '</div>' +
             '<div class="admin-product-actions">' +
-                '<button class="row-btn edit" onclick="openEditProduct(\'' + p._id + '\')" title="Edit">âœï¸</button>' +
+                '<button class="row-btn edit" onclick="openEditProduct(\'' + p._id + '\')" title="Edit">✏️</button>' +
                 (inactive
-                    ? '<button class="row-btn restore" onclick="restoreProduct(\'' + p._id + '\')" title="Restore">â†©ï¸</button>'
-                    : '<button class="row-btn remove" onclick="removeProduct(\'' + p._id + '\')" title="Remove">ðŸ—‘ï¸</button>'
+                    ? '<button class="row-btn restore" onclick="restoreProduct(\'' + p._id + '\')" title="Restore">↩️</button>'
+                    : '<button class="row-btn remove" onclick="removeProduct(\'' + p._id + '\')" title="Remove">🗑️</button>'
                 ) +
             '</div>' +
         '</div>';
@@ -639,7 +639,7 @@ function quickStock(productId, value) {
 }
 
 function removeProduct(productId) {
-    if (!confirm("Remove this product from the store? (It becomes hidden â€” nothing is deleted from MongoDB.)")) return;
+    if (!confirm("Remove this product from the store? (It becomes hidden — nothing is deleted from MongoDB.)")) return;
     apiDeleteProduct(productId)
         .then(function() {
             showToast("Product removed (hidden)", "success");
@@ -683,7 +683,7 @@ function openAddProduct() {
     document.getElementById("pfCategory").value = "Vegetables";
     document.getElementById("pfPrice").value = "";
     document.getElementById("pfUnit").value = "kg";
-    document.getElementById("pfEmoji").value = "ðŸ¥¬";
+    document.getElementById("pfEmoji").value = "🥬";
     document.getElementById("pfGradient").value = "linear-gradient(135deg, #56ab2f, #a8e063)";
     document.getElementById("pfOrigin").value = "";
     document.getElementById("pfStock").value = 50;
@@ -951,8 +951,8 @@ function renderReviews() {
                 '<div><strong>' + esc(rev.productName || "Product") + '</strong>' +
                 '<span class="admin-review-user"> by ' + esc(rev.userName || "Anonymous") + '</span></div>' +
                 '<div class="admin-review-actions">' +
-                    '<span class="admin-review-rating">' + (typeof starHTML === "function" ? starHTML(rev.rating) : ("â˜…".repeat(rev.rating) + "â˜…".repeat(5 - rev.rating))) + '</span>' +
-                    '<button class="row-btn remove" onclick="deleteReview(\'' + rev._id + '\', \'' + String(rev.productName || "").replace(/[^a-zA-Z0-9 ]/g, "") + '\')" title="Delete review">ðŸ—‘ï¸</button>' +
+                    '<span class="admin-review-rating">' + (typeof starHTML === "function" ? starHTML(rev.rating) : ("★".repeat(rev.rating) + "★".repeat(5 - rev.rating))) + '</span>' +
+                    '<button class="row-btn remove" onclick="deleteReview(\'' + rev._id + '\', \'' + String(rev.productName || "").replace(/[^a-zA-Z0-9 ]/g, "") + '\')" title="Delete review">🗑️</button>' +
                 '</div>' +
             '</div>' +
             '<p class="admin-review-comment">' + esc(rev.comment || "") + '</p>' +
