@@ -94,8 +94,8 @@ function assert(cond, msg) {
         assert(signupRes.status === 201 && signupRes.body && signupRes.body.success,
             "A1 - Signup creates customer: status " + signupRes.status);
 
-        // A2: login
-        var loginRes = await req("POST", "/api/users/login", {
+        // A2: login (token explicitly requested for the API client)
+        var loginRes = await req("POST", "/api/users/login?token=1", {
             email: testEmail,
             password: testPass
         });

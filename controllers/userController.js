@@ -127,6 +127,13 @@ function generateToken(id) {
     });
 }
 
+// Only return the JWT in the response body to explicit API/script clients.
+// Browser sessions use the httpOnly cookie, so exposing the token in the body
+// would needlessly widen the impact of any future XSS.
+function wantsToken(req) {
+    return req.get("X-Request-Token") === "1" || String(req.query.token || "").toLowerCase() === "1";
+}
+
 // HttpOnly session cookie options. The JWT is delivered in an httpOnly cookie
 // so page JS (and therefore any XSS payload) can never read it; `secure` is
 // detected per-request (Vercel terminates TLS at the proxy -> x-forwarded-proto
@@ -143,8 +150,9 @@ function sessionCookieOptions(req) {
     };
 }
 
-// Issue the session as an httpOnly cookie (token still returned in the JSON
-// body for backward compatibility with older clients).
+// Issue the session as an httpOnly cookie. The JWT is returned in the JSON
+// body ONLY when the client explicitly asks for it (wantsToken) - legacy
+// API/script clients - never for normal browser sessions.
 function setAuthCookie(req, res, userId) {
     res.cookie("freshmart_token", generateToken(userId), sessionCookieOptions(req));
 }
@@ -186,9 +194,14 @@ exports.signup = async (req, res) => {
 
         let user = await User.findOne({ email: normalized });
 
-        // Email already belongs to a confirmed account -> standard signup error.
+        // Email already belongs to a confirmed account. Respond with the same
+        // generic message as a fresh signup (no OTP is delivered in this case)
+        // so the endpoint cannot be used to enumerate registered emails.
         if (user && user.emailVerified !== false) {
-            return res.status(400).json({ success: false, message: "An account with this email already exists. Please log in." });
+            return res.status(201).json({
+                success: true,
+                message: "If an account exists for this email, an OTP has been sent. Please verify your email to complete signup."
+            });
         }
 
         // Either no account yet, or an abandoned unverified signup.
@@ -249,12 +262,13 @@ exports.signupVerifyOtp = async (req, res) => {
             user.emailVerified = true;
             await user.save();
             setAuthCookie(req, res, user._id);
-            return res.json({
+            const body = {
                 success: true,
-                token: generateToken(user._id),
                 message: "Email verified. Your account is ready!",
                 data: publicUser(user)
-            });
+            };
+            if (wantsToken(req)) body.token = generateToken(user._id);
+            return res.json(body);
         }
         if (result === "invalid") {
             const attempts = Number(user.otpAttempts || 0);
@@ -333,12 +347,13 @@ exports.login = async (req, res) => {
         }
 
         setAuthCookie(req, res, user._id);
-        res.json({
+        const body = {
             success: true,
             message: "Login successful.",
-            token: generateToken(user._id),
             data: publicUser(user)
-        });
+        };
+        if (wantsToken(req)) body.token = generateToken(user._id);
+        res.json(body);
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
@@ -574,11 +589,12 @@ exports.googleLogin = async (req, res) => {
         }
 
         setAuthCookie(req, res, user._id);
-        res.json({
+        const body = {
             success: true,
-            token: generateToken(user._id),
             data: publicUser(user)
-        });
+        };
+        if (wantsToken(req)) body.token = generateToken(user._id);
+        res.json(body);
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
