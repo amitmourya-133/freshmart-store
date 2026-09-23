@@ -4,79 +4,11 @@
 
 const Product = require("../models/Product");
 const mongoose = require("mongoose");
+const { normalizeProductImage, parseImageDataUri } = require("../utils/productImage");
+const { uploadImageBytes } = require("../utils/cloudinary");
 
 function isBadObjectId(id) {
     return !mongoose.Types.ObjectId.isValid(String(id || ""));
-}
-
-// ===============================
-// PRODUCT IMAGE VALIDATION
-// ===============================
-
-// An admin can provide an image either as a plain URL / project-relative file
-// name (existing behavior) or as an uploaded file, which arrives to the server
-// as a base64 data URI. Uploaded images are validated server-side: decoded
-// byte length is capped and the file's actual bytes (magic numbers) are sniffed
-// so a client-provided MIME type is never trusted. Only PNG/JPEG/WEBP pass.
-const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024; // 1.5 MiB decoded payload
-const MAX_IMAGE_DATA_URI = 2.5 * 1024 * 1024; // ~2.5 MiB base64 string (1.875 MiB decoded bound)
-
-function badImage(message) {
-    const err = new Error(message);
-    err.status = 400;
-    return err;
-}
-
-// Return the authoritative type from the raw bytes (null = not an image we accept).
-function sniffImageType(buf) {
-    if (buf.length >= 8 &&
-        buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47 && // 89 PNG 4E 47
-        buf[4] === 0x0d && buf[5] === 0x0a && buf[6] === 0x1a && buf[7] === 0x0a) {
-        return "png";
-    }
-    if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "jpeg";
-    if (buf.length >= 12 &&
-        buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && // RIFF
-        buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) { // WEBP
-        return "webp";
-    }
-    return null;
-}
-
-// Validate + normalize an incoming product image value, or throw a 400-style error.
-function normalizeProductImage(value) {
-    const v = String(value == null ? "" : value).trim();
-    if (!v) return "";
-
-    // Existing methods: absolute URL or project-relative file name (image/*.png).
-    if (/^https?:\/\//i.test(v)) {
-        if (v.length > 4096) throw badImage("Image URL is too long.");
-        return v;
-    }
-    if (/^images\//i.test(v) || /^[A-Za-z0-9_\-.\/ ]+\.(png|jpe?g|webp|gif|jfif)$/i.test(v)) {
-        if (v.length > 512) throw badImage("Image file name is too long.");
-        return v;
-    }
-
-    // Uploaded image: data URI. Never trust the client-declared MIME type.
-    const match = /^data:image\/(png|jpeg|webp|jpg);base64,([A-Za-z0-9+/=]+)$/i.exec(v);
-    if (!match) throw badImage("Image must be a URL, an images/ file name, or a PNG/JPEG/WEBP upload.");
-    if (v.length > MAX_IMAGE_DATA_URI) throw badImage("Image is too large (max 1.5 MB).");
-
-    let buf;
-    try {
-        buf = Buffer.from(match[2], "base64");
-    } catch (e) {
-        throw badImage("Invalid image upload.");
-    }
-    if (!buf.length) throw badImage("Invalid image upload.");
-    if (buf.length > MAX_IMAGE_BYTES) throw badImage("Image is too large (max 1.5 MB).");
-
-    // Authoritative check: sniff the real bytes, ignore whatever the client said.
-    const type = sniffImageType(buf);
-    if (!type) throw badImage("Unsupported image format. Please use JPG, PNG or WEBP.");
-
-    return "data:image/" + type + ";base64," + buf.toString("base64");
 }
 
 // GET ALL PRODUCTS (public, only active)
@@ -123,6 +55,23 @@ exports.getAdminProducts = async (req, res) => {
         res.json({ success: true, count: products.length, data: products });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// UPLOAD PRODUCT IMAGE TO CLOUDINARY (admin)
+// The frontend sends the camera/file data URI; the server re-validates the
+// actual bytes, uploads to Cloudinary and returns ONLY a secure delivery URL.
+// The base64 payload itself is never stored in MongoDB.
+exports.uploadImage = async (req, res) => {
+    try {
+        const parsed = parseImageDataUri(req.body && req.body.image);
+        const imageUrl = await uploadImageBytes(parsed.buffer, parsed.type);
+        res.json({ success: true, imageUrl });
+    } catch (error) {
+        const status = (error && error.status) || 502;
+        let message = "Image upload failed. Please try again.";
+        if (status === 400 || status === 503) message = error.message;
+        res.status(status).json({ success: false, message });
     }
 };
 

@@ -516,6 +516,21 @@ function fetchAdminProducts() {
         });
 }
 
+// Upload a product image (admin) — server validates, uploads to Cloudinary,
+// returns only the secure delivery URL. The data URI is never persisted.
+function apiUploadProductImage(dataUri) {
+    return fetch(API.base + "/products/upload", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ image: dataUri })
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(res) {
+            if (!res.success) throw new Error(res.message || "Upload failed");
+            return res.imageUrl;
+        });
+}
+
 // Create product (admin)
 function apiCreateProduct(data) {
     return fetch(API.base + "/products", {

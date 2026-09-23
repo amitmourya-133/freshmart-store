@@ -14,7 +14,8 @@ const {
     updateStock,
     deleteProduct,
     setRating,
-    addRating
+    addRating,
+    uploadImage
 } = require("../controllers/productController");
 const {
     getProductReviews,
@@ -27,8 +28,13 @@ const { rateLimit } = require("../utils/rateLimit");
 // product's rating or flooding the review list.
 const publicWriteLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 20 });
 
+// Uploads are expensive (Cloudinary round-trip) so admins get their own
+// limiter on the upload endpoint.
+const uploadLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 20 });
+
 // Admin routes (must be BEFORE /:id route)
 router.get("/admin/all", protect, admin, getAdminProducts);
+router.post("/upload", protect, admin, uploadLimiter, uploadImage);
 router.post("/", protect, admin, createProduct);
 router.put("/:id", protect, admin, updateProduct);
 router.patch("/:id/stock", protect, admin, updateStock);

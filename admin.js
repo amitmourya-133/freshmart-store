@@ -687,10 +687,17 @@ function updateImagePreview() {
 // Accepted uploads (client-side pre-check only; the server re-validates bytes).
 var PRODUCT_ACCEPTED_IMAGE = /\.(jpe?g|png|webp)$/i;
 var PRODUCT_MAX_IMAGE_BYTES = 1.5 * 1024 * 1024;
+var pfUploadBusy = false;
 
+// Select/Take Photo -> local preview -> upload to backend (Cloudinary) -> URL
 function onProductImageSelected(event) {
     var input = event.target;
     if (!input) return;
+    if (pfUploadBusy) {
+        showToast("Please wait for the current upload to finish.", "error");
+        input.value = "";
+        return;
+    }
     var file = input.files && input.files[0];
     if (!file) return;
     var okName = PRODUCT_ACCEPTED_IMAGE.test(file.name || "");
@@ -707,15 +714,48 @@ function onProductImageSelected(event) {
     }
     var reader = new FileReader();
     reader.onload = function (e) {
+        var dataUri = String(e.target.result || "");
+        if (dataUri.indexOf("data:image/") !== 0) {
+            showToast("Could not read the selected image. Please try another file.", "error");
+            input.value = "";
+            return;
+        }
+        // Local preview while the upload happens.
         var dataField = document.getElementById("pfImageData");
-        if (dataField) dataField.value = String(e.target.result || "");
+        if (dataField) dataField.value = dataUri;
         updateImagePreview();
+
+        pfUploadBusy = true;
+        setPfUploading(true);
+        apiUploadProductImage(dataUri)
+            .then(function (imageUrl) {
+                // Only the Cloudinary URL ever reaches product save.
+                document.getElementById("pfImage").value = imageUrl;
+                if (dataField) dataField.value = "";
+                updateImagePreview();
+                showToast("Image uploaded. It will be stored as a secure link.", "success");
+            })
+            .catch(function (err) {
+                if (dataField) dataField.value = "";
+                updateImagePreview();
+                showToast((err && err.message) || "Image upload failed. Please try again.", "error");
+            })
+            .then(function () {
+                pfUploadBusy = false;
+                setPfUploading(false);
+                input.value = "";
+            });
     };
     reader.onerror = function () {
         showToast("Could not read the selected image. Please try another file.", "error");
         input.value = "";
     };
     reader.readAsDataURL(file);
+}
+
+function setPfUploading(busy) {
+    var btn = document.getElementById("pfChooseImgBtn");
+    if (btn) btn.textContent = busy ? "⏳ Uploading image…" : "📷 Upload Image / Take Photo";
 }
 
 function openAddProduct() {
@@ -734,6 +774,8 @@ function openAddProduct() {
     document.getElementById("pfRatingCount").value = 1;
     document.getElementById("pfImage").value = "";
     document.getElementById("pfImageData").value = "";
+    pfUploadBusy = false;
+    setPfUploading(false);
     var fileInput = document.getElementById("pfImageFile");
     if (fileInput) fileInput.value = "";
     document.getElementById("pfDescription").value = "";
@@ -762,6 +804,8 @@ function openEditProduct(productId) {
     var pImgIsData = pImg.indexOf("data:image/") === 0;
     document.getElementById("pfImageData").value = pImgIsData ? pImg : "";
     document.getElementById("pfImage").value = pImgIsData ? "" : pImg;
+    pfUploadBusy = false;
+    setPfUploading(false);
     var fileInput = document.getElementById("pfImageFile");
     if (fileInput) fileInput.value = "";
     document.getElementById("pfDescription").value = p.description || "";
@@ -776,6 +820,11 @@ function closeProductModal() {
 
 function saveProduct(event) {
     event.preventDefault();
+
+    if (pfUploadBusy) {
+        showToast("Image is still uploading. Please wait for it to finish.", "error");
+        return;
+    }
 
     var data = {
         name: document.getElementById("pfName").value.trim(),
