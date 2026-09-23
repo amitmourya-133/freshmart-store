@@ -79,7 +79,10 @@ function switchTab(tab) {
 // Helper: resolve the image file for a product (override `image` field wins)
 function adminProductImage(p) {
     if (p && p.image) {
-        return p.image.indexOf("images/") === 0 ? p.image : "images/" + p.image;
+        var v = String(p.image).trim();
+        // Uploaded (data URI) and full URLs are used as-is.
+        if (v.indexOf("data:image/") === 0 || /^https?:\/\//i.test(v)) return v;
+        return v.indexOf("images/") === 0 ? v : "images/" + v;
     }
     if (p && typeof getProductImage === "function") {
         return getProductImage(p.name);
@@ -664,6 +667,12 @@ function restoreProduct(productId) {
 function updateImagePreview() {
     var wrap = document.getElementById("pfImagePreview");
     if (!wrap) return;
+    // An uploaded image (data URI) always wins over the URL text field.
+    var dataVal = document.getElementById("pfImageData") ? document.getElementById("pfImageData").value : "";
+    if (dataVal) {
+        wrap.innerHTML = '<img class="admin-img-preview" src="' + esc(dataVal) + '" alt="preview">';
+        return;
+    }
     var val = document.getElementById("pfImage").value.trim();
     var name = (document.getElementById("pfName").value || "").trim();
     var url = "";
@@ -673,6 +682,40 @@ function updateImagePreview() {
     wrap.innerHTML = url
         ? '<img class="admin-img-preview" src="' + esc(url) + '" alt="preview" onerror="this.parentNode.innerHTML=\'<span class=admin-img-missing>Image not found: ' + safeUrl + '</span>\'">'
         : "";
+}
+
+// Accepted uploads (client-side pre-check only; the server re-validates bytes).
+var PRODUCT_ACCEPTED_IMAGE = /\.(jpe?g|png|webp)$/i;
+var PRODUCT_MAX_IMAGE_BYTES = 1.5 * 1024 * 1024;
+
+function onProductImageSelected(event) {
+    var input = event.target;
+    if (!input) return;
+    var file = input.files && input.files[0];
+    if (!file) return;
+    var okName = PRODUCT_ACCEPTED_IMAGE.test(file.name || "");
+    var okMime = /^image\/(png|jpe?g|webp)$/i.test(file.type || "");
+    if (!okName && !okMime) {
+        showToast("Please choose a JPG, PNG or WEBP image.", "error");
+        input.value = "";
+        return;
+    }
+    if (file.size > PRODUCT_MAX_IMAGE_BYTES) {
+        showToast("Image is too large (max 1.5 MB).", "error");
+        input.value = "";
+        return;
+    }
+    var reader = new FileReader();
+    reader.onload = function (e) {
+        var dataField = document.getElementById("pfImageData");
+        if (dataField) dataField.value = String(e.target.result || "");
+        updateImagePreview();
+    };
+    reader.onerror = function () {
+        showToast("Could not read the selected image. Please try another file.", "error");
+        input.value = "";
+    };
+    reader.readAsDataURL(file);
 }
 
 function openAddProduct() {
@@ -690,6 +733,9 @@ function openAddProduct() {
     document.getElementById("pfRating").value = 4.0;
     document.getElementById("pfRatingCount").value = 1;
     document.getElementById("pfImage").value = "";
+    document.getElementById("pfImageData").value = "";
+    var fileInput = document.getElementById("pfImageFile");
+    if (fileInput) fileInput.value = "";
     document.getElementById("pfDescription").value = "";
     updateImagePreview();
     document.getElementById("productModal").style.display = "flex";
@@ -712,7 +758,12 @@ function openEditProduct(productId) {
     document.getElementById("pfStock").value = p.stock || 0;
     document.getElementById("pfRating").value = p.rating || 0;
     document.getElementById("pfRatingCount").value = p.ratingCount || 0;
-    document.getElementById("pfImage").value = p.image || "";
+    var pImg = String(p.image || "");
+    var pImgIsData = pImg.indexOf("data:image/") === 0;
+    document.getElementById("pfImageData").value = pImgIsData ? pImg : "";
+    document.getElementById("pfImage").value = pImgIsData ? "" : pImg;
+    var fileInput = document.getElementById("pfImageFile");
+    if (fileInput) fileInput.value = "";
     document.getElementById("pfDescription").value = p.description || "";
     updateImagePreview();
     document.getElementById("productModal").style.display = "flex";
@@ -737,7 +788,8 @@ function saveProduct(event) {
         stock: parseInt(document.getElementById("pfStock").value, 10) || 0,
         rating: parseFloat(document.getElementById("pfRating").value),
         ratingCount: parseInt(document.getElementById("pfRatingCount").value, 10),
-        image: document.getElementById("pfImage").value.trim(),
+        image: document.getElementById("pfImageData").value ||
+            document.getElementById("pfImage").value.trim(),
         description: document.getElementById("pfDescription").value.trim()
     };
 

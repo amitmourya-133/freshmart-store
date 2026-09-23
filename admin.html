@@ -232,8 +232,15 @@
                 <label>Rating Count</label>
                 <input type="number" id="pfRatingCount" min="0" step="1" placeholder="e.g. 42">
 
-                <label>Image file name (optional — must exist in /images)</label>
-                <input type="text" id="pfImage" placeholder="e.g. apple.png">
+                <label>Image URL or file name (optional)</label>
+                <input type="text" id="pfImage" placeholder="e.g. https://example.com/apple.png">
+                <input type="hidden" id="pfImageData">
+
+                <div class="admin-img-row">
+                    <label class="admin-choose-img" for="pfImageFile">📷 Upload Image / Take Photo</label>
+                    <input type="file" id="pfImageFile" accept="image/jpeg,image/png,image/webp" onchange="onProductImageSelected(event)" class="admin-file-input">
+                    <span class="admin-img-hint">JPG, PNG or WEBP · max 1.5 MB · mobile: choose gallery or camera</span>
+                </div>
                 <div id="pfImagePreview" class="admin-img-preview-wrap"></div>
 
                 <label>Description</label>

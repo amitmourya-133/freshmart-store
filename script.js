@@ -1346,7 +1346,10 @@ function getProductImage(name) {
     if (Array.isArray(products)) {
         for (var i = 0; i < products.length; i++) {
             if (products[i].name === name && products[i].image) {
-                return products[i].image.indexOf("images/") === 0 ? products[i].image : "images/" + products[i].image;
+                var v = String(products[i].image).trim();
+                // Uploaded (data URI) and full URLs are used as-is.
+                if (v.indexOf("data:image/") === 0 || /^https?:\/\//i.test(v)) return v;
+                return v.indexOf("images/") === 0 ? v : "images/" + v;
             }
         }
     }

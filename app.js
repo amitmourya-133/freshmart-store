@@ -80,7 +80,7 @@ app.use((req, res, next) => {
 // Parses the httpOnly session cookie (freshmart_token) on every request.
 app.use(cookieParser());
 
-app.use(express.json());
+app.use(express.json({ limit: "5mb" }));
 
 // Security headers on every API (and locally-served static) response. On Vercel
 // the edge router also adds these for static files; here they guarantee the

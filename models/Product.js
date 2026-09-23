@@ -19,7 +19,8 @@ const productSchema = new mongoose.Schema(
         stock: { type: Number, default: 50, min: 0 },
         active: { type: Boolean, default: true },
         rating: { type: Number, default: 4.0, min: 0, max: 5 },
-        ratingCount: { type: Number, default: 1 }
+        ratingCount: { type: Number, default: 1 },
+        image: { type: String, default: "" }
     },
     { timestamps: true }
 );
