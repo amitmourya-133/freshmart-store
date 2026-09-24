@@ -439,7 +439,7 @@ function updateAuthHeader() {
     var name = getAuthUserName();
     if (isLoggedIn() && name) {
         var safeName = String(name).replace(/[&<>"']/g, function(ch) {
-            return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
+            return { "&": "&", "<": "<", ">": ">", '"': """, "'": "'" }[ch];
         });
         var auth = getAuthUser() || {};
         var isAdminUser = auth.role === "admin" || auth.isAdmin;
@@ -447,7 +447,10 @@ function updateAuthHeader() {
             ? '<button type="button" class="secondary-btn admin-shortcut-btn" onclick="window.location.href=\'admin.html\'">⚙️ Admin</button>'
             : "";
         var nameBtnOnclick = isAdminUser ? "window.location.href='admin.html'" : "";
+        // Profile button for all users (customer or admin)
+        var profileBtn = '<button type="button" class="secondary-btn auth-name-btn" title="My Profile" onclick="window.location.href=\'profile.html\'">👤 Profile</button>';
         area.innerHTML = adminBtn +
+            profileBtn +
             '<button type="button" class="secondary-btn hide-on-mobile-nav" onclick="window.location.href=\'help.html\'" title="Contact FreshMart Support">🆘 Help Center</button>' +
             '<button type="button" class="secondary-btn auth-name-btn" title="' + safeName + '"' + (nameBtnOnclick ? ' onclick="' + nameBtnOnclick + '"' : '') + '>👤 ' + safeName + '</button>' +
             '<button type="button" class="secondary-btn hide-on-mobile-nav" onclick="handleLogout()">Logout</button>';
@@ -455,6 +458,7 @@ function updateAuthHeader() {
         area.innerHTML = '<button type="button" class="secondary-btn" onclick="window.location.href=\'signup.html\'">Create Account</button>' +
             '<button type="button" class="secondary-btn" onclick="window.location.href=\'login.html\'">Login</button>';
     }
+}
 }
 
 // Guard used by the in-page "Proceed To Checkout" action.

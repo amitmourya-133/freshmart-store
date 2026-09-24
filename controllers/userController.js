@@ -488,6 +488,94 @@ exports.getMe = async (req, res) => {
     res.json({ success: true, data: req.user });
 };
 
+// Update profile (name, phone, addresses, password)
+// Protected — customer can update their own profile
+exports.updateMe = async (req, res) => {
+    try {
+        const updates = Object.keys(req.body);
+        const allowedUpdates = ["name", "phone", "addresses", "password"];
+        const isValidUpdate = updates.every((update) => allowedUpdates.includes(update));
+
+        if (!isValidUpdate) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid updates! Allowed updates: name, phone, addresses, password",
+            });
+        }
+
+        // Handle password update separately
+        if (req.body.password) {
+            if (req.body.password.length < 6) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Password must be at least 6 characters",
+                });
+            }
+            // We'll handle password after applying other updates
+            // For now, just validate and remember to hash it later
+        }
+
+        // Handle address deletion request
+        if (req.body.deleteAddressIndex !== undefined) {
+            const idx = parseInt(req.body.deleteAddressIndex, 10);
+            if (req.user.addresses && req.user.addresses[idx]) {
+                req.user.addresses.splice(idx, 1);
+            }
+        }
+
+        // Handle setting default address
+        if (req.body.setDefaultIndex !== undefined) {
+            const idx = parseInt(req.body.setDefaultIndex, 10);
+            if (req.user.addresses && req.user.addresses[idx]) {
+                req.user.addresses.forEach(function(addr, i) {
+                    addr.isDefault = (i === idx);
+                });
+            }
+        }
+
+        // Apply allowed updates (excluding password for now - handled separately)
+        var passwordToHash = null;
+        if (req.body.password && req.body.password.length >= 6) {
+            passwordToHash = req.body.password;
+            // Remove password from updates list so it's not applied as a string field
+            updates = updates.filter(function(u) { return u !== "password"; });
+        }
+
+        updates.forEach((update) => (req.user[update] = req.body[update]));
+
+        if (passwordToHash) {
+            const salt = await bcrypt.genSalt(10);
+            req.user.password = await bcrypt.hash(passwordToHash, salt);
+        }
+
+        await req.user.save({ validateBeforeSave: false });
+
+        // Build response - remove sensitive fields
+        const userResponse = req.user.toObject();
+        delete userResponse.password;
+        delete userResponse.otpHash;
+        delete userResponse.otpExpiry;
+        delete userResponse.otpAttempts;
+        delete userResponse.resetOtpHash;
+        delete userResponse.resetOtpExpiry;
+        delete userResponse.resetOtpAttempts;
+        delete userResponse.resetTokenHash;
+        delete userResponse.resetTokenExpiry;
+        delete userResponse.googleId;
+
+        return res.json({
+            success: true,
+            message: "Profile updated successfully",
+            data: userResponse,
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message,
+        });
+    }
+};
+
 // ===============================
 // GOOGLE SIGN-IN (real OAuth 2.0 authorization-code flow)
 // Start -> accounts.google.com -> callback with code -> server exchange +

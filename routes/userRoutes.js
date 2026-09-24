@@ -14,6 +14,7 @@ const {
     forgotPasswordResendOtp,
     forgotPasswordReset,
     getMe,
+    updateMe,
     googleConfigStatus,
     googleAuthStart,
     googleLogin,
@@ -54,6 +55,7 @@ router.post("/google-login", authLimiter, googleLogin);
 
 // Protected
 router.get("/me", protect, getMe);
+router.put("/me", protect, updateMe);
 
 // Admin only
 router.get("/admin/list", protect, admin, listUsers);

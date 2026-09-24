@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FreshMart - My Profile</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <nav>
+                <div class="logo">
+                    <a href="index.html">FreshMart</a>
+                </div>
+                <div class="auth-area" id="authArea">
+                    <!-- Will be populated by script.js -->
+                </div>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="profile-page">
+            <div class="profile-header">
+                <h1>My Profile</h1>
+                <a href="index.html" class="back-btn">← Back to Home</a>
+            </div>
+
+            <div class="profile-card">
+                <!-- Profile section -->
+                <div class="profile-section" id="profileSection">
+                    <div class="profile-image">
+                        <svg width="120" height="120" viewBox="0 0 24 24" fill="none" stroke="#159447" stroke-width="3">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M8 14s1.5 2 4 2 4-2 4-2"/>
+                            <line x1="9" y1="9" x2="9.01" y2="9"/>
+                            <line x1="15" y1="9" x2="15.01" y2="9"/>
+                            <line x1="9" y1="15" x2="9.01" y2="15"/>
+                            <line x1="15" y1="15" x2="15.01" y2="15"/>
+                        </svg>
+                    </div>
+                    <div class="profile-info">
+                        <div class="user-name" id="userName"></div>
+                        <div class="user-email" id="userEmail"></div>
+                        <div class="user-phone" id="userPhone"></div>
+                    </div>
+                </div>
+
+                <!-- Edit profile button -->
+                <button class="edit-btn" onclick="toggleEdit(true)">Edit Profile</button>
+            </div>
+
+            <!-- Edit form (hidden by default, shown on edit button click) -->
+            <div class="edit-form" id="editForm" style="display:none;">
+                <h2>Edit Profile</h2>
+                
+                <form id="profileForm">
+                    <div class="form-group">
+                        <label for="name">Name</label>
+                        <input type="text" id="name" class="input-field" placeholder="Full name">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="phone">Phone</label>
+                        <input type="tel" id="phone" class="input-field" placeholder="Phone number">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="newPassword">New Password (leave blank to keep current)</label>
+                        <input type="password" id="newPassword" class="input-field" placeholder="Enter new password">
+                    </div>
+                    
+                    <button type="submit" class="save-btn">Save Changes</button>
+                    <button type="button" onclick="toggleEdit(false)" class="cancel-btn">Cancel</button>
+                </form>
+            </div>
+
+            <!-- Addresses section -->
+            <div class="profile-section" id="addressesSection" style="margin-top:32px;">
+                <h2>Saved Addresses</h2>
+                
+                <div id="addressesList">
+                    <!-- Addresses will be loaded by script.js -->
+                </div>
+                
+                <button class="add-address-btn" onclick="toggleAddressForm(true)">Add New Address</button>
+            </div>
+
+            <!-- Address form (modal-like) -->
+            <div class="address-form" id="addressForm" style="display:none; margin-top:16px;">
+                <h3 id="addressFormTitle">Add New Address</h3>
+                <form id="addressFormElem">
+                    <input type="hidden" id="addressIndex">
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Name</label>
+                            <input type="text" id="addrName" class="input-field" placeholder="e.g. Home">
+                        </div>
+                        <div class="form-group">
+                            <label>Phone</label>
+                            <input type="tel" id="addrPhone" class="input-field" placeholder="e.g. 9876543210">
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>House/Building</label>
+                            <input type="text" id="addrHouse" class="input-field" placeholder="e.g. 123 Main St">
+                        </div>
+                        <div class="form-group">
+                            <label>Street</label>
+                            <input type="text" id="addrStreet" class="input-field" placeholder="e.g. Main Street">
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Landmark</label>
+                            <input type="text" id="addrLandmark" class="input-field" placeholder="e.g. Near Park">
+                        </div>
+                        <div class="form-group">
+                            <label>City</label>
+                            <input type="text" id="addrCity" class="input-field" placeholder="e.g. Mumbai">
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>State</label>
+                            <select id="addrState" class="input-field">
+                                <option value="">Select state</option>
+                                <option value="Maharashtra">Maharashtra</option>
+                                <option value="Delhi NCR">Delhi NCR</option>
+                                <option value="Gujarat">Gujarat</option>
+                                <option value="UP">Uttar Pradesh</option>
+                                <option value="Karnataka">Karnataka</option>
+                                <option value="Tamil Nadu">Tamil Nadu</option>
+                                <option value="Andhra Pradesh">Andhra Pradesh</option>
+                                <option value="Kerala">Kerala</option>
+                                <option value="Rajasthan">Rajasthan</option>
+                                <option value="West Bengal">West Bengal</option>
+                                <option value="Himachal Pradesh">Himachal Pradesh</option>
+                                <option value="Punjab">Punjab</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Pincode</label>
+                            <input type="text" id="addrPincode" class="input-field" placeholder="6 digits (e.g. 400001)">
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Delivery Instructions</label>
+                        <textarea id="addrInstructions" class="input-field" placeholder="e.g. Leave at door or with neighbor"></textarea>
+                    </div>
+                    
+                    <div class="form-actions">
+                        <button type="submit" class="save-btn" id="addressSaveBtn">Save Address</button>
+                        <button type="button" onclick="toggleAddressForm(false)" class="cancel-btn">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2026 FreshMart. All rights reserved.</p>
+            <p>Fresh vegetables, fruits and groceries delivered to your door</p>
+        </div>
+    </footer>
+
+    <script src="api.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

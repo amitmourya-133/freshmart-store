@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FreshMart - Delivery Partner</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body data-page="delivery">
+
+    <a class="skip-link" href="#main-content">Skip to content</a><header>
+        <div class="logo">FreshMart</div>
+        <div class="header-actions">
+            <button type="button" class="secondary-btn" onclick="window.location.href='index.html'">Store</button>
+            <button type="button" class="dark-mode-toggle" id="darkModeToggle" onclick="toggleDarkMode()" title="Dark Mode" aria-label="Toggle dark mode">🌙</button>
+        </div>
+    </header>
+
+    <a class="skip-link" href="#assignments">Skip to assignments</a><main id="main-content">
+
+        <div class="delivery-header">
+            <h1>Delivery Partner Panel</h1>
+            <div class="availability-toggle" id="availabilityWrapper">
+                <label class="switch">
+                    <input type="checkbox" id="availabilityInput" disabled>
+                    <span class="slider round"></span>
+                </label>
+            </div>
+            <div class="earnings-summary" id="earningsWrapper" style="margin-top:12px;">
+                <div class="earning-card" id="earningsToday">
+                    <div>Today</div>
+                    <div class="amount" id="earningsTodayAmount">₹0</div>
+                </div>
+                <div class="earning-card" id="earningsThisWeek">
+                    <div>This Week</div>
+                    <div class="amount" id="earningsThisWeekAmount">₹0</div>
+                </div>
+                <div class="earning-card" id="earningsThisMonth">
+                    <div>This Month</div>
+                    <div class="amount" id="earningsThisMonthAmount">₹0</div>
+                </div>
+            </div>
+        </div>
+
+        <section class="assignments" id="assignments" style="margin-top:24px;">
+            <h2>Today's Deliveries</h2>
+            <p class="empty-state" id="emptyState">No deliveries assigned yet. Check back later.</p>
+            <div class="assignments-list" id="assignmentsList">
+                <!-- Assignment cards will be populated by JavaScript -->
+            </div>
+        </section>
+
+    </main>
+
+    <footer>
+        <p>FreshMart Delivery Partner</p>
+    </footer>
+
+    <script src="api.js"></script>
+    <script>
+        'use strict';
+
+        // ===============================
+        // INITIALISATION
+        // ===============================
+
+        document.addEventListener("DOMContentLoaded", function() {
+            // Check authentication and role
+            checkDeliveryAuth();
+        });
+
+        // ===============================
+        // AUTHENTICATION & ROLE VERIFICATION
+        // ===============================
+
+        function checkDeliveryAuth() {
+            // Verify delivery user is logged in
+            const token = window.freshmartToken || "";
+            if (!token) {
+                // No token - redirect to login
+                window.location.href = "login.html";
+                return;
+            }
+
+            // Fetch current user to verify role
+            fetch("/api/users/me", {
+                headers: { "Authorization": "Bearer " + token }
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (!data.success || data.data.role !== "delivery") {
+                    // Not a delivery user - redirect
+                    window.location.href = "login.html";
+                    return;
+                }
+                // User is verified - continue
+                initDashboard();
+            })
+            .catch(err => {
+                console.error("Auth check failed:", err);
+                window.location.href = "login.html";
+            });
+        }
+
+        // ===============================
+        // DASHBOARD INITIALISATION
+        // ===============================
+
+        async function initDashboard() {
+            // Fetch today's deliveries and earnings in parallel
+            await Promise.all([
+                loadTodayDeliveries(),
+                loadEarnings()
+            ]);
+        }
+
+        // ===============================
+        // LOAD TODAY'S DELIVERIES
+        // ===============================
+
+        async function loadTodayDeliveries() {
+            const token = window.freshmartToken || "";
+            const res = await fetch("/api/delivery/today", {
+                headers: { "Authorization": "Bearer " + token }
+            });
+            const data = await res.json();
+
+            if (data.success && data.deliveries) {
+                renderAssignments(data.deliveries);
+                document.getElementById("emptyState").style.display = "none";
+            } else {
+                document.getElementById("assignmentsList").innerHTML = '';
+                document.getElementById("emptyState").style.display = "block";
+                showToast("No deliveries assigned at this time", "info");
+            }
+        }
+
+        // Render assignment cards
+        function renderAssignments(deliveries) {
+            const container = document.getElementById("assignmentsList");
+            container.innerHTML = "";
+
+            deliveries.forEach(assignment => {
+                const order = assignment.order || {};
+                const status = assignment.status || "ASSIGNED";
+                const statusRanks = {
+                    ASSIGNED: 0, ACCEPTED: 1, PICKED_UP: 2,
+                    EN_ROUTE: 3, DELIVERED: 4, REJECTED: -1, CANCELLED: -2
+                };
+                const rank = statusRanks[status] || 0;
+
+                const html = createAssignmentCard(assignment, order, rank);
+                container.innerHTML += html;
+            });
+
+            // Add click handlers to action buttons after rendering
+            setTimeout(attachActionHandlers, 100);
+        }
+
+        function createAssignmentCard(assignment, order, rank) {
+            const orderNumber = order.orderNumber || assignment.orderId || 'N/A';
+            const customerName = order.customerName || order.name || 'Customer';
+            const customerPhone = order.phone || '';
+            const address = order.address || order.deliveryAddress || 'Address';
+            const items = order.items || assignment.notes || 'Items';
+            const amount = order.total || order.amount || 0;
+            const paymentMethod = order.paymentMethod || order.paymentStatus || 'COD';
+            const deliverySlot = order.deliverySlot || assignment.deliverySlot || 'Slot';
+            const assignedAt = assignment.assignedAt ? new Date(assignment.assignedAt).toLocaleString() : '';
+            const status = assignment.status || 'ASSIGNED';
+
+            // Determine available actions based on status
+            let actionsHtml = '';
+            const isDisabled = (current, allowed) => allowed.includes(current) ? '' : 'disabled';
+
+            switch(status) {
+                case "ASSIGNED":
+                    actionsHtml = `
+                        <button class="action-btn accept" title="Accept Assignment" ${isDisabled(status, ["ACCEPTED", "PICKED_UP"]) ? 'disabled' : ''} data-id="${assignment._id}">
+                            Accept
+                        </button>
+                        <button class="action-btn reject" title="Reject Assignment" ${isDisabled(status, ["PICKED_UP"]) ? 'disabled' : ''} data-id="${assignment._id}">
+                            Reject
+                        </button>
+                    `;
+                    break;
+
+                case "ACCEPTED":
+                    actionsHtml = `
+                        <button class="action-btn pickup" title="Mark Picked Up" ${isDisabled(status, ["EN_ROUTE"]) ? 'disabled' : ''} data-id="${assignment._id}">
+                            Pickup
+                        </button>
+                    `;
+                    break;
+
+                case "PICKED_UP":
+                    actionsHtml = `
+                        <button class="action-btn start" title="Start Delivery" ${isDisabled(status, ["EN_ROUTE"]) ? 'disabled' : ''} data-id="${assignment._id}">
+                            Start Delivery
+                        </button>
+                    `;
+                    break;
+
+                case "EN_ROUTE":
+                    actionsHtml = `
+                        <button class="action-btn deliver" title="Mark Delivered" ${isDisabled(status, ["DELIVERED"]) ? 'disabled' : ''} data-id="${assignment._id}">
+                            Deliver
+                        </button>
+                    `;
+                    break;
+
+                case "DELIVERED":
+                case "REJECTED":
+                case "CANCELLED":
+                    // No action buttons for terminal states
+                    break;
+            }
+
+            // Format date Ago
+            const dateString = assignedAt ? 
+                `Assigned: ${assignedAt}` : '';
+
+            const cardClass = rank >= 0 ? 'delivery-card' : 'delivery-card delivered';
+
+            return `
+                <div class="delivery-card ${cardClass}" data-assignment-id="${assignment._id}">
+                    <div class="delivery-header">
+                        <span class="status-badge" style="background:${rank >= 0 ? getStatusColor(status) : '#6c75'}">
+                            ${status}
+                        </span>
+                        <span class="delivery-time">${dateString}</span>
+                    </div>
+                    <div class="delivery-details">
+                        <div class="detail-row">
+                            <strong>Order:</strong> ${orderNumber}
+                        </div>
+                        <div class="detail-row">
+                            <strong>Customer:</strong> ${customerName}
+                        </div>
+                        <div class="detail-row">
+                            <strong>Phone:</strong> ${customerPhone ? `<a href="tel:${customerPhone}">${customerPhone}</a>` : 'N/A'}
+                        </div>
+                        <div class="detail-row">
+                            <strong>Address:</strong> ${address}
+                        </div>
+                    </div>
+                    <div class="delivery-items">
+                        <strong>Items:</strong> ${items}
+                    </div>
+                    <div class="delivery-amount">
+                        <strong>₹${Number(amount).toLocaleString()}</strong>
+                    </div>
+                    <div class="delivery-actions">
+                        ${actionsHtml}
+                    </div>
+                </div>
+            `;
+        }
+
+        function getStatusColor(status) {
+            const colors = {
+                ASSIGNED: '#159447', ACCEPTED: '#ffc107',
+                PICKED_UP: '#fd7e14', EN_ROUTE: '#dc3545',
+                DELIVERED: '#28a745', REJECTED: #6c7575, CANCELLED: #6c7575
+            };
+            return colors[status] || '#6c7575';
+        }
+
+        // Attach event handlers to action buttons
+        function attachActionHandlers() {
+            document.querySelectorAll('.accept').forEach(btn => {
+                btn.addEventListener('click', () => handleAccept(btn.dataset.id));
+            });
+            document.querySelectorAll('.reject').forEach(btn => {
+                btn.addEventListener('click', () => handleReject(btn.dataset.id));
+            });
+            document.querySelectorAll('.pickup').forEach(btn => {
+                btn.addEventListener('click', () => handlePickup(btn.dataset.id));
+            });
+            document.querySelectorAll('.start').forEach(btn => {
+                btn.addEventListener('click', () => handleStart(btn.dataset.id));
+            });
+            document.querySelectorAll('.deliver').forEach(btn => {
+                btn.addEventListener('click', () => handleDeliver(btn.dataset.id));
+            });
+        }
+
+        // ===============================
+        // STATUS ACTION HANDLERS
+        // ===============================
+
+        async function handleAssignId(assignmentId, action, body) {
+            const token = window.freshmartToken || "";
+            const res = await fetch(`/api/delivery/${action}`, {
+                method: "PUT",
+                headers: {
+                    "Authorization": "Bearer " + token,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(body)
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                showToast(data.message || "Action completed successfully", "success");
+                // Reload the page to show updated state
+                setTimeout(() => window.location.reload(), 1500);
+            } else {
+                showToast(data.message || "Action failed", "error");
+            }
+        }
+
+        async function handleAccept(assignmentId) {
+            await handleAssignId(assignmentId, "accept", {});
+        }
+
+        async function handleReject(assignmentId) {
+            if (!confirm("Are you sure you want to reject this assignment?")) return;
+            await handleAssignId(assignmentId, "reject", {});
+        }
+
+        async function handlePickup(assignmentId) {
+            await handleAssignId(assignmentId, "status", { status: "PICKED_UP" });
+        }
+
+        async function handleStart(assignmentId) {
+            await handleAssignId(assignmentId, "status", { status: "EN_ROUTE" });
+        }
+
+        async function handleDeliver(assignmentId) {
+            // Show OTP prompt for delivery completion
+            const otp = prompt("Enter the 4-digit OTP for delivery verification:");
+            if (!otp || otp.length !== 4) {
+                showToast("Invalid OTP. Please enter exactly 4 digits.", "error");
+                return;
+            }
+
+            await handleAssignId(assignmentId, "status", { 
+                status: "DELIVERED", 
+                otpCode: otp 
+            });
+        }
+
+        // ===============================
+        // EARNINGS
+        // ===============================
+
+        async function loadEarnings() {
+            const token = window.freshmartToken || "";
+            const res = await fetch("/api/delivery/earnings", {
+                headers: { "Authorization": "Bearer " + token }
+            });
+            const data = await res.json();
+
+            if (data.success && data.totalEarnings !== undefined) {
+                document.getElementById("earningsTodayAmount").textContent = `₹${data.totalEarnings.toLocaleString() || 0}`;
+                // If completedCount is available, we could split by time period
+                document.getElementById("earningsThisWeekAmount").textContent = `₹${(data.completedCount * 50).toLocaleString() || 0}`; // placeholder - actual would need per-delivery earnings
+                document.getElementById("earningsThisMonthAmount").textContent = `₹${(data.completedCount * 200).toLocaleString() || 0}`; // placeholder
+            }
+        }
+
+        // ===============================
+        // AVAILABILITY TOGGLE
+        // ===============================
+
+        function initAvailability() {
+            const token = window.freshmartToken || "";
+            fetch("/api/delivery/availability", {
+                headers: { "Authorization": "Bearer " + token }
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success !== false) {
+                    const checkbox = document.getElementById("availabilityInput");
+                    if (checkbox) {
+                        checkbox.checked = data.isAvailable;
+                        checkbox.disabled = false;
+                        checkbox.addEventListener('change', function() {
+                            toggleAvailability(this.checked);
+                        });
+                    }
+                }
+            })
+            .catch(err => console.error("Availability check failed:", err));
+        }
+
+        function toggleAvailability(isAvailable) {
+            const token = window.freshmartToken || "";
+            fetch("/api/delivery/availability", {
+                method: "PUT",
+                headers: {
+                    "Authorization": "Bearer " + token,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ isAvailable })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    showToast(data.message || "Availability updated", "success");
+                    // Refresh the page to reflect new availability
+                    setTimeout(() => window.location.reload(), 1000);
+                } else {
+                    showToast(data.message || "Failed to update availability", "error");
+                    // Reset the toggle
+                    document.getElementById("availabilityInput").checked = !isAvailable;
+                }
+            })
+            .catch(err => {
+                showToast("Network error", "error");
+                document.getElementById("availabilityInput").checked = !isAvailable;
+            });
+        }
+
+        // ===============================
+        // HELPER: TOAST MESSAGES
+        // ===============================
+
+        function showToast(message, type = "info") {
+            // Create toast element if one doesn't exist
+            let toast = document.querySelector('.fresh-toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.className = 'fresh-toast';
+                toast.style.cssText = `
+                    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+                    background: #159447; color: white; padding: 12px 24px;
+                    border-radius: 8px; z-index: 9999; min-width: 200px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                    animation: slideIn 0.3s ease;
+                `;
+                document.body.appendChild(toast);
+            }
+
+            toast.textContent = message;
+            toast.style.display = 'block';
+
+            // Auto-hide after 3 seconds
+            setTimeout(() => {
+                toast.style.display = 'none';
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
