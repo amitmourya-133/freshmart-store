@@ -76,3 +76,15 @@ exports.admin = (req, res, next) => {
         });
     }
 };
+
+exports.delivery = (req, res, next) => {
+    // Only users with role "delivery" may proceed.
+    if (req.user && req.user.role === "delivery") {
+        next();
+    } else {
+        res.status(403).json({
+            success: false,
+            message: "Delivery partner access only"
+        });
+    }
+};

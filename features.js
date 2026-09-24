@@ -427,14 +427,49 @@ function getSubtotal() {
 // 5. SUBSCRIPTION CONTENT
 // ===============================
 
-function renderSubscriptionContent() {
+async function renderSubscriptionContent() {
     var banner = document.querySelector(".subscription-banner");
     if (!banner) return;
-    var h3 = banner.querySelector("h3");
-    var p = banner.querySelector("p");
-    if (currentLang === "hi") {
-        if (h3)         h3.innerText = "साप्ताहिक वेजी बॉक्स";
-        if (p) p.innerText = "हर हफ़्ते ताज़ी सब्ज़ियाँ घर पर। 20% तक बचाएँ!";
+
+    try {
+        var subApiBase = (typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"))
+            ? "http://localhost:5000/api"
+            : "/api";
+
+        const resp = await fetch(subApiBase + "/subscriptions/my", {
+            headers: { "Authorization": "Bearer " + (window.freshmartToken || "") }
+        });
+        const data = await resp.json();
+
+        if (data.success && data.subscription) {
+            var h3 = banner.querySelector("h3");
+            var p = banner.querySelector("p");
+            if (currentLang === "hi") {
+                if (h3) h3.innerText = "साप्ताहिक वेजी बॉक्स";
+                if (p) p.innerText = "हर हफ़्ते ताज़ी सब्ज़ियाँ घर पर। 20% तक बचाएँ!";
+            } else {
+                if (h3) h3.innerText = "Weekly Veggie Box";
+                if (p) p.innerText = "Fresh vegetables delivered every week. Save up to 20%!";
+            }
+        } else {
+            // No active subscription — show default banner
+            if (currentLang === "hi") {
+                if (h3) h3.innerText = "साप्ताहिक वेजी बॉक्स";
+                if (p) p.innerText = "हर हफ़्ते ताज़ी सब्ज़ियाँ घर पर। 20% तक बचाएँ!";
+            } else {
+                if (h3) h3.innerText = "Weekly Veggie Box";
+                if (p) p.innerText = "Fresh vegetables delivered every week. Save up to 20%!";
+            }
+        }
+    } catch (error) {
+        // Fallback on error
+        if (currentLang === "hi") {
+            if (h3) h3.innerText = "साप्ताहिक वेजी बॉक्स";
+            if (p) p.innerText = "हर हफ़्ते ताज़ी सब्ज़ियाँ घर पर। 20% तक बचाएँ!";
+        } else {
+            if (h3) h3.innerText = "Weekly Veggie Box";
+            if (p) p.innerText = "Fresh vegetables delivered every week. Save up to 20%!";
+        }
     }
 }
 

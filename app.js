@@ -20,6 +20,9 @@ const reviewRoutes = require("./routes/reviewRoutes");
 const settingsRoutes = require("./routes/settingsRoutes");
 const couponRoutes = require("./routes/couponRoutes");
 const dashboardRoutes = require("./routes/dashboardRoutes");
+const subscriptionRoutes = require("./routes/subscriptionRoutes");
+const paymentRoutes = require("./routes/paymentRoutes");
+const deliveryRoutes = require("./routes/deliveryRoutes");
 
 const app = express();
 
@@ -57,7 +60,7 @@ app.use(cors({
     origin(origin, cb) {
         cb(null, isAllowedOrigin(origin));
     },
-    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
     maxAge: 86400
 }));
@@ -106,6 +109,9 @@ app.use("/api/reviews", reviewRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/coupons", couponRoutes);
 app.use("/api/admin/dashboard", dashboardRoutes);
+app.use("/api/subscriptions", subscriptionRoutes);
+app.use("/api/payments", paymentRoutes);
+app.use("/api/delivery", deliveryRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {

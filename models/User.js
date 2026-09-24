@@ -11,7 +11,7 @@ const userSchema = new mongoose.Schema(
         email: { type: String, required: true, unique: true, lowercase: true, trim: true },
         phone: { type: String, trim: true },
         password: { type: String },
-        role: { type: String, enum: ["customer", "admin"], default: "customer" },
+        role: { type: String, enum: ["customer", "admin", "delivery"], default: "customer" },
         // OTP email-verification state. Only the SHA-256 hash is stored,
         // never the plain OTP.
         otpHash: { type: String },
@@ -32,7 +32,20 @@ const userSchema = new mongoose.Schema(
         // created signup accounts start as emailVerified: false until their
         // signup OTP is confirmed.
         emailVerified: { type: Boolean, default: true },
-        isAdmin: { type: Boolean, default: false }
+        isAdmin: { type: Boolean, default: false },
+        // Saved addresses for checkout and profile
+        addresses: [{
+            name: { type: String, trim: true },
+            phone: { type: String, trim: true },
+            house: { type: String, trim: true },
+            street: { type: String, trim: true },
+            landmark: { type: String, trim: true },
+            city: { type: String, trim: true },
+            state: { type: String, trim: true },
+            pincode: { type: String, match: [/^\d{6}$/, "Pincode must be 6 digits"] },
+            deliveryInstructions: { type: String, trim: true },
+            isDefault: { type: Boolean, default: false }
+        }],
     },
     { timestamps: true }
 );
