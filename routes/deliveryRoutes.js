@@ -333,4 +333,49 @@ router.put("/availability", protect, async (req, res) => {
     }
 });
 
+// NEW: GET /api/delivery/management/partners — admin sees all delivery partners
+router.get("/management/partners", protect, admin, async (req, res) => {
+    try {
+        const deliveryUsers = await User.find({ role: "delivery" }).select(
+            "name email phone isAvailable"
+        );
+        return res.json({
+            success: true,
+            deliveryUsers,
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message,
+        });
+    }
+});
+
+// NEW: GET /api/delivery/management/today — admin sees all today's assignments
+router.get(
+    "/management/today",
+    protect,
+    admin,
+    async (req, res) => {
+        try {
+            const deliveries = await DeliveryAssignment.find({
+                status: { $in: ["ASSIGNED", "ACCEPTED", "PICKED_UP", "EN_ROUTE"] },
+            })
+                .populate("deliveryUser", "name email")
+                .populate("order", "orderNumber total status paymentStatus")
+                .sort({ assignedAt: -1 });
+
+            return res.json({
+                success: true,
+                deliveries,
+            });
+        } catch (error) {
+            return res.status(500).json({
+                success: false,
+                message: error.message,
+            });
+        }
+    }
+);
+
 module.exports = router;

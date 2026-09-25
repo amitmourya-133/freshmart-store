@@ -25,6 +25,7 @@
             <button class="admin-tab" id="tabCustomersBtn" onclick="switchTab('customers')">👥 Customers</button>
             <button class="admin-tab" id="tabReviewsBtn" onclick="switchTab('reviews')">⭐ Reviews</button>
             <button class="admin-tab" id="tabCouponsBtn" onclick="switchTab('coupons')">🎟️ Coupons</button>
+            <button class="admin-tab" id="tabDeliveryBtn" onclick="switchTab('delivery')">🚚 Delivery</button>
             <button class="admin-tab" id="tabSettingsBtn" onclick="switchTab('settings')">⚙️ Settings</button>
 
             <div class="admin-tabs-actions">
@@ -302,6 +303,28 @@
         </div>
     </div>
 
+
+    <!-- Delivery Management Modal -->
+    <div id="deliveryManagementSection" class="admin-section" style="display:none;">
+        <div class="admin-section-head">
+            <h2>Delivery Management</h2>
+        </div>
+        <div class="admin-stats" id="adminDeliveryStats">
+            <p style="text-align:center;color:var(--text-secondary);padding:20px;">Loading delivery data...</p>
+        </div>
+        <div class="admin-section" style="margin-top:24px;">
+            <h3>Delivery Partners</h3>
+            <div id="deliveryPartnersList" style="margin-top:16px;">
+                <p style="text-align:center;color:var(--text-secondary);padding:20px;">Loading delivery partners...</p>
+            </div>
+        </div>
+        <div class="admin-section" style="margin-top:24px;">
+            <h3>Today's Assignments</h3>
+            <div id="todayAssignmentsList" style="margin-top:16px;">
+                <p style="text-align:center;color:var(--text-secondary);padding:20px;">Loading today's assignments...</p>
+            </div>
+        </div>
+    </div>
 
     <!-- Customer Order History Modal -->
     <div id="customerOrdersModal" class="admin-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="customerOrdersTitle">
