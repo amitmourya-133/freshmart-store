@@ -1,0 +1,17 @@
+{
+  "name": "FreshMart - Online Fruit & Vegetable Store",
+  "short_name": "FreshMart",
+  "description": "Order fresh fruits, vegetables and groceries for fast home delivery.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#159447",
+  "theme_color": "#159447",
+  "icons": [
+    {
+      "src": "./jacfruit.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

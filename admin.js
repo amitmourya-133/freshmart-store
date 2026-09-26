@@ -1283,48 +1283,131 @@ function loadAdminDelivery() {
     }
 
     fetchAdminDeliveryPartners().then(function(partners) {
-        renderAdminDeliveryPartners(partners);    }).catch(function(err) {        container.innerHTML = '<p style="text-align:center;color:#e74c3c;padding:30px;">' + esc(err.message || "Failed to load delivery partners") + '</p>';    });
+        renderAdminDeliveryPartners(partners);
+        window._adminDeliveryPartners = partners;
+        updateAdminDeliveryStats();
+    }).catch(function(err) {
+        container.innerHTML = '<p style="text-align:center;color:#e74c3c;padding:30px;">' + esc(err.message || "Failed to load delivery partners") + '</p>';
+    });
+
+    if (typeof fetchAdminDeliveryToday === "function") {
+        fetchAdminDeliveryToday().then(function(deliveries) {
+            renderAdminDeliveryToday(deliveries);
+            window._adminDeliveryToday = deliveries;
+            updateAdminDeliveryStats();
+        }).catch(function() {});
+    }
+}
+
+function updateAdminDeliveryStats() {
+    var stats = document.getElementById("adminDeliveryStats");
+    if (!stats) return;
+    var partners = window._adminDeliveryPartners || [];
+    var deliveries = window._adminDeliveryToday || [];
+    var online = partners.filter(function(p) { return ((p.online !== undefined) ? p.online : p.isOnline); }).length;
+    var active = deliveries.filter(function(d) { return d.status && d.status !== "REJECTED" && d.status !== "CANCELLED"; }).length;
+    stats.innerHTML =
+        '<div class="stat-box"><strong>' + partners.length + '</strong><span>Delivery Partners</span></div>' +
+        '<div class="stat-box"><strong>' + online + '</strong><span>Online</span></div>' +
+        '<div class="stat-box"><strong>' + deliveries.length + '</strong><span>Active Deliveries</span></div>' +
+        '<div class="stat-box low"><strong>' + active + '</strong><span>In Progress</span></div>';
 }
 
 function renderAdminDeliveryPartners(partners) {
     var container = document.getElementById("deliveryPartnersList");
     if (!container) return;
-    if (!partners || partners.length === 0) {        container.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:20px;">No delivery partners found.</p>';        return;    }
-    var html = partners.map(function(p) {        return '<div class="admin-coupon' + (p.isOnline ? " active" : "") + '">' +            '<div class="admin-coupon-main">' +                '<div class="admin-coupon-code">' + (p.name || "Partner " + p._id) + '</div>' +                '<div class="admin-coupon-meta">' +                '<span>Status: ' + (p.isOnline ? "Online" : "Offline") + '</span>' +                '<span>Availability: ' + (p.isAvailable ? "Available" : "Unavailable") + '</span>' +                '</div>' +            '</div>' +        '</div>';    }).join("");    container.innerHTML = '<h3>Delivery Partners</h3>' + html;}
+    if (!partners || partners.length === 0) {
+        container.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:20px;">No delivery partners found.</p>';
+        return;
+    }
+    var html = partners.map(function(p) {
+        var loc = (p.lastLat != null && p.lastLng != null)
+            ? p.lastLat.toFixed(5) + ", " + p.lastLng.toFixed(5)
+            : "";
+        var lastSeen = p.lastLocationAt
+            ? new Date(p.lastLocationAt).toLocaleString()
+            : "never";
+        var contact = p.phone ? esc(p.phone) : "";
+        return '<div class="admin-coupon' + (((p.online !== undefined) ? p.online : p.isOnline) ? " active" : "") + '">' +
+            '<div class="admin-coupon-main">' +
+                '<div class="admin-coupon-code">' + (p.name || "Partner " + p._id) + '</div>' +
+                '<div class="admin-coupon-meta">' +
+                (contact ? '<span>Phone: ' + contact + '</span>' : '') +
+                '<span>Status: ' + (((p.online !== undefined) ? p.online : p.isOnline) ? "Online" : "Offline") + '</span>' +
+                '<span>Availability: ' + (p.isAvailable ? "Available" : "Unavailable") + '</span>' +
+                (loc ? '<span>Last location: ' + esc(loc) + '</span>' : '') +
+                '<span>Last seen: ' + esc(lastSeen) + '</span>' +
+                '</div>' +
+            '</div>' +
+        '</div>';
+    }).join("");
+    container.innerHTML = '<h3>Delivery Partners</h3>' + html;
+}
 
-function renderAdminDeliveryToday(assignments) {    var container = document.getElementById("todayAssignmentsList");    if (!container) return;    if (!assignments || assignments.length === 0) {        container.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:20px;">No active deliveries today.</p>';        return;    }    var html = assignments.map(function(a) {        var statusClass = a.status;        var statusLabel = a.status;        var orderInfo = a.order ? '<div>Order: ' + (a.order.orderNumber || "N/A") + ' - ₹' + (a.order.total || 0) + '</div>' : '';        return '<div style="padding: 8px; border-bottom: 1px solid #eee; margin-bottom: 8px;">' + '<strong>Assignment:</strong> ' + (a.status || 'Unknown') + orderInfo + '</div>';    }).join("");    container.innerHTML = '<h3>Today\'s Assignments</h3>' + html;}
+function renderAdminDeliveryToday(assignments) {
+    var container = document.getElementById("todayAssignmentsList");
+    if (!container) return;
+    if (!assignments || assignments.length === 0) {
+        container.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:20px;">No active deliveries today.</p>';
+        return;
+    }
+    var html = assignments.map(function(a) {
+        var statusLabel = a.status;
+        var partnerName = a.deliveryUser && a.deliveryUser.name ? a.deliveryUser.name : "";
+        var orderInfo = a.order ? 'Order: ' + (a.order.orderNumber || "N/A") + ' - ₹' + (a.order.total || 0) : '';
+        var partnerInfo = partnerName ? ' &middot; Partner: ' + partnerName : '';
+        return '<div style="padding: 8px; border-bottom: 1px solid #eee; margin-bottom: 8px;">' +
+            '<strong>' + (statusLabel || 'Unknown') + '</strong>' +
+            (orderInfo ? '<div>' + orderInfo + '</div>' : '') +
+            (partnerInfo ? '<div>' + partnerInfo + '</div>' : '') +
+            '</div>';
+    }).join("");
+    container.innerHTML = '<h3>Today\'s Assignments</h3>' + html;
+}
 
-function fetchAdminDeliveryPartners() {    return new Promise(function(resolve, reject) {        fetch("/api/delivery/management/partners", {            method: "GET",            credentials: "include",        }) .then(function(resp) {            if (!resp.ok) throw new Error("HTTP " + resp.status);            return resp.json();        }) .then(function(data) {            if (data.success) resolve(data.deliveryUsers || []);            else reject(data.message || "Failed");        }) .catch(reject);    });}
+function fetchAdminDeliveryPartners() {
+    return new Promise(function(resolve, reject) {
+        fetch(API.base + "/delivery/management/partners", {
+            headers: getAuthHeaders()
+        })
+        .then(function(resp) {
+            if (!resp.ok) throw new Error("HTTP " + resp.status);
+            return resp.json();
+        })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed");
+            resolve(data.deliveryUsers || []);
+        })
+        .catch(reject);
+    });
+}
 
-function fetchAdminDeliveryToday() {    return new Promise(function(resolve, reject) {        fetch("/api/delivery/management/today", {            method: "GET",            credentials: "include",        }) .then(function(resp) {            if (!resp.ok) throw new Error("HTTP " + resp.status);            return resp.json();        }) .then(function(data) {            if (data.success) resolve(data.deliveries || []);            else reject(data.message || "Failed");        }) .catch(reject);    });}
+function fetchAdminDeliveryToday() {
+    return new Promise(function(resolve, reject) {
+        fetch(API.base + "/delivery/management/today", {
+            headers: getAuthHeaders()
+        })
+        .then(function(resp) {
+            if (!resp.ok) throw new Error("HTTP " + resp.status);
+            return resp.json();
+        })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed");
+            resolve(data.deliveries || []);
+        })
+        .catch(reject);
+    });
+}
 
-function handleAdminDeliveryPartnerClick(e) {    // Handle partner card click - could filter assignments by partner}
+function handleAdminDeliveryPartnerClick(e) {
+    // Handle partner card click - could filter assignments by partner
+}
 
-function handleAdminDeliveryAssignmentClick(e) {    // Handle assignment card click for details}
+function handleAdminDeliveryAssignmentClick(e) {
+    // Handle assignment card click for details
+}
 
-function renderAdminDeliveryPartners(partners) {    var container = document.getElementById("deliveryPartnersList");    if (!container) return;    if (!partners || partners.length === 0) {        container.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:20px;">No delivery partners found.</p>';        return;    }    var html = partners.map(function(p) {        return '<div class="admin-coupon' + (p.isOnline ? " active" : "") + '">' +            '<div class="admin-coupon-main">' +                '<div class="admin-coupon-code">' + (p.name || "Partner " + p._id) + '</div>' +                '<div class="admin-coupon-meta">' +                '<span>Status: ' + (p.isOnline ? "Online" : "Offline") + '</span>' +                '<span>Availability: ' + (p.isAvailable ? "Available" : "Unavailable") + '</span>' +                '</div>' +            '</div>' +        '</div>';    }).join("");    container.innerHTML = '<h3>Delivery Partners</h3>' + html;}
-
-function renderAdminDeliveryToday(assignments) {    var container = document.getElementById("todayAssignmentsList");    if (!container) return;    if (!assignments || assignments.length === 0) {        container.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:20px;">No active deliveries today.</p>';        return;    }    var html = assignments.map(function(a) {        var statusClass = a.status;        var statusLabel = a.status;        var orderInfo = a.order ? '<div>Order: ' + (a.order.orderNumber || "N/A") + ' - ₹' + (a.order.total || 0) + '</div>' : '';        return '<div style="padding: 8px; border-bottom: 1px solid #eee; margin-bottom: 8px;">' + '<strong>Assignment:</strong> ' + (a.status || 'Unknown') + orderInfo + '</div>';    }).join("");    container.innerHTML = '<h3>Today\'s Assignments</h3>' + html;}
-
-function fetchAdminDeliveryPartners() {    return new Promise(function(resolve, reject) {        fetch("/api/delivery/management/partners", {            method: "GET",            credentials: "include",        }) .then(function(resp) {            if (!resp.ok) throw new Error("HTTP " + resp.status);            return resp.json();        }) .then(function(data) {            if (data.success) resolve(data.deliveryUsers || []);            else reject(data.message || "Failed");        }) .catch(reject);    });}
-
-function fetchAdminDeliveryToday() {    return new Promise(function(resolve, reject) {        fetch("/api/delivery/management/today", {            method: "GET",            credentials: "include",        }) .then(function(resp) {            if (!resp.ok) throw new Error("HTTP " + resp.status);            return resp.json();        }) .then(function(data) {            if (data.success) resolve(data.deliveries || []);            else reject(data.message || "Failed");        }) .catch(reject);    });}
-
-function handleAdminDeliveryPartnerClick(e) {    // Handle partner card click - could filter assignments by partner}
-
-function handleAdminDeliveryAssignmentClick(e) {    // Handle assignment card click for details}
-
-function renderAdminDeliveryPartners(partners) {    var container = document.getElementById("deliveryPartnersList");    if (!container) return;    if (!partners || partners.length === 0) {        container.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:20px;">No delivery partners found.</p>';        return;    }    var html = partners.map(function(p) {        return '<div class="admin-coupon' + (p.isOnline ? " active" : "") + '">' +            '<div class="admin-coupon-main">' +                '<div class="admin-coupon-code">' + (p.name || "Partner " + p._id) + '</div>' +                '<div class="admin-coupon-meta">' +                '<span>Status: ' + (p.isOnline ? "Online" : "Offline") + '</span>' +                '<span>Availability: ' + (p.isAvailable ? "Available" : "Unavailable") + '</span>' +                '</div>' +            '</div>' +        '</div>';    }).join("");    container.innerHTML = '<h3>Delivery Partners</h3>' + html;}
-
-function renderAdminDeliveryToday(assignments) {    var container = document.getElementById("todayAssignmentsList");    if (!container) return;    if (!assignments || assignments.length === 0) {        container.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:20px;">No active deliveries today.</p>';        return;    }    var html = assignments.map(function(a) {        var statusClass = a.status;        var statusLabel = a.status;        var orderInfo = a.order ? '<div>Order: ' + (a.order.orderNumber || "N/A") + ' - ₹' + (a.order.total || 0) + '</div>' : '';        return '<div style="padding: 8px; border-bottom: 1 JS; margin-bottom: 8px;">' + '<strong>Assignment:</strong> ' + (a.status || 'Unknown') + orderInfo + '</div>';    }).join("");    container.innerHTML = '<h3>Today\'s Assignments</h3>' + html;}
-
-function fetchAdminDeliveryPartners() {    return new Promise(function(resolve, reject) {        fetch("/api/delivery/management/partners", {            method: "GET",            credentials: "include",        }) .then(function(resp) {            if (!resp.ok) throw new Error("HTTP " + resp.status);            return resp.json();        }) .then(function(data) {            if (data.success) resolve(data.deliveryUsers || []);            else reject(data.message || "Failed");        }) .catch(reject);    });}
-
-function fetchAdminDeliveryToday() {    return new Promise(function(resolve, reject) {        fetch("/api/delivery/management/today", {            method: "GET",            credentials: "include",        }) .then(function(resp) {            if (!resp.ok) throw new Error("HTTP " + resp.status);            return resp.json();        }) .then(function(data) {            if (data.success) resolve(data.deliveries || []);            else reject(data.message || "Failed");        }) .catch(reject);    });}
-
-function handleAdminDeliveryPartnerClick(e) {    // Handle partner card click - could filter assignments by partner}
-
-function handleAdminDeliveryAssignmentClick(e) {    // Handle assignment card click for details}
+function renderAdminCoupons(list) {
     var container = document.getElementById("adminCouponsBody");
     if (!container) return;
     if (!list || list.length === 0) {

@@ -23,6 +23,7 @@ const dashboardRoutes = require("./routes/dashboardRoutes");
 const subscriptionRoutes = require("./routes/subscriptionRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const deliveryRoutes = require("./routes/deliveryRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
 
 const app = express();
 
@@ -112,6 +113,7 @@ app.use("/api/admin/dashboard", dashboardRoutes);
 app.use("/api/subscriptions", subscriptionRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/delivery", deliveryRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {
@@ -126,7 +128,7 @@ app.get("/api/health", (req, res) => {
 // Everything server-side (config, secrets, backend source, dependencies)
 // must NEVER be downloadable from the browser. This guard runs BEFORE
 // express.static and blocks any request that targets such files.
-const SERVED_ONLY_EXT = [".html", ".js", ".css", ".png", ".jpg", ".jpeg", ".jfif", ".webp", ".gif", ".svg", ".ico", ".txt"];
+const SERVED_ONLY_EXT = [".html", ".js", ".css", ".json", ".png", ".jpg", ".jpeg", ".jfif", ".webp", ".gif", ".svg", ".ico", ".txt"];
 const NEVER_SERVE_PREFIX = [
     "/.env", "/.git", "/node_modules", "/server.js", "/app.js", "/seed.js",
     "/seedAdmin.js", "/package.json", "/package-lock.json", "/vercel.json",

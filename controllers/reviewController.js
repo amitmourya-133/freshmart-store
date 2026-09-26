@@ -27,15 +27,16 @@ exports.getProductReviews = async (req, res) => {
     }
 };
 
-// POST a review for one product (public; also updates running product rating)
+// POST a review for one product (public, optionally authenticated; one review
+// per product per account so a single user cannot inflate a rating repeatedly).
 exports.addProductReview = async (req, res) => {
     try {
         if (isBadObjectId(req.params.id)) {
             return res.status(404).json({ success: false, message: "Product not found" });
         }
-        const { rating, comment, userName, user } = req.body;
+        const { rating, comment, userName } = req.body;
         const r = Number(rating);
-        if (!r || r < 1 || r > 5) {
+        if (!Number.isFinite(r) || r < 1 || r > 5) {
             return res.status(400).json({ success: false, message: "Rating must be 1-5" });
         }
         if (!comment || !String(comment).trim()) {
@@ -47,11 +48,24 @@ exports.addProductReview = async (req, res) => {
             return res.status(404).json({ success: false, message: "Product not found" });
         }
 
+        // Tie the review to the authenticated user when present. The client may
+        // not forge the identity; 'user' from the body is always ignored.
+        const authorId = req.user ? req.user._id : undefined;
+        if (authorId) {
+            const dup = await Review.findOne({ product: product._id, user: authorId });
+            if (dup) {
+                return res.status(409).json({
+                    success: false,
+                    message: "You have already reviewed this product",
+                });
+            }
+        }
+
         const review = await Review.create({
             product: product._id,
             productName: product.name,
-            user: user || undefined,
-            userName: String(userName || "").trim().slice(0, 30) || "Anonymous",
+            user: authorId,
+            userName: (req.user && req.user.name) || String(userName || "").trim().slice(0, 30) || "Anonymous",
             rating: r,
             comment: String(comment).trim()
         });

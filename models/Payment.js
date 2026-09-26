@@ -70,7 +70,4 @@ const paymentSchema = new Schema(
     { timestamps: true }
 );
 
-// Index for order lookup
-paymentSchema.index({ order: 1 });
-
 module.exports = mongoose.model("Payment", paymentSchema);

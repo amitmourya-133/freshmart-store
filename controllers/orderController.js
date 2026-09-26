@@ -8,6 +8,8 @@ const Product = require("../models/Product");
 const User = require("../models/User");
 const Settings = require("../models/Settings");
 const Coupon = require("../models/Coupon");
+const DeliveryAssignment = require("../models/DeliveryAssignment");
+const notificationController = require("./notificationController");
 const { getMultFromWeight, round2 } = require("../utils/pricing");
 const { findValidCoupon, computeCouponDiscount, normalizeCode } = require("../utils/coupons");
 const emailService = require("../utils/emailService");
@@ -37,6 +39,35 @@ async function recordNotify(order, field, at) {
         patch[field] = at || new Date();
         await Order.updateOne({ _id: order._id }, { $set: patch });
     } catch (e) { /* non-fatal */ }
+}
+
+// In-app inbox notification for the order owner (guests are skipped).
+function inboxNotify(order, title, message) {
+    if (!order || !order.user) return;
+    notificationController.notifyBase(order.user, {
+        type: "order_status",
+        title: title,
+        message: message,
+        data: {
+            link: "orders.html",
+            orderId: String(order._id),
+            orderNumber: order.orderNumber || order.trackingId || ""
+        }
+    });
+}
+
+// Latest delivery partner for an order (used by owner/admin order view and the
+// public tracking view). Returns { name, phone } or null when unassigned.
+async function deliveryPartnerFor(orderId) {
+    try {
+        const assignment = await DeliveryAssignment.findOne({ order: orderId })
+            .sort({ createdAt: -1 })
+            .populate("deliveryUser", "name phone");
+        if (!assignment || !assignment.deliveryUser) return null;
+        return { name: assignment.deliveryUser.name, phone: assignment.deliveryUser.phone };
+    } catch (e) {
+        return null;
+    }
 }
 
 const ORDER_STATUSES = ["Placed", "Confirmed", "Preparing", "Out for Delivery", "Delivered", "Cancelled"];
@@ -280,10 +311,12 @@ exports.createOrder = async (req, res) => {
         };
 
         if (finalPaymentMethod === "cod") {
-            orderData.paid = true;
-            orderData.paymentStatus = "PAID";
+            // COD starts UNPAID/PENDING. The payment is collected at the door,
+            // so the delivery partner flips it to PAID when the order reaches
+            // DELIVERED (see deliveryRoutes /status). Never paid at creation.
+            orderData.paid = false;
+            orderData.paymentStatus = "PENDING";
             orderData.paymentMode = "cod";
-            orderData.paymentAt = new Date();
             orderData.payment = "Cash On Delivery";
         } else if (paid === true) {
             // Manual UPI/QR confirmation: kept explicitly unverified until an
@@ -328,8 +361,10 @@ exports.createOrder = async (req, res) => {
 
         // Decrement stock (order created => reservation). Payment success/failure
         // does not touch stock; only cancellation restores it (see cancellation).
+        const reservedProducts = [];
         for (const item of totals.items) {
             if (item.productId) {
+                reservedProducts.push(item.productId);
                 await Product.findByIdAndUpdate(item.productId, { $inc: { stock: -item.quantity } });
             }
         }
@@ -349,6 +384,34 @@ exports.createOrder = async (req, res) => {
             success: true,
             data: order
         });
+
+        // In-app inbox notifications (fire-and-forget; never affect the response).
+        if (req.user) {
+            notificationController.notifyBase(req.user._id, {
+                type: "order_status",
+                title: "Order placed",
+                message: "Your order " + orderNumber + " is placed and being packed.",
+                data: { link: "orders.html", orderId: String(order._id), orderNumber: orderNumber },
+            });
+        }
+        (async () => {
+            try {
+                if (reservedProducts.length) {
+                    const lowStock = await Product.find({
+                        _id: { $in: reservedProducts },
+                        stock: { $lte: 5 },
+                    }).select("_id name stock");
+                    if (lowStock.length) {
+                        await notificationController.notifyRole("admin", {
+                            type: "low_stock",
+                            title: "Low stock alert",
+                            message: lowStock.map((p) => p.name + " (" + p.stock + " left)").join(", ") + " — restock soon.",
+                            data: { link: "admin.html", count: lowStock.length },
+                        });
+                    }
+                }
+            } catch (e) { console.warn("[notification] low-stock failed: " + ((e && e.message) || "unknown")); }
+        })();
 
         // Order confirmation email (fire-and-forget; never blocks or fails the
         // response). The flag is recorded only when the send actually succeeded,
@@ -498,11 +561,17 @@ exports.getOrder = async (req, res) => {
             return res.status(404).json({ success: false, message: "Order not found" });
         }
         const isAdmin = req.user && req.user.role === "admin";
-        const isOwner = order.user && req.user && String(order.user) === String(req.user._id);
+        // order.user may be a populated document or a raw ObjectId.
+        const ownerId = order.user && (order.user._id ? order.user._id : order.user);
+        const isOwner = req.user && ownerId && String(ownerId) === String(req.user._id);
         if (!isAdmin && !isOwner) {
             return res.status(403).json({ success: false, message: "Not authorized to view this order" });
         }
-        res.json({ success: true, data: order });
+        // Owner/admin view: include the assigned delivery partner (name + phone).
+        const partner = await deliveryPartnerFor(order._id);
+        const doc = order.toObject ? order.toObject() : Object.assign({}, order);
+        if (partner) doc.deliveryPartner = partner;
+        res.json({ success: true, data: doc });
     } catch (error) {
         if (error && error.name === "CastError") {
             return res.status(404).json({ success: false, message: "Order not found" });
@@ -567,6 +636,7 @@ exports.updateOrderStatus = async (req, res) => {
                 return res.status(400).json({ success: false, message: result.message });
             }
             emailOnStatusChange(result.order, previousStatus);
+            inboxNotify(result.order, "Order cancelled", "Order " + (result.order.orderNumber || "") + " was cancelled.");
             return res.json({ success: true, data: result.order });
         }
 
@@ -583,6 +653,7 @@ exports.updateOrderStatus = async (req, res) => {
         await order.save();
 
         emailOnStatusChange(order, previousStatus);
+        inboxNotify(order, "Order " + status, "Order " + order.orderNumber + " is now " + status + ".");
 
         res.json({ success: true, data: order });
     } catch (error) {
@@ -615,6 +686,7 @@ exports.cancelOrder = async (req, res) => {
             return res.status(400).json({ success: false, message: result.message });
         }
         emailOnStatusChange(result.order, previousStatus);
+        inboxNotify(result.order, "Order cancelled", "Order " + (result.order.orderNumber || "") + " was cancelled.");
         res.json({ success: true, data: result.order });
     } catch (error) {
         if (error && error.name === "CastError") {
@@ -681,7 +753,10 @@ exports.getOrderByNumber = async (req, res) => {
         if (!order) {
             return res.status(404).json({ success: false, message: "Order not found" });
         }
-        // Tracking-only view: NEVER leak phone, address, payment ids or refund id
+        // Tracking-view safe fields: NEVER leak phone, address, payment ids or refund id.
+        // The delivery partner's name (never their phone/address) is shown so the
+        // customer can recognise whom to expect, when assigned.
+        const partner = await deliveryPartnerFor(order._id);
         res.json({
             success: true,
             data: {
@@ -694,6 +769,7 @@ exports.getOrderByNumber = async (req, res) => {
                     return { name: i.name || i.productName, quantity: i.quantity || 1, price: i.price || 0 };
                 }),
                 total: order.total,
+                deliveryPartner: partner ? { name: partner.name } : null,
                 timeline: (order.statusHistory || []).map(function (h) {
                     return { status: h.status, at: h.at };
                 })

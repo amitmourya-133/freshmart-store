@@ -8,11 +8,13 @@
 require("dotenv").config();
 const mongoose = require("mongoose");
 const app = require("../app");
+const { seedDefaultSubscriptionPlans } = require("../utils/seedSubscriptionPlans");
 
 // Cache the MongoDB connection across warm invocations.
 // On Vercel the same lambda container may serve many requests, so we only
 // connect once per container instead of once per request.
 let cachedDb = null;
+let plansSeeded = false;
 
 function connectToDb() {
     if (cachedDb) return cachedDb;
@@ -35,6 +37,12 @@ module.exports = async (req, res) => {
 
     try {
         await connectToDb();
+        // Additive bootstrap: insert default subscription plans once, only when
+        // the collection is empty (guarded + idempotent, never overwrites data).
+        if (!plansSeeded) {
+            plansSeeded = true;
+            seedDefaultSubscriptionPlans().catch(function () { /* non-fatal */ });
+        }
     } catch (error) {
         return res.status(500).json({
             success: false,

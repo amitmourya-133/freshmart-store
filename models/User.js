@@ -33,6 +33,11 @@ const userSchema = new mongoose.Schema(
         // signup OTP is confirmed.
         emailVerified: { type: Boolean, default: true },
         isAdmin: { type: Boolean, default: false },
+        // Delivery-partner availability + last known location (opt-in sharing)
+        isAvailable: { type: Boolean, default: false },
+        lastLat: { type: Number },
+        lastLng: { type: Number },
+        lastLocationAt: { type: Date },
         // Saved addresses for checkout and profile
         addresses: [{
             name: { type: String, trim: true },

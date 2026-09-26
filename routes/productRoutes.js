@@ -21,7 +21,7 @@ const {
     getProductReviews,
     addProductReview
 } = require("../controllers/reviewController");
-const { protect, admin } = require("../middleware/auth");
+const { protect, admin, optionalProtect } = require("../middleware/auth");
 const { rateLimit } = require("../utils/rateLimit");
 
 // Public write limiter: stops anonymous rating/review spam inflating a
@@ -47,6 +47,6 @@ router.get("/", getProducts);
 router.get("/:id", getProduct);
 router.post("/:id/rating", publicWriteLimiter, addRating);
 router.get("/:id/reviews", getProductReviews);
-router.post("/:id/reviews", publicWriteLimiter, addProductReview);
+router.post("/:id/reviews", optionalProtect, publicWriteLimiter, addProductReview);
 
 module.exports = router;
