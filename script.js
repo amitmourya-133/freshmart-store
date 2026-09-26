@@ -2460,7 +2460,92 @@ function selectSavedAddress(idx) {
     });
 }
 
-// Capture the customer's current GPS position (optional, manual fallback).
+// Fill the checkout address fields ONLY from the geocoded location, so a
+// freshly shared/picked point never leaves stale typed or saved-address text.
+function fillAddressFromLocation(addr) {
+    if (!addr) return;
+    var set = function(id, val) { var el = document.getElementById(id); if (el) el.value = val || ""; };
+    set("customerAddress", addr.address || "");
+    set("customerCity", addr.city || "");
+    set("customerState", addr.state || "");
+    set("customerPincode", addr.pincode || "");
+    detectPincodeInfo();
+    var list = document.querySelectorAll(".saved-addr-item");
+    list.forEach(function(el) { el.classList.remove("selected"); });
+}
+
+// Static mini-map preview under the buttons so the customer can SEE where the
+// pin actually is before ordering (fixes unclear/wrong-looking shared spots).
+function buildLocationPreview(lat, lng) {
+    var wrap = document.getElementById("locMapPreview");
+    if (!wrap) return;
+    wrap.innerHTML = "";
+    wrap.style.display = "block";
+
+    var frame = document.createElement("iframe");
+    frame.title = "Your selected location preview";
+    frame.className = "loc-preview-frame";
+    frame.setAttribute("loading", "lazy");
+    var bbox = [Number(lng) - 0.006, Number(lat) - 0.004, Number(lng) + 0.006, Number(lat) + 0.004].join(",");
+    frame.src = "https://www.openstreetmap.org/export/embed.html?bbox=" +
+        encodeURIComponent(bbox) +
+        "&layer=mapnik&marker=" +
+        encodeURIComponent(String(lat) + "," + String(lng));
+    wrap.appendChild(frame);
+
+    var row = document.createElement("div");
+    row.className = "loc-preview-row";
+
+    var adjust = document.createElement("button");
+    adjust.type = "button";
+    adjust.className = "loc-secondary-btn";
+    adjust.textContent = "🗺️ Adjust on Map";
+    adjust.addEventListener("click", openCheckoutMapPicker);
+    row.appendChild(adjust);
+
+    var fine = document.createElement("span");
+    fine.className = "loc-preview-note";
+    fine.textContent = "Your pin is shown above — drag it on the bigger map if it's not exactly right.";
+    row.appendChild(fine);
+
+    wrap.appendChild(row);
+}
+
+// Interactive map picker: drag the marker / search / use GPS, then the picked
+// point's geocoded address automatically fills the form (and ONLY that).
+function openCheckoutMapPicker() {
+    var latEl = document.getElementById("deliveryLat");
+    var lngEl = document.getElementById("deliveryLng");
+    var accEl = document.getElementById("deliveryAcc");
+    openMapPicker({
+        lat: latEl && latEl.value ? Number(latEl.value) : undefined,
+        lng: lngEl && lngEl.value ? Number(lngEl.value) : undefined,
+        accuracy: accEl && accEl.value ? Number(accEl.value) : undefined,
+        title: "Set your delivery location"
+    }).then(function(picked) {
+        if (!picked) return;
+        document.getElementById("deliveryLat").value = String(picked.latitude);
+        document.getElementById("deliveryLng").value = String(picked.longitude);
+        document.getElementById("deliveryAcc").value = picked.accuracy ? String(Math.round(picked.accuracy)) : "";
+        document.getElementById("deliveryLocAt").value = new Date().toISOString();
+        var cap = document.getElementById("locCaptured");
+        if (cap) {
+            cap.style.display = "inline-block";
+            cap.textContent = picked.address ? "📍 " + picked.address.full : "📍 Pinned: " + Number(picked.latitude).toFixed(5) + ", " + Number(picked.longitude).toFixed(5);
+        }
+        var clear = document.getElementById("clearLocBtn");
+        if (clear) clear.style.display = "inline-block";
+        if (picked.address) fillAddressFromLocation(picked.address);
+        buildLocationPreview(picked.latitude, picked.longitude);
+        showToast("Location saved — address auto-filled.", "success");
+    }).catch(function(e) {
+        if (e && e.cancelled) return;
+        var err = document.getElementById("locErr");
+        if (err) { err.style.display = "block"; err.textContent = "⚠️ " + ((e && e.message) || "Could not open the map."); }
+    });
+}
+
+// Capture the customer's current GPS position and auto-fill the full address.
 function captureCheckoutLocation() {
     var btn = document.getElementById("useLocBtn");
     var err = document.getElementById("locErr");
@@ -2474,11 +2559,22 @@ function captureCheckoutLocation() {
         var cap = document.getElementById("locCaptured");
         if (cap) {
             cap.style.display = "inline-block";
-            cap.textContent = "📍 Captured: " + Number(loc.latitude).toFixed(5) + ", " + Number(loc.longitude).toFixed(5) + (loc.accuracy ? " (±" + loc.accuracy + "m)" : "");
+            cap.textContent = "📍 Resolving your address…";
         }
         var clear = document.getElementById("clearLocBtn");
         if (clear) clear.style.display = "inline-block";
-        showToast("Location captured. You can still edit the address above.", "success");
+        showToast("Location captured — resolving your address…", "info");
+        reverseGeocode(loc.latitude, loc.longitude).then(function(addr) {
+            fillAddressFromLocation(addr);
+            if (cap) cap.textContent = "📍 " + addr.full;
+            showToast("Address auto-filled from your location. Adjust on the map if needed.", "success");
+        }).catch(function() {
+            if (cap) {
+                cap.textContent = "📍 Captured: " + Number(loc.latitude).toFixed(5) + ", " + Number(loc.longitude).toFixed(5) + (loc.accuracy ? " (±" + loc.accuracy + "m)" : "");
+            }
+            showToast("Location captured — please fill the address details manually.", "info");
+        });
+        buildLocationPreview(loc.latitude, loc.longitude);
     }).catch(function(e) {
         if (err) { err.style.display = "block"; err.textContent = "⚠️ " + ((e && e.message) || "Could not get your location."); }
         clearCheckoutLocation();
@@ -2499,6 +2595,8 @@ function clearCheckoutLocation() {
     if (cap) { cap.textContent = ""; cap.style.display = "none"; }
     var clear = document.getElementById("clearLocBtn");
     if (clear) clear.style.display = "none";
+    var preview = document.getElementById("locMapPreview");
+    if (preview) { preview.innerHTML = ""; preview.style.display = "none"; }
 }
 
 // Attach optional captured coordinates to the order payload (server validates).

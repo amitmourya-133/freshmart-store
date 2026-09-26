@@ -118,11 +118,13 @@
 
                 <div class="loc-row">
                     <button type="button" class="loc-action-btn" id="useLocBtn" onclick="captureCheckoutLocation()">📍 Use My Current Location</button>
+                    <button type="button" class="loc-action-btn" id="pickMapBtn" onclick="openCheckoutMapPicker()">🗺️ Pick on Map</button>
                     <span class="loc-captured" id="locCaptured"></span>
                     <button type="button" class="loc-secondary-btn" id="clearLocBtn" style="display:none;" onclick="clearCheckoutLocation()">✕ Clear</button>
                 </div>
                 <div class="loc-err" id="locErr"></div>
-                <p class="loc-note">Optional — helps the delivery partner find your exact door. You can still place the order without sharing a location.</p>
+                <div id="locMapPreview" class="loc-map-preview" style="display:none;"></div>
+                <p class="loc-note">Share your location and your full address is filled in automatically. Tap <strong>Pick on Map</strong> to pin or correct the exact spot — the delivery partner reaches your door, not just your street.</p>
                 <input type="hidden" id="deliveryLat">
                 <input type="hidden" id="deliveryLng">
                 <input type="hidden" id="deliveryAcc">
