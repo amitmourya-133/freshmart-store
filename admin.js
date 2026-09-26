@@ -512,16 +512,39 @@ function adminAgoText(iso) {
     return Math.round(hrs / 24) + "d ago";
 }
 
-// Customer saved location card (map + open-in-maps, only from stored coords).
+// CUSTOMER DELIVERY LOCATION - dedicated admin section. Renders the EXACT
+// stored coordinates, saved address, accuracy and capture time from
+// order.deliveryLocation ONLY. NEVER uses the admin's/staff browser GPS, the
+// partner's live location, or a city-centre default. When no customer
+// coordinates were captured it shows an explicit "unavailable" state (an old
+// order or a checkout that declined location sharing), never fabricated coords.
 function adminLocationBlock(order) {
-    if (!order.deliveryLocation) return "";
-    var la = Number(order.deliveryLocation.latitude);
-    var ln = Number(order.deliveryLocation.longitude);
-    var href = openInMapsHref(la, ln);
-    if (!href) return '<p>📍 Saved coords: Customer location is unavailable.</p>';
-    return '<p>📍 Saved coords: ' + la.toFixed(5) + ', ' + ln.toFixed(5) + ' ' +
-        '<button type="button" class="row-btn" onclick="showAdminMap(' + la + ',' + ln + ',\'Customer Saved Location\')">View Map</button> ' +
-        '<a class="row-btn" style="text-decoration:none;" href="' + href + '" target="_blank" rel="noopener noreferrer">Open in Maps</a></p>';
+    var c = order.customer || {};
+    var addrLine = [c.address, c.city, c.state, c.pincode].filter(function(x) { return Boolean(x); }).join(", ");
+    var loc = order.deliveryLocation;
+    var href = "";
+    var la = 0, ln = 0;
+    if (loc && loc.latitude !== null && loc.latitude !== undefined && loc.longitude !== null && loc.longitude !== undefined) {
+        la = Number(loc.latitude);
+        ln = Number(loc.longitude);
+        href = openInMapsHref(la, ln);
+    }
+    if (!href) {
+        return '<div class="order-detail-block"><h4>📍 Customer Delivery Location</h4>' +
+            (addrLine ? '<p>Address: ' + esc(addrLine) + '</p>' : "") +
+            '<p>⚠️ Customer location unavailable</p></div>';
+    }
+    var accLine = (Number.isFinite(Number(loc.accuracy)) && Number(loc.accuracy) >= 0)
+        ? '<p>Accuracy: ±' + esc(Math.round(Number(loc.accuracy))) + ' m</p>' : "";
+    var capLine = loc.capturedAt ? '<p>Captured: ' + esc(new Date(loc.capturedAt).toLocaleString()) + '</p>' : "";
+    return '<div class="order-detail-block"><h4>📍 Customer Delivery Location</h4>' +
+        (addrLine ? '<p>Address: ' + esc(addrLine) + '</p>' : "") +
+        '<p>Coordinates: <strong>' + la.toFixed(6) + ', ' + ln.toFixed(6) + '</strong></p>' +
+        accLine + capLine +
+        '<p>' +
+        '<button type="button" class="row-btn" onclick="showAdminMap(' + la + ',' + ln + ',\'Customer Delivery Location\')">🗺️ View on Map</button> ' +
+        '<a class="row-btn" style="text-decoration:none;" href="' + href + '" target="_blank" rel="noopener noreferrer">📍 Open in Google Maps</a></p>' +
+        '</div>';
 }
 
 // Delivery assignment card. Shows the pipeline state and the partner's live
@@ -539,7 +562,7 @@ function adminDeliveryBlock(order) {
             if (track.partner.stale) age += " (stale)";
             var plHref = openInMapsHref(pla, pln);
             if (!plHref) {
-                pupdate = '<p>🚚 Partner live location: unavailable (invalid coordinates).</p>';
+                pupdate = '<p>🚚 Delivery partner has not shared a live location yet.</p>';
             } else {
                 pupdate = '<p>🚚 Partner live location: ' + pla.toFixed(5) + ', ' + pln.toFixed(5) + ' (' + age + ') ' +
                     '<button type="button" class="row-btn" onclick="showAdminMap(' + pla + ',' + pln + ',\'Partner Live Location\')">View Map</button> ' +
