@@ -6,6 +6,8 @@
 // ===============================
 
 const Coupon = require("../models/Coupon");
+const CouponUsage = require("../models/CouponUsage");
+const User = require("../models/User");
 const { normalizeCode, findValidCoupon, computeCouponDiscount } = require("../utils/coupons");
 
 const MAX_VALUE = 1000000;
@@ -42,8 +44,14 @@ function validCouponPayload(body) {
         if (!Number.isInteger(ul) || ul < 0 || ul > 999999999) errors.push("Usage limit must be a positive whole number");
         else usageLimit = ul || null;
     }
+    let perUserLimit = null;
+    if (body.perUserLimit !== undefined && body.perUserLimit !== null && body.perUserLimit !== "") {
+        const p = Number(body.perUserLimit);
+        if (!Number.isInteger(p) || p < 0 || p > 999999999) errors.push("Per-user limit must be a positive whole number or empty for unlimited");
+        else perUserLimit = p || null;
+    }
     const active = body.active === undefined || body.active === null || String(body.active) === "true";
-    return { errors, payload: { code, discountType, discountValue: round2(discountValue), minimumOrderValue: round2(minimumOrderValue), expiryDate, usageLimit, active } };
+    return { errors, payload: { code, discountType, discountValue: round2(discountValue), minimumOrderValue: round2(minimumOrderValue), expiryDate, usageLimit, perUserLimit, active } };
 }
 
 function round2(n) {
@@ -58,7 +66,7 @@ exports.validateCoupon = async (req, res) => {
         if (!Number.isFinite(subtotal) || subtotal < 0) {
             return res.status(400).json({ success: false, message: "Invalid cart subtotal" });
         }
-        const { coupon } = await findValidCoupon(code);
+        const { coupon } = await findValidCoupon(code, { userId: req.user ? req.user._id : null });
         const discountAmount = computeCouponDiscount(coupon, subtotal);
         res.json({
             success: true,
@@ -86,7 +94,48 @@ exports.validateCoupon = async (req, res) => {
 exports.listCoupons = async (req, res) => {
     try {
         const coupons = await Coupon.find({}).sort({ createdAt: -1 });
-        res.json({ success: true, count: coupons.length, data: coupons });
+
+        // Per-coupon redemption summary: total uses and the top customers.
+        const usageRows = await CouponUsage.aggregate([{ $group: { _id: "$coupon", users: { $sum: 1 }, uses: { $sum: "$count" } } }]);
+        const usageMap = new Map(usageRows.map(function (r) { return [String(r._id), r]; }));
+
+        // Resolve top customers per coupon (bounded, for the admin panel).
+        const topUserRows = await CouponUsage.aggregate([
+            { $sort: { count: -1 } },
+            { $limit: 200 },
+            { $lookup: { from: "users", localField: "user", foreignField: "_id", as: "u" } },
+            { $project: { coupon: 1, count: 1, name: { $arrayElemAt: ["$u.name", 0] }, email: { $arrayElemAt: ["$u.email", 0] } } }
+        ]);
+        const topUsersMap = new Map();
+        topUserRows.forEach(function (r) {
+            if (!topUsersMap.has(String(r.coupon))) topUsersMap.set(String(r.coupon), []);
+            topUsersMap.get(String(r.coupon)).push({ user: r.name || (r.email ? r.email.split("@")[0] : "Customer"), count: r.count });
+        });
+
+        const data = coupons.map(function (c) {
+            const stat = usageMap.get(String(c._id));
+            const used = stat ? stat.uses : 0;
+            const perUserUsed = stat ? stat.users : 0;
+            return {
+                _id: c._id,
+                code: c.code,
+                discountType: c.discountType,
+                discountValue: c.discountValue,
+                minimumOrderValue: c.minimumOrderValue,
+                expiryDate: c.expiryDate,
+                active: c.active,
+                usageLimit: c.usageLimit,
+                usageCount: c.usageCount,
+                perUserLimit: c.perUserLimit,
+                remainingUses: c.usageLimit != null ? Math.max(0, c.usageLimit - c.usageCount) : null,
+                perUserRemaining: c.perUserLimit != null ? Math.max(0, c.perUserLimit - perUserUsed) : null,
+                totalUserClaims: perUserUsed,
+                topUsers: (topUsersMap.get(String(c._id)) || []).slice(0, 5),
+                createdAt: c.createdAt
+            };
+        });
+
+        res.json({ success: true, count: data.length, data: data });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }

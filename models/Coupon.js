@@ -28,7 +28,10 @@ const couponSchema = new mongoose.Schema(
         // null = unlimited uses
         usageLimit: { type: Number, default: null, min: 0 },
         // successful eligible uses (incremented only when an order is created)
-        usageCount: { type: Number, default: 0, min: 0 }
+        usageCount: { type: Number, default: 0, min: 0 },
+        // Per-customer redemption cap (null = each customer may use it unlimited
+        // times). Enforced server-side against the CouponUsage collection.
+        perUserLimit: { type: Number, default: null, min: 0 }
     },
     { timestamps: true }
 );

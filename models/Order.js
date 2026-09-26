@@ -9,7 +9,10 @@ const orderItemSchema = new mongoose.Schema(
         name: { type: String, required: true },
         price: { type: Number, required: true },
         quantity: { type: Number, required: true, min: 1 },
-        productId: { type: mongoose.Schema.Types.ObjectId, ref: "Product" }
+        productId: { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
+        // Pack-size variant sold (null = legacy weight-multiplier pricing).
+        variantId: { type: mongoose.Schema.Types.ObjectId, default: null },
+        variantUnit: { type: String, default: null }
     },
     { _id: false }
 );
@@ -59,7 +62,20 @@ const orderSchema = new mongoose.Schema(
         discount: { type: Number, default: 0 },
         // Uppercase coupon code applied to this order (null when none).
         couponCode: { type: String, default: null, uppercase: true },
+        // Whether this order's coupon usage was already returned to the pool
+        // (guards against double-release if cancellation runs more than once).
+        couponReleased: { type: Boolean, default: false },
         deliverySlot: { type: String, default: "Morning (8-11 AM)" },
+        // Optional GPS coordinates captured at checkout (customer's current
+        // location). Address remains the canonical destination; coordinates help
+        // the delivery partner navigate. Backward-compatible: absent on older
+        // orders and when the customer declines location sharing.
+        deliveryLocation: {
+            latitude: { type: Number, default: null },
+            longitude: { type: Number, default: null },
+            accuracy: { type: Number, default: null },
+            capturedAt: { type: Date, default: null }
+        },
         subscription: { type: Boolean, default: false },
         subscriptionPlan: { type: String, default: null },
         total: { type: Number, default: 0 },

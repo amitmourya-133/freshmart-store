@@ -215,6 +215,14 @@ function getProductStock(item) {
     if (typeof item.stock === "number") return Math.max(0, item.stock);
     if (typeof item.active !== "undefined" && item.active === false && typeof item.stock === "number") return Math.max(0, item.stock);
     var byId = getProductById(cartItemProductId(item));
+    if (byId && item.variantId && byId.variants) {
+        for (var i = 0; i < byId.variants.length; i++) {
+            if (String(byId.variants[i]._id) === String(item.variantId)) {
+                return Math.max(0, Number(byId.variants[i].stock) || 0);
+            }
+        }
+        return 0;
+    }
     if (byId && typeof byId.stock === "number") return Math.max(0, byId.stock);
     var byName = findProductByName(item.name);
     if (byName && typeof byName.stock === "number") return Math.max(0, byName.stock);
@@ -241,7 +249,9 @@ function dbCartPayload() {
             product: pid,
             quantity: Math.max(1, parseInt(item.quantity, 10) || 1),
             weight: item.qtyLabel || null,
-            unit: item.unit || null
+            unit: item.unit || null,
+            variantId: item.variantId || null,
+            variantUnit: item.variantUnit || null
         });
     });
     return out;
@@ -274,7 +284,9 @@ function cartEntryFromServerItem(it) {
         qtyLabel: it.weight || null,
         mult: mult,
         unit: it.unit || "kg",
-        productId: it.product
+        productId: it.product,
+        variantId: it.variantId || null,
+        variantUnit: it.variantUnit || null
     };
 }
 
@@ -283,12 +295,12 @@ function applyCartFromServer(serverItems) {
     var map = {};
     serverItems.forEach(function(it) {
         if (!it || !it.name) return;
-        map[it.name.toLowerCase()] = cartEntryFromServerItem(it);
+        map[cartMergeKey(it)] = cartEntryFromServerItem(it);
     });
 
     cart.forEach(function(item) {
         if (!item || !item.name) return;
-        var key = item.name.toLowerCase();
+        var key = cartMergeKey(item);
         if (!map[key]) map[key] = item;
     });
 
@@ -302,6 +314,11 @@ function applyCartFromServer(serverItems) {
     if (document.body && document.body.dataset.page === "checkout" && typeof loadCheckout === "function") {
         loadCheckout();
     }
+}
+
+function cartMergeKey(item) {
+    if (!item || !item.name) return "";
+    return String(item.name).toLowerCase() + "|" + String(item.variantId || "");
 }
 
 // Load the DB cart for a logged-in user (adopt + keep local-only items)
@@ -628,14 +645,34 @@ function addToCart(name, price, unit) {
         return;
     }
     var u = unit || (product ? product.unit : "kg");
-    var opt = getActiveOption(name, u);
+    // Use per-product variant selection when present; fall back to the
+    // global index (legacy cards) otherwise.
+    var variantIndex = (product && typeof variantSelection[product.name] === "number")
+        ? variantSelection[product.name]
+        : (window.selectedVariantIndex || 0);
+    var opt = { label: "1 " + (product ? product.unit : "kg"), mult: 1 };
+    var variantId = null;
+    var variantUnit = null;
+    if (product && product.variants && product.variants[variantIndex]) {
+        var variant = product.variants[variantIndex];
+        u = variant.unit || u;
+        opt = { label: variant.unit || "1 " + u, mult: 1 };
+        price = variant.price || price;
+        variantId = variant._id || null;
+        variantUnit = variant.unit || null;
+    } else {
+        var opt = getActiveOption(name, u);
+    }
     var scaled = Math.round(price * opt.mult * 100) / 100;
     var productId = (product && product._id) ? product._id : null;
-    var existingProduct = cart.find(function(item) { return item.name === name; });
+    // Different pack variants of the same product are separate cart lines.
+    var existingProduct = cart.find(function(item) {
+        return item.name === name && String(item.variantId || "") === String(variantId || "");
+    });
 
     if (existingProduct) {
-        if (product && Number(product.stock) < (existingProduct.quantity + 1)) {
-            showToast("Only " + product.stock + " units of " + name + " available.", "error");
+        if (product && Number(getProductStock(existingProduct)) < (existingProduct.quantity + 1)) {
+            showToast("Only " + getProductStock(existingProduct) + " units of " + name + " available.", "error");
             return;
         }
         existingProduct.quantity++;
@@ -644,8 +681,9 @@ function addToCart(name, price, unit) {
         existingProduct.mult = opt.mult;
         existingProduct.unit = u;
         existingProduct.productId = productId;
+        if (variantId) { existingProduct.variantId = variantId; existingProduct.variantUnit = variantUnit; }
     } else {
-        cart.push({ name: name, price: scaled, quantity: 1, qtyLabel: opt.label, mult: opt.mult, unit: u, productId: productId });
+        cart.push({ name: name, price: scaled, quantity: 1, qtyLabel: opt.label, mult: opt.mult, unit: u, productId: productId, variantId: variantId, variantUnit: variantUnit });
     }
 
     saveCart();
@@ -728,12 +766,10 @@ function updateCart() {
 function increaseQuantity(index) {
     if (!cart[index]) return;
     var item = cart[index];
-    if (item.productId) {
-        var product = products.find(function(p) { return p._id === item.productId; });
-        if (product && Number(product.stock) <= item.quantity) {
-            showToast("Only " + product.stock + " units of " + item.name + " available.", "error");
-            return;
-        }
+    var stock = getProductStock(item);
+    if (typeof stock === "number" && item.quantity >= stock) {
+        showToast("Only " + stock + " units of " + item.name + " available.", "error");
+        return;
     }
     cart[index].quantity++;
     saveCart();
@@ -983,9 +1019,9 @@ function productCardHTML(index) {
         '<h3>' + escHtml(product.name) + '</h3>' +
         starHTML(r.rating) +
         '<span class="rating-count">(' + r.count + ')</span>' +
-        '<p class="product-price">₹' + product.price + ' / ' + escHtml(product.unit) + '</p>' +
+        '<p class="product-price">₹' + product.price + ' / ' + escHtml(product.unit) + (product.variants && product.variants.length > 0 ? '<br><small>Select variant</small>' : '') + '</p>' +
         '<span class="product-badge">' + escHtml(product.category) + '</span>' +
-        '<div class="card-controls">' + cartControlsHTML(safeName, product.price, qty, product.unit) + '</div>' +
+        '<div class="card-controls">' + cartControlsHTML(safeName, product.price, qty, product.unit) + (product.variants && product.variants.length > 0 ? '<div class="variant-chips">' + (function() { var v = product.variants; var html = '<select onchange="setVariant(' + index + ', this.value)">'; html += '<option value="">-- Select Variant --</option>'; v.forEach(function(v, i) { html += '<option value="' + i + '">' + v.unit + ' - ₹' + v.price + '</option>'; }); html += '</select>'; return html; }()) + '</div>' : '') + '</div>' +
     '</div>';
 }
 
@@ -1542,6 +1578,18 @@ function cartControlsHTML(name, price, qty, unit) {
     });
     chips += '</div>';
 
+    // Add variant selection if product has variants
+    var variantHTML = "";
+    if (product && product.variants && product.variants.length > 0) {
+        var curVariant = (typeof variantSelection[realName] === "number") ? variantSelection[realName] : -1;
+        variantHTML = '<div class="variant-chips"><select onchange="setVariantFromCart(\'' + escName + '\', this.value)">';
+        variantHTML += '<option value="">-- Select Variant --</option>';
+        product.variants.forEach(function(v, i) {
+            variantHTML += '<option value="' + i + '"' + (i === curVariant ? " selected" : "") + '>' + v.unit + ' - ₹' + v.price + '</option>';
+        });
+        variantHTML += '</select></div>';
+    }
+
     var main;
     if (out) {
         main = '<span class="out-of-stock-label">Out of Stock</span>';
@@ -1558,13 +1606,13 @@ function cartControlsHTML(name, price, qty, unit) {
 }
 
 function changeCardQty(name, delta, price) {
+    var product = findProductByName(unescapeJsStr(name));
     var existing = cart.find(function(item) { return item.name === name; });
 
     if (!existing) {
-        cart.push({ name: name, price: price, quantity: 1, qtyLabel: "", mult: 1 });
+        cart.push({ name: name, price: price, quantity: 1, qtyLabel: "", mult: 1, variantId: null, variantUnit: null });
     } else {
-        var product = findProductByName(unescapeJsStr(name));
-        var stock = (product && typeof product.stock === "number") ? Math.max(0, product.stock) : undefined;
+        var stock = getProductStock(existing);
         if (delta > 0 && typeof stock === "number" && existing.quantity >= stock) {
             showToast("Only " + stock + " units of " + name + " available.", "error");
             updateAllCartControls();
@@ -1670,6 +1718,43 @@ function selectQtyOption(name, label, mult, unit) {
         item.unit = unit;
         saveCart();
         updateCart();
+    }
+    updateAllCartControls();
+}
+
+var variantSelection = {};
+
+function setVariant(index, variantIndex) {
+    var product = products[index];
+    if (!product || !product.variants) return;
+    var vi = parseInt(variantIndex, 10);
+    var variant = product.variants[vi];
+    if (!variant) return;
+    variantSelection[product.name] = vi;
+    window.selectedVariantIndex = undefined;
+    if (typeof window.selectedVariantName === "object") window.selectedVariantName[product.name] = vi;
+    updateAllCartControls();
+}
+
+function setVariantFromCart(name, variantIndex) {
+    var product = findProductByName(unescapeJsStr(name));
+    var vi = parseInt(variantIndex, 10);
+    if (!product || !product.variants || !product.variants[vi]) return;
+    variantSelection[product.name] = vi;
+    window.selectedVariantIndex = undefined;
+    var variant = product.variants[vi];
+    // Update any existing cart line for this product+variant to the new pack.
+    for (var i = 0; i < cart.length; i++) {
+        if (cart[i].name === product.name && String(cart[i].variantId || "") === String(variant._id || "")) {
+            cart[i].price = variant.price;
+            cart[i].qtyLabel = variant.unit;
+            cart[i].unit = variant.unit;
+            cart[i].variantId = variant._id || null;
+            cart[i].variantUnit = variant.unit || null;
+            saveCart();
+            updateCart();
+            break;
+        }
     }
     updateAllCartControls();
 }
@@ -2081,6 +2166,19 @@ function refreshCartPrices() {
             var product = products.find(function(p) { return p.name === item.name; });
             if (product && product._id) {
                 item.productId = product._id;
+                if (item.variantId && product.variants) {
+                    var v = null;
+                    for (var i = 0; i < product.variants.length; i++) {
+                        if (String(product.variants[i]._id) === String(item.variantId)) { v = product.variants[i]; break; }
+                    }
+                    if (v) {
+                        item.price = Math.round(Number(v.price) * 100) / 100;
+                        item.unit = v.unit;
+                        item.variantUnit = v.unit;
+                        item.qtyLabel = v.unit;
+                        return;
+                    }
+                }
                 var mult = getMultForWeight(item.qtyLabel, item.unit || product.unit);
                 item.price = Math.round((Number(product.price) || 0) * mult * 100) / 100;
                 item.unit = product.unit;
@@ -2310,6 +2408,116 @@ function loadCheckout() {
     loadShippingSettings().then(function() {
         renderCheckout();
     });
+    loadSavedAddresses();
+}
+
+// ===============================
+// SAVED ADDRESS + LOCATION (checkout)
+// ===============================
+
+// Populate address book options when a logged-in customer has saved addresses.
+function loadSavedAddresses() {
+    var wrap = document.getElementById("savedAddrWrap");
+    var list = document.getElementById("savedAddrList");
+    if (!hasSession() || !wrap || !list) return;
+    apiGetMe().then(function(user) {
+        var addrs = user && Array.isArray(user.addresses) ? user.addresses : [];
+        if (!addrs.length) return;
+        wrap.style.display = "block";
+        list.innerHTML = addrs.map(function(a, i) {
+            var line = [a.house || a.address || "", a.street || "", a.landmark || "", a.city || "", a.state || "", a.pincode || ""]
+                .filter(function(v) { return v; })
+                .map(function(v) { return escHtml(v); })
+                .join(", ");
+            return '<div class="saved-addr-item" role="button" tabindex="0" data-idx="' + i + '" onclick="selectSavedAddress(' + i + ')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();selectSavedAddress(' + i + ');}">' +
+                '<div class="addr-tag">' + escHtml(a.name || ("Address " + (i + 1))) + '</div>' +
+                '<div class="addr-text">' + line + '</div>' +
+                '</div>';
+        }).join("");
+    }).catch(function() { /* no saved addresses / not logged in — keep hidden */ });
+}
+
+// Fill the checkout form from a saved address (never pre-fills the phone
+// unless a phone is stored on the address card, which is the owner's own).
+function selectSavedAddress(idx) {
+    apiGetMe().then(function(user) {
+        var addrs = user && Array.isArray(user.addresses) ? user.addresses : [];
+        if (!addrs[idx]) return;
+        var a = addrs[idx];
+        var set = function(id, val) { var el = document.getElementById(id); if (el) el.value = val || ""; };
+        set("customerName", a.name || a.house || "");
+        set("customerPhone", a.phone || "");
+        set("customerAddress", [a.house, a.street, a.landmark].filter(function(v) { return v; }).join(", "));
+        set("customerCity", a.city || "");
+        set("customerState", a.state || "");
+        set("customerPincode", a.pincode || "");
+        detectPincodeInfo();
+        var items = document.querySelectorAll(".saved-addr-item");
+        items.forEach(function(el) { el.classList.remove("selected"); });
+        if (items[idx]) items[idx].classList.add("selected");
+    }).catch(function() {
+        showToast("Could not load the saved address. Please type it manually.", "error");
+    });
+}
+
+// Capture the customer's current GPS position (optional, manual fallback).
+function captureCheckoutLocation() {
+    var btn = document.getElementById("useLocBtn");
+    var err = document.getElementById("locErr");
+    if (btn) { btn.disabled = true; btn.textContent = "📍 Locating…"; }
+    if (err) err.style.display = "none";
+    captureCurrentLocation().then(function(loc) {
+        document.getElementById("deliveryLat").value = String(loc.latitude);
+        document.getElementById("deliveryLng").value = String(loc.longitude);
+        document.getElementById("deliveryAcc").value = loc.accuracy != null ? String(loc.accuracy) : "";
+        document.getElementById("deliveryLocAt").value = loc.capturedAt || new Date().toISOString();
+        var cap = document.getElementById("locCaptured");
+        if (cap) {
+            cap.style.display = "inline-block";
+            cap.textContent = "📍 Captured: " + Number(loc.latitude).toFixed(5) + ", " + Number(loc.longitude).toFixed(5) + (loc.accuracy ? " (±" + loc.accuracy + "m)" : "");
+        }
+        var clear = document.getElementById("clearLocBtn");
+        if (clear) clear.style.display = "inline-block";
+        showToast("Location captured. You can still edit the address above.", "success");
+    }).catch(function(e) {
+        if (err) { err.style.display = "block"; err.textContent = "⚠️ " + ((e && e.message) || "Could not get your location."); }
+        clearCheckoutLocation();
+    }).then(function() {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = "📍 Use My Current Location";
+        }
+    });
+}
+
+function clearCheckoutLocation() {
+    ["deliveryLat", "deliveryLng", "deliveryAcc", "deliveryLocAt"].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.value = "";
+    });
+    var cap = document.getElementById("locCaptured");
+    if (cap) { cap.textContent = ""; cap.style.display = "none"; }
+    var clear = document.getElementById("clearLocBtn");
+    if (clear) clear.style.display = "none";
+}
+
+// Attach optional captured coordinates to the order payload (server validates).
+function collectedDeliveryLocation() {
+    var lat = document.getElementById("deliveryLat");
+    var lng = document.getElementById("deliveryLng");
+    if (!lat || !lng) return undefined;
+    var nLat = Number(lat.value);
+    var nLng = Number(lng.value);
+    if (!Number.isFinite(nLat) || !Number.isFinite(nLng)) return undefined;
+    var acc = document.getElementById("deliveryAcc");
+    var at = document.getElementById("deliveryLocAt");
+    var loc = {
+        latitude: Math.round(nLat * 1e6) / 1e6,
+        longitude: Math.round(nLng * 1e6) / 1e6,
+        capturedAt: (at && at.value) ? at.value : new Date().toISOString()
+    };
+    if (acc && Number.isFinite(Number(acc.value))) loc.accuracy = Number(acc.value);
+    return loc;
 }
 
 // ===============================
@@ -2429,6 +2637,7 @@ function buildOrderObject() {
         paymentMethod: getCurrentPaymentMethod(),
         onlineMethod: getSelectedOnlineMethod(),
         deliverySlot: getDeliverySlot(),
+        deliveryLocation: collectedDeliveryLocation(),
         clientRef: "web-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10)
     };
 }
@@ -2892,6 +3101,7 @@ function initializePage() {
         } else if (page === "orders") {
             loadCart();
             loadOrders();
+            loadMyReturns();
         } else if (page === "help") {
             loadCart();
             if (typeof initHelpPage === "function") initHelpPage();
@@ -3622,6 +3832,40 @@ function statusTimelineHTML(statusHistory) {
     return '<div class="order-tracker"><div class="tracker-timeline"><h4>Order Timeline</h4><ul>' + items + '</ul></div></div>';
 }
 
+// Delivery pipeline steps surfaced from the backend's DeliveryAssignment state
+// (server-backed statuses only — never invented client-side).
+var DELIVERY_PIPES = [
+    { key: "ASSIGNED", label: "Assigned", icon: "📌" },
+    { key: "ACCEPTED", label: "Accepted", icon: "✅" },
+    { key: "PICKED_UP", label: "Picked Up", icon: "📦" },
+    { key: "EN_ROUTE", label: "On the Way", icon: "🛵" },
+    { key: "DELIVERED", label: "Delivered", icon: "🏠" }
+];
+
+function deliveryTrackerHTML(deliveryTrack) {
+    var s = deliveryTrack && deliveryTrack.status ? String(deliveryTrack.status) : "";
+    if (!s) return "";
+    if (s === "REJECTED") {
+        return '<div class="order-tracker delivery-tracker"><div class="tracker-steps"><div class="track-step current"><div class="track-dot">♻️</div><div class="track-label">Reassign Pending</div></div></div></div>';
+    }
+    var idx = -1;
+    for (var i = 0; i < DELIVERY_PIPES.length; i++) {
+        if (DELIVERY_PIPES[i].key === s) { idx = i; break; }
+    }
+    if (idx < 0) return "";
+    var steps = DELIVERY_PIPES.map(function(step, i) {
+        var cls = "track-step";
+        if (i === idx) cls += " current";
+        if (i < idx) cls += " done";
+        if (i > idx) cls += " upcoming";
+        return '<div class="' + cls + '">' +
+            '<div class="track-dot">' + (i < idx ? "✓" : step.icon) + '</div>' +
+            '<div class="track-label">' + step.label + '</div>' +
+            '</div>';
+    }).join("");
+    return '<div class="order-tracker delivery-tracker"><div class="tracker-steps">' + steps + '</div></div>';
+}
+
 function renderOrdersListHTML(orders, offline) {
     if (!orders || orders.length === 0) {
         return '<div class="empty-orders"><div class="empty-orders-icon">📦</div><h2>No Orders Yet</h2><p>You haven\'t placed any orders yet.</p><button type="button" onclick="window.location.href=\'index.html\'">Start Shopping</button></div>';
@@ -3639,7 +3883,7 @@ function renderOrdersListHTML(orders, offline) {
             var itemTotal = Math.round(price * quantity * 100) / 100;
             subtotal += itemTotal;
             var name = item.name || item.productName || "Product";
-            var weight = item.weight ? " (" + item.weight + ")" : "";
+            var weight = item.weight ? " (" + item.weight + ")" : (item.variantUnit ? " (" + item.variantUnit + ")" : "");
             productsHTML += '<div class="order-product"><span>' + escHtml(name + weight) + ' × ' + quantity + '</span><strong>₹' + itemTotal + '</strong></div>';
         });
 
@@ -3652,22 +3896,45 @@ function renderOrdersListHTML(orders, offline) {
             ? '<button type="button" class="cancel-order-btn" onclick="cancelOrderById(\'' + jsStr(order._id) + '\')">Cancel Order</button>'
             : "";
 
+        var returnBtn = (!offline && order._id && !order.isLocal && order.status === "Delivered")
+            ? '<button type="button" class="return-order-btn" onclick="openReturnModal(\'' + jsStr(order._id) + '\')">↩ Return / Replace items</button>'
+            : "";
+        var returnStatusLine = (order.returnInfo && order.returnInfo.returnNumber)
+            ? '<div class="order-return-status"><strong>Return:</strong> ' + escHtml(order.returnInfo.returnNumber) +
+                ' · <span class="admin-badge ' + (order.returnInfo.status === "REJECTED" || order.returnInfo.status === "CANCELLED" ? "badge-reject" : (order.returnInfo.status === "CLOSED" ? "badge-ok" : "badge-pending")) + '">' + escHtml(order.returnInfo.status || "") + '</span></div>'
+            : "";
+
         var helpOrderRef = order.orderNumber || order.trackingId || (order._id || "");
         var helpBtn = helpOrderRef
             ? '<button type="button" class="help-order-btn" onclick="window.location.href=\'help.html?order=' + encodeURIComponent(helpOrderRef) + '\'" title="Get help for this order">🆘 Help</button>'
             : "";
 
         var trackLine = order.trackingId ? '<p><strong>Track ID:</strong> ' + escHtml(order.trackingId) + '</p>' : "";
+        var partnerLine = (order.deliveryTrack && order.deliveryTrack.partner && order.deliveryTrack.partner.name)
+            ? '<p><strong>👤 Delivery Partner:</strong> ' + escHtml(order.deliveryTrack.partner.name) + '</p>'
+            : "";
+
+        // Saved checkout coordinates, shown only for the customer's own order.
+        var locLine = "";
+        if (order.customer && order.customer.state) {
+            locLine += '<p><strong>State:</strong> ' + escHtml(order.customer.state) + '</p>';
+        }
+        if (order.deliveryLocation && Number.isFinite(Number(order.deliveryLocation.latitude)) && Number.isFinite(Number(order.deliveryLocation.longitude))) {
+            locLine += '<p><strong>📍 Saved location:</strong> <a class="location-link" href="' + openInMapsHref(order.deliveryLocation.latitude, order.deliveryLocation.longitude) + '" target="_blank" rel="noopener noreferrer">Open in Maps</a> <button type="button" class="loc-secondary-btn" onclick="openMapView(' + Number(order.deliveryLocation.latitude) + ',' + Number(order.deliveryLocation.longitude) + ',\'My Delivery Location\')">View Map</button></p>';
+        }
 
         ordersHTML += '<div class="order-card"><div class="order-header"><div><div class="order-id">' + escHtml(order.orderNumber || "Order") + '</div>' + trackLine + '<small>' + escHtml(formatOrderDate(order.createdAt || order.date)) + '</small></div><div class="order-status">' + escHtml(friendlyStatus(order.status || "Placed")) + '</div></div>' +
             statusTrackerHTML(order.status || "Placed", true) +
+            deliveryTrackerHTML(order.deliveryTrack) +
             '<div class="order-pay-row">' + paymentStatusBadge(order.paymentStatus, order.paid, order.paymentMode) + (order.paymentMode === "manual" && order.paymentReference ? '<span class="pay-ref">UPI Ref: ' + escHtml(order.paymentReference) + '</span>' : "") + '</div>' +
             '<h3>Products</h3><div style="margin-top:10px;">' + productsHTML + '</div>' +
             '<div class="summary-row"><span>Subtotal</span><strong>₹' + Number(order.subtotal) + '</strong></div>' +
             '<div class="summary-row"><span>Delivery</span><strong>₹' + delivery + '</strong></div>' +
             '<div class="order-total">Total: ₹' + total + '</div>' +
-            '<div class="detail-section"><h3>Delivery Details</h3><p><strong>Name:</strong> ' + escHtml((order.customer && order.customer.name) || "N/A") + '</p><p><strong>Phone:</strong> ' + escHtml((order.customer && order.customer.phone) || "N/A") + '</p><p><strong>Address:</strong> ' + escHtml((order.customer && order.customer.address) || "N/A") + '</p><p><strong>City:</strong> ' + escHtml((order.customer && order.customer.city) || "N/A") + '</p><p><strong>Pincode:</strong> ' + escHtml((order.customer && order.customer.pincode) || "N/A") + '</p></div>' +
-            '<p><strong>Payment:</strong> ' + escHtml(order.payment || "Cash On Delivery") + '</p>' + helpBtn + cancelBtn +
+            returnStatusLine +
+            '<div class="detail-section"><h3>Delivery Details</h3><p><strong>Name:</strong> ' + escHtml((order.customer && order.customer.name) || "N/A") + '</p><p><strong>Phone:</strong> ' + escHtml((order.customer && order.customer.phone) || "N/A") + '</p><p><strong>Address:</strong> ' + escHtml((order.customer && order.customer.address) || "N/A") + '</p><p><strong>City:</strong> ' + escHtml((order.customer && order.customer.city) || "N/A") + '</p>' + locLine + '<p><strong>Pincode:</strong> ' + escHtml((order.customer && order.customer.pincode) || "N/A") + '</p></div>' +
+            partnerLine +
+            '<p><strong>Payment:</strong> ' + escHtml(order.payment || "Cash On Delivery") + '</p>' + helpBtn + cancelBtn + returnBtn +
             '<button type="button" class="place-order-btn" style="margin-top:20px;" onclick="window.location.href=\'index.html\'">Continue Shopping</button></div>';
     });
     return ordersHTML;
@@ -3706,6 +3973,7 @@ function trackOrder() {
             '<small>' + escHtml(formatOrderDate(data.date)) + '</small></div>' +
             '<div class="order-status">' + escHtml(friendlyStatus(data.status || "—")) + '</div></div>' +
             statusTrackerHTML(data.status || "Placed", true) +
+            deliveryTrackerHTML(data.deliveryStatus ? { status: data.deliveryStatus } : null) +
             '<div class="order-pay-row">' + paymentStatusBadge(data.paymentStatus) + '</div>' +
             '<h3>Items</h3>' + itemsHtml +
             '<div class="order-total">Total: ₹' + (data.total || 0) + '</div>' +
@@ -3714,4 +3982,215 @@ function trackOrder() {
     }).catch(function(err) {
         out.innerHTML = '<p style="color:#e74c3c;">' + escHtml((err && err.message) || "Order not found. Check the ID and try again.") + '</p>';
     });
+}
+
+// ===============================
+// CUSTOMER RETURNS / REPLACEMENTS UI
+// ===============================
+
+var returnModalOpen = false;
+
+function openReturnModal(orderId) {
+    if (!orderId) return;
+    if (returnModalOpen) return;
+    returnModalOpen = true;
+
+    var modal = document.createElement("div");
+    modal.id = "returnModal";
+    modal.className = "qr-modal";
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    modal.setAttribute("aria-labelledby", "returnModalTitle");
+    modal.innerHTML =
+        '<div class="qr-modal-box" style="text-align:left;">' +
+            '<button type="button" class="qr-close" onclick="closeReturnModal()" aria-label="Close">✕</button>' +
+            '<h3 id="returnModalTitle">📦 Request Return / Replacement</h3>' +
+            '<div id="returnModalBody" style="color:var(--text-secondary);padding:10px 0;">Loading order...</div>' +
+        '</div>';
+    document.body.appendChild(modal);
+
+    apiGetOrder(orderId).then(function(order) {
+        renderReturnForm(modal, order);
+    }).catch(function(err) {
+        var body = document.getElementById("returnModalBody");
+        if (body) body.innerHTML = '<p style="color:#e74c3c;">' + escHtml((err && err.message) || "Could not load the order.") + '</p>';
+    });
+}
+
+function renderReturnForm(modal, order) {
+    var body = document.getElementById("returnModalBody");
+    if (!body) return;
+    if (order.status !== "Delivered") {
+        body.innerHTML = '<p style="color:#e74c3c;">Returns can only be requested for delivered orders.</p>';
+        return;
+    }
+    var items = order.items || [];
+    if (!items.length) {
+        body.innerHTML = '<p style="color:#e74c3c;">This order has no items to return.</p>';
+        return;
+    }
+
+    var itemChoices = items.map(function(item, i) {
+        var label = escHtml((item.name || item.productName || "Item") + (item.variantUnit ? " (" + item.variantUnit + ")" : (item.weight ? " (" + item.weight + ")" : "")));
+        return '<div class="return-item-choice">' +
+            '<label><input type="checkbox" class="ri-chk" data-i="' + i + '" checked> ' + label + ' × ' + (item.quantity || 1) +
+            ' (<select class="ri-qty" data-i="' + i + '">' + qtyOptionsHTML(item.quantity || 1) + '</select>)</label>' +
+            '</div>';
+    }).join("");
+
+    body.innerHTML =
+        '<p class="qr-amount">Order: <strong>' + escHtml(order.orderNumber || "") + '</strong></p>' +
+        '<div style="max-height:180px;overflow-y:auto;border:1px solid var(--border-color);border-radius:var(--radius-sm);padding:8px;margin:8px 0;">' + itemChoices + '</div>' +
+        '<label style="display:block;margin-top:10px;">Return Type</label>' +
+        '<select id="rfType" style="width:100%;padding:10px 12px;border:1px solid var(--border-color);border-radius:var(--radius-sm);">' +
+            '<option value="refund">Refund (money back)</option>' +
+            '<option value="replacement">Replacement (fresh goods)</option>' +
+        '</select>' +
+        '<label style="display:block;margin-top:10px;">Reason</label>' +
+        '<select id="rfReason" style="width:100%;padding:10px 12px;border:1px solid var(--border-color);border-radius:var(--radius-sm);">' +
+            '<option value="quality issue">Quality / freshness issue</option>' +
+            '<option value="wrong item">Wrong item or variant delivered</option>' +
+            '<option value="damaged">Damaged packaging</option>' +
+            '<option value="missing qty">Quantity missing</option>' +
+            '<option value="changed mind">Changed mind / no longer needed</option>' +
+        '</select>' +
+        '<label style="display:block;margin-top:10px;">Description (optional)</label>' +
+        '<textarea id="rfComments" rows="2" maxlength="1000" placeholder="Tell us what happened..." style="width:100%;padding:10px 12px;border:1px solid var(--border-color);border-radius:var(--radius-sm);font-family:inherit;"></textarea>' +
+        '<button type="button" class="paid-btn" id="rfSubmitBtn" onclick="submitReturnRequest(\'' + escJs(order._id) + '\')">Submit Return Request</button>' +
+        '<button type="button" class="pay-cancel-btn" onclick="closeReturnModal()">Cancel</button>';
+    trapModalFocus(modal);
+}
+
+function qtyOptionsHTML(maxQty) {
+    var html = "";
+    for (var q = 1; q <= Math.max(1, maxQty); q++) {
+        html += '<option value="' + q + '">' + q + '</option>';
+    }
+    return html;
+}
+
+function collectReturnRequest(orderId) {
+    var items = [];
+    var checks = document.querySelectorAll("#returnModal .ri-chk");
+    for (var i = 0; i < checks.length; i++) {
+        if (!checks[i].checked) continue;
+        var idx = parseInt(checks[i].getAttribute("data-i"), 10);
+        var qtySel = document.querySelector('#returnModal .ri-qty[data-i="' + idx + '"]');
+        var qty = qtySel ? parseInt(qtySel.value, 10) : 1;
+        items.push({ i: idx, productId: "", quantity: qty });
+    }
+    return items;
+}
+
+function submitReturnRequest(orderId) {
+    var btn = document.getElementById("rfSubmitBtn");
+    if (btn) { btn.disabled = true; btn.textContent = "Submitting..."; }
+    apiGetOrder(orderId).then(function(order) {
+        var selections = collectReturnRequest(orderId);
+        if (!selections.length) { showToast("Select at least one item to return.", "error"); resetReturnBtn(); return; }
+        // Resolve real product ids for the selected lines from the server order.
+        var payloadItems = selections.map(function(sel) {
+            var it = order.items[sel.i] || {};
+            return {
+                productId: it.productId || it.product || null,
+                variantId: it.variantId || null,
+                quantity: sel.quantity
+            };
+        });
+        var body = {
+            orderId: orderId,
+            items: payloadItems,
+            returnType: document.getElementById("rfType").value,
+            reason: document.getElementById("rfReason").value,
+            comments: document.getElementById("rfComments").value.trim() || undefined
+        };
+        return apiSubmitReturn(body);
+    }).then(function(rt) {
+        showToast("Return request submitted" + (rt && rt.returnNumber ? " (" + rt.returnNumber + ")" : "") + ".", "success");
+        closeReturnModal();
+        if (typeof loadOrders === "function") loadOrders();
+        else if (typeof renderMyReturns === "function") renderMyReturns();
+    }).catch(function(err) {
+        showToast((err && err.message) || "Failed to submit return request.", "error");
+        resetReturnBtn();
+    });
+}
+
+function resetReturnBtn() {
+    var btn = document.getElementById("rfSubmitBtn");
+    if (btn) { btn.disabled = false; btn.textContent = "Submit Return Request"; }
+}
+
+function closeReturnModal() {
+    var modal = document.getElementById("returnModal");
+    if (modal) modal.remove();
+    returnModalOpen = false;
+}
+
+// My Returns list (rendered wherever the order history page shows it).
+var myReturns = [];
+
+function loadMyReturns() {
+    apiMyReturns().then(function(resp) {
+        myReturns = (resp && resp.data) || [];
+        renderMyReturns();
+    }).catch(function() {
+        myReturns = [];
+        renderMyReturns();
+    });
+}
+
+function renderMyReturns() {
+    var container = document.getElementById("myReturnsList");
+    if (!container) return;
+    if (!myReturns.length) {
+        container.innerHTML = '<div class="cart-empty"><div class="cart-empty-icon">📦</div><h3>No returns yet</h3><p>Return requests for your delivered orders will appear here.</p></div>';
+        return;
+    }
+    var html = myReturns.map(function(r) {
+        var items = (r.items || []).map(function(i) {
+            return escHtml(i.name + (i.variantUnit ? " (" + i.variantUnit + ")" : "") + " × " + i.quantity);
+        }).join(", ");
+        var cancelBtn = r.status === "SUBMITTED"
+            ? '<button type="button" class="cancel-order-btn" onclick="cancelMyReturn(\'' + escJs(r._id) + '\')">Cancel Request</button>'
+            : "";
+        return '<div class="order-card"><div class="order-header"><div><div class="order-id">' + escHtml(r.returnNumber || "Return") +
+            '</div><small>' + escHtml(formatOrderDate(r.createdAt)) + '</small></div>' +
+            '<div class="order-status">' + returnStatusBadgeHTML(r.status || "") + '</div></div>' +
+            '<div class="order-pay-row"><span style="font-size:13px;">' + escHtml(r.returnType === "replacement" ? "Replacement" : "Refund") + '</span></div>' +
+            '<p style="font-size:13px;color:var(--text-secondary);">' + escHtml(items) + '</p>' +
+            '<p style="font-size:13px;">' + escHtml(r.reason || "") + (r.comments ? " — " + escHtml(r.comments) : "") + '</p>' +
+            (r.refund && r.refund.amount ? '<p style="font-size:13px;color:var(--green-primary);">Refund: ₹' + r.refund.amount + (r.refund.method ? " via " + escHtml(r.refund.method.replace(/_/g, " ")) : "") + '</p>' : "") +
+            '<div style="margin-top:12px;">' + cancelBtn + '</div></div>';
+    }).join("");
+    container.innerHTML = html;
+}
+
+function returnStatusBadgeHTML(status) {
+    var cls = status === "REJECTED" || status === "CANCELLED" ? "badge-reject" :
+        (status === "CLOSED" ? "badge-ok" : "badge-pending");
+    return '<span class="admin-badge ' + cls + '">' + escHtml(status || "") + '</span>';
+}
+
+function cancelMyReturn(id) {
+    if (!id) return;
+    if (!window.confirm("Cancel this return request? This cannot be undone.")) return;
+    apiCancelReturn(id).then(function() {
+        showToast("Return request cancelled.", "success");
+        loadMyReturns();
+    }).catch(function(err) {
+        showToast((err && err.message) || "Could not cancel the return request.", "error");
+    });
+}
+
+function toggleMyReturns() {
+    var section = document.getElementById("myReturnsSection");
+    if (!section) return;
+    var visible = section.style.display !== "none";
+    section.style.display = visible ? "none" : "block";
+    if (!visible) loadMyReturns();
+}
+
+function escJs(s) {
+    return jsStr(s);
 }

@@ -894,3 +894,302 @@ function apiMarkAllNotificationsRead() {
             return data;
         });
 }
+
+// Returns / refunds / replacement (customer + admin). All cookie-authed.
+function apiSubmitReturn(body) {
+    return fetch(API.base + "/returns", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(body || {})
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Submit return failed");
+            return data.data;
+        });
+}
+
+function apiMyReturns() {
+    return fetch(API.base + "/returns/my", { headers: getAuthHeaders() })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed to load returns");
+            return data; // { success, count, data: [...] }
+        });
+}
+
+function apiCancelReturn(id) {
+    return fetch(API.base + "/returns/" + encodeURIComponent(id) + "/cancel", {
+        method: "POST",
+        headers: getAuthHeaders()
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Cancel return failed");
+            return data.data;
+        });
+}
+
+function apiUploadReturnProof(imageDataUri) {
+    return fetch(API.base + "/returns/upload-proof", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ image: imageDataUri })
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Upload failed");
+            return data.imageUrl;
+        });
+}
+
+function adminListReturns(status) {
+    var url = API.base + "/returns";
+    if (status) url += "?status=" + encodeURIComponent(status);
+    return fetch(url, { headers: getAuthHeaders() })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed to load returns");
+            return data.data;
+        });
+}
+
+function adminUpdateReturnStatus(id, body) {
+    return fetch(API.base + "/returns/" + encodeURIComponent(id) + "/status", {
+        method: "PATCH",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(body || {})
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Update return status failed");
+            return data.data;
+        });
+}
+
+function adminListReviews(status) {
+    var url = API.base + "/reviews";
+    if (status) url += "?status=" + encodeURIComponent(status);
+    return fetch(url, { headers: getAuthHeaders() })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed to load reviews");
+            return data.data;
+        });
+}
+
+function apiModerateReview(id, body) {
+    return fetch(API.base + "/reviews/" + encodeURIComponent(id) + "/moderation", {
+        method: "PATCH",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(body || {})
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Update review failed");
+            return data.data;
+        });
+}
+
+// ---------- DELIVERY PARTNER (cookie-authed, delivery role) ----------
+
+function apiDeliveryToday() {
+    return fetch(API.base + "/delivery/today", { headers: getAuthHeaders() })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed to load deliveries");
+            return data.deliveries || [];
+        });
+}
+
+function apiDeliveryEarnings() {
+    return fetch(API.base + "/delivery/earnings", { headers: getAuthHeaders() })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed to load earnings");
+            return data;
+        });
+}
+
+function apiDeliveryAction(action, assignmentId, extra) {
+    var body = Object.assign({ assignmentId: assignmentId }, extra || {});
+    return fetch(API.base + "/delivery/" + encodeURIComponent(action), {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(body)
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Action failed");
+            return data.assignment;
+        });
+}
+
+function apiDeliveryAccept(assignmentId) { return apiDeliveryAction("accept", assignmentId); }
+function apiDeliveryReject(assignmentId) { return apiDeliveryAction("reject", assignmentId); }
+function apiDeliveryStatus(assignmentId, status, otp) { return apiDeliveryAction("status", assignmentId, { status: status, otp: otp }); }
+
+function apiDeliveryAvailability(isAvailable) {
+    return fetch(API.base + "/delivery/availability", {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ isAvailable: isAvailable === true })
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed to update availability");
+            return data;
+        });
+}
+
+function apiDeliveryShareLocation(lat, lng) {
+    return fetch(API.base + "/delivery/location", {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ lat: lat, lng: lng })
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed to share location");
+            return data;
+        });
+}
+
+function apiDeliveryProof(assignmentId, imageData) {
+    return fetch(API.base + "/delivery/proof-image", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ assignmentId: assignmentId, imageData: imageData })
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Upload failed");
+            return data.proofImage;
+        });
+}
+
+// ---------- DELIVERY ADMIN (cookie-authed, admin role) ----------
+
+function apiAdminDeliveryPartners() {
+    return fetch(API.base + "/delivery/management/partners", { headers: getAuthHeaders() })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed to load delivery partners");
+            return data.deliveryUsers || [];
+        });
+}
+
+function apiAdminDeliveryToday() {
+    return fetch(API.base + "/delivery/management/today", { headers: getAuthHeaders() })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed to load deliveries");
+            return data.deliveries || [];
+        });
+}
+
+function apiAdminAssignDelivery(orderId, deliveryUserId) {
+    return fetch(API.base + "/delivery/assign", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ orderId: orderId, deliveryUserId: deliveryUserId })
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Assignment failed");
+            return data.assignment;
+        });
+}
+
+// ---------- GEOLOCATION + MAPS (shared UI helpers) ----------
+
+// "Use My Current Location" capture with graceful degradation. Rejects with a
+// user-friendly message when the browser lacks geolocation or access is denied.
+function captureCurrentLocation() {
+    return new Promise(function(resolve, reject) {
+        if (!("geolocation" in navigator)) {
+            reject(new Error("Location sharing is not supported by this browser. Please enter your address manually."));
+            return;
+        }
+        navigator.geolocation.getCurrentPosition(
+            function(pos) {
+                if (!pos || !pos.coords) {
+                    reject(new Error("Could not read your location."));
+                    return;
+                }
+                resolve({
+                    latitude: pos.coords.latitude,
+                    longitude: pos.coords.longitude,
+                    accuracy: pos.coords.accuracy != null ? Math.round(pos.coords.accuracy) : null,
+                    capturedAt: new Date().toISOString()
+                });
+            },
+            function() {
+                reject(new Error("Location access was denied or unavailable. You can still enter your address manually."));
+            },
+            { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 }
+        );
+    });
+}
+
+function openInMapsHref(lat, lng) {
+    return "https://maps.google.com/?q=" + encodeURIComponent(String(lat) + "," + String(lng));
+}
+
+// Key-free OpenStreetMap embed inside a modal lightbox (DOM-built so no
+// untrusted text ever reaches a string-built HTML sink).
+function openMapView(lat, lng, title) {
+    var coordLat = Number(lat);
+    var coordLng = Number(lng);
+    if (!Number.isFinite(coordLat) || !Number.isFinite(coordLng)) return;
+
+    var overlay = document.createElement("div");
+    overlay.className = "map-modal-overlay";
+
+    var box = document.createElement("div");
+    box.className = "map-modal-box";
+
+    var head = document.createElement("div");
+    head.className = "map-modal-head";
+
+    var strong = document.createElement("strong");
+    strong.textContent = title || "Location";
+    head.appendChild(strong);
+
+    var closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "map-modal-close";
+    closeBtn.setAttribute("aria-label", "Close map");
+    closeBtn.textContent = "✕";
+    head.appendChild(closeBtn);
+
+    var frame = document.createElement("div");
+    frame.className = "map-modal-frame";
+
+    var iframe = document.createElement("iframe");
+    iframe.title = "Map";
+    var bbox = [coordLng - 0.005, coordLat - 0.003, coordLng + 0.005, coordLat + 0.003].join(",");
+    iframe.src = "https://www.openstreetmap.org/export/embed.html?bbox=" +
+        encodeURIComponent(bbox) +
+        "&layer=mapnik&marker=" +
+        encodeURIComponent(String(coordLat) + "," + String(coordLng));
+    iframe.setAttribute("loading", "lazy");
+    iframe.setAttribute("referrerpolicy", "no-referrer-when-downgrade");
+    frame.appendChild(iframe);
+
+    var link = document.createElement("a");
+    link.className = "map-open-link";
+    link.href = openInMapsHref(coordLat, coordLng);
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "Open in Google Maps ↗";
+    frame.appendChild(link);
+
+    box.appendChild(head);
+    box.appendChild(frame);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    closeBtn.addEventListener("click", function() { overlay.remove(); });
+    overlay.addEventListener("click", function(e) { if (e.target === overlay) overlay.remove(); });
+}

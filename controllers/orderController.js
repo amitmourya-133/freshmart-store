@@ -8,11 +8,23 @@ const Product = require("../models/Product");
 const User = require("../models/User");
 const Settings = require("../models/Settings");
 const Coupon = require("../models/Coupon");
+const InventoryLog = require("../models/InventoryLog");
 const DeliveryAssignment = require("../models/DeliveryAssignment");
 const notificationController = require("./notificationController");
 const { getMultFromWeight, round2 } = require("../utils/pricing");
-const { findValidCoupon, computeCouponDiscount, normalizeCode } = require("../utils/coupons");
+const { findValidCoupon, computeCouponDiscount, normalizeCode, reserveCouponUsage, releaseCouponUsage } = require("../utils/coupons");
+const { assertVariantAvailable } = require("../utils/variants");
 const emailService = require("../utils/emailService");
+
+// Best-effort audit log: stock reservations/restores never break the order
+// flow when logging fails.
+async function logStockChange(entry) {
+    try {
+        await InventoryLog.create(entry);
+    } catch (e) {
+        console.warn("[inventory] log failed: " + (e && e.message ? e.message : "unknown"));
+    }
+}
 
 // Best-effort notification sending wrapper. Never throws; never affects the
 // request's order state. Logs a sanitized failure line (no secrets).
@@ -70,6 +82,44 @@ async function deliveryPartnerFor(orderId) {
     }
 }
 
+// Latest delivery-assignment state for an order (used by owner/admin order views
+// and the customer tracking view). includePartnerLocation is admin-only: it adds
+// the partner's live coordinates so the map can drop a partner pin; customers
+// never receive the partner's location (their private account data).
+async function deliveryTrackFor(orderId, includePartnerLocation) {
+    try {
+        const assignment = await DeliveryAssignment.findOne({ order: orderId })
+            .sort({ createdAt: -1 })
+            .populate("deliveryUser", includePartnerLocation ? "name phone lastLat lastLng lastLocationAt" : "name");
+        if (!assignment) return null;
+        const track = {
+            status: assignment.status,
+            assignedAt: assignment.assignedAt || null,
+            acceptedAt: assignment.acceptedAt || null,
+            pickedUpAt: assignment.pickedUpAt || null,
+            enRouteAt: assignment.enRouteAt || null,
+            deliveredAt: assignment.deliveredAt || null,
+            proofImage: assignment.proofImage || null
+        };
+        if (assignment.deliveryUser) {
+            track.partner = { name: assignment.deliveryUser.name };
+            if (includePartnerLocation) {
+                const u = assignment.deliveryUser;
+                const lastAt = u.lastLocationAt ? new Date(u.lastLocationAt).getTime() : null;
+                const STALE_MS = 15 * 60 * 1000;
+                track.partner.phone = u.phone || null;
+                track.partner.lastLat = u.lastLat != null ? u.lastLat : null;
+                track.partner.lastLng = u.lastLng != null ? u.lastLng : null;
+                track.partner.lastLocationAt = u.lastLocationAt || null;
+                track.partner.stale = lastAt ? (Date.now() - lastAt > STALE_MS) : true;
+            }
+        }
+        return track;
+    } catch (e) {
+        return null;
+    }
+}
+
 const ORDER_STATUSES = ["Placed", "Confirmed", "Preparing", "Out for Delivery", "Delivered", "Cancelled"];
 const STATUS_RANK = { Placed: 0, Confirmed: 1, Preparing: 2, "Out for Delivery": 3, Delivered: 4 };
 const PAYMENT_STATUSES = ["PENDING", "PAID", "FAILED", "CANCELLED", "REFUNDED", "PENDING_REFUND"];
@@ -106,6 +156,35 @@ function validateCustomer(c) {
     if (!c.city || String(c.city).trim().length < 2) return "Please enter your city";
     if (!/^\d{6}$/.test(String(c.pincode || "").trim())) return "Please enter a valid 6-digit pincode";
     return null;
+}
+
+// Optional GPS capture at checkout. Returns a sanitized { latitude, longitude,
+// accuracy, capturedAt } object or null when absent (manual address entry /
+// older clients). Malformed or out-of-range values are rejected — coordinates
+// claimed by the browser are never stored without sanity checks.
+function normalizeDeliveryLocation(loc) {
+    if (loc === undefined || loc === null) return null;
+    if (typeof loc !== "object" || Array.isArray(loc)) {
+        throw { status: 400, message: "Invalid delivery location" };
+    }
+    const lat = loc.latitude === undefined || loc.latitude === null || String(loc.latitude).trim() === "" ? NaN : Number(loc.latitude);
+    const lng = loc.longitude === undefined || loc.longitude === null || String(loc.longitude).trim() === "" ? NaN : Number(loc.longitude);
+    const accuracy = loc.accuracy === undefined || loc.accuracy === null || String(loc.accuracy).trim() === "" ? NaN : Number(loc.accuracy);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        throw { status: 400, message: "Invalid delivery location coordinates" };
+    }
+    if (Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+        throw { status: 400, message: "Delivery location coordinates are out of range" };
+    }
+    if (Number.isFinite(accuracy) && (accuracy < 0 || accuracy > 5000)) {
+        throw { status: 400, message: "Invalid delivery location accuracy" };
+    }
+    return {
+        latitude: Math.round(lat * 1e6) / 1e6,
+        longitude: Math.round(lng * 1e6) / 1e6,
+        accuracy: Number.isFinite(accuracy) ? Math.round(accuracy) : null,
+        capturedAt: new Date()
+    };
 }
 
 function pushHistory(order, status, by) {
@@ -148,6 +227,22 @@ async function computeServerTotals(items, options) {
             if (!product || !product.active) {
                 throw { status: 400, message: (item.name || "Item") + " is no longer available" };
             }
+            if (item.variantId) {
+                // Pack-size variant: price/stock come from the variant, never
+                // from the client. assertVariantAvailable also enforces stock.
+                const variant = assertVariantAvailable(product, item.variantId, qty);
+                serverSubtotal += round2(variant.price * qty);
+                normalized.push({
+                    name: product.name,
+                    price: round2(variant.price),
+                    quantity: qty,
+                    weight: item.weight || null,
+                    productId: product._id,
+                    variantId: variant._id,
+                    variantUnit: variant.unit
+                });
+                continue;
+            }
             if (product.stock < qty) {
                 throw { status: 400, message: "Only " + product.stock + " units of " + product.name + " in stock" };
             }
@@ -159,7 +254,9 @@ async function computeServerTotals(items, options) {
                 price: itemPrice,
                 quantity: qty,
                 weight: item.weight || null,
-                productId: product._id
+                productId: product._id,
+                variantId: null,
+                variantUnit: null
             });
         } else {
             const price = round2(Number(item.price) || 0);
@@ -169,7 +266,9 @@ async function computeServerTotals(items, options) {
                 price: price,
                 quantity: qty,
                 weight: item.weight || null,
-                productId: undefined
+                productId: undefined,
+                variantId: null,
+                variantUnit: null
             });
         }
     }
@@ -192,9 +291,9 @@ async function computeServerTotals(items, options) {
     let couponInfo = null;
     const rawCode = options && options.couponCode ? options.couponCode : null;
     if (rawCode && String(rawCode).trim()) {
-        const { coupon } = await findValidCoupon(rawCode);
+        const { coupon } = await findValidCoupon(rawCode, { userId: options && options.userId ? options.userId : null });
         discount = computeCouponDiscount(coupon, subtotal);
-        couponInfo = { _id: coupon._id, code: coupon.code, discountType: coupon.discountType, discountValue: coupon.discountValue, minimumOrderValue: coupon.minimumOrderValue };
+        couponInfo = { _id: coupon._id, code: coupon.code, discountType: coupon.discountType, discountValue: coupon.discountValue, minimumOrderValue: coupon.minimumOrderValue, perUserLimit: coupon.perUserLimit };
     }
     const total = round2(subtotal + delivery - discount);
     return {
@@ -221,12 +320,95 @@ function normalizeCustomer(c) {
     };
 }
 
+// Reserve stock atomically with a guarded findOneAndUpdate (single statement,
+// so two concurrent checkouts can never both succeed against the last unit).
+// Returns the product doc with the variant included when it was a pack sale,
+// or null when the line is not servable at the requested quantity.
+// Reserve stock atomically with a guarded update (single statement, so two
+// concurrent checkouts can never both succeed against the last unit). The
+// variant branch uses $elemMatch as the DOCUMENT-LEVEL guard (MongoDB
+// re-validates the query on write-conflict retries) plus arrayFilters pinned
+// to the exact pack _id so the increment lands on the right element and never
+// on a sibling pack. Returns the product doc with the decremented variant (for
+// audit), or null when the line is not servable at the requested quantity.
+async function tryReserveLine(item) {
+    if (!item.productId) return null;
+    const qty = item.quantity;
+    if (item.variantId) {
+        const res = await Product.updateOne(
+            {
+                _id: item.productId,
+                active: true,
+                variants: { $elemMatch: { _id: item.variantId, active: true, stock: { $gte: qty } } }
+            },
+            { $inc: { "variants.$[elem].stock": -qty } },
+            { arrayFilters: [{ "elem._id": item.variantId, "elem.stock": { $gte: qty } }] }
+        );
+        if (res && res.modifiedCount === 1) {
+            return Product.findById(item.productId);
+        }
+        return null;
+    }
+    // Legacy weight/unit product (root stock).
+    const res = await Product.updateOne(
+        { _id: item.productId, active: true, stock: { $gte: qty } },
+        { $inc: { stock: -qty } }
+    );
+    if (res && res.modifiedCount === 1) {
+        return Product.findById(item.productId);
+    }
+    return null;
+}
+
+// Compensate a reserved line (rollback used at order-create failure and an
+// admin/customer cancellation path that returns stock to the shelf).
+async function restoreLine(item) {
+    if (!item.productId) return;
+    const qty = item.quantity;
+    if (item.variantId) {
+        const res = await Product.updateOne(
+            { _id: item.productId },
+            { $inc: { "variants.$[elem].stock": qty } },
+            { arrayFilters: [{ "elem._id": item.variantId }] }
+        );
+        if (res && res.matchedCount === 1) {
+            const product = await Product.findById(item.productId).lean();
+            const variant = product && product.variants ? product.variants.find(function (v) { return String(v._id) === String(item.variantId); }) : null;
+            await logStockChange({
+                product: item.productId, variantId: item.variantId, scope: "variant", change: qty,
+                previousStock: variant ? Math.max(0, variant.stock - qty) : 0, newStock: variant ? variant.stock : 0,
+                reason: "order_cancelled", order: item.orderId || null,
+                changedByType: item.changedByType || "system", changedBy: item.changedBy || null,
+                note: (item.variantUnit || item.name || "item")
+            });
+        }
+        return;
+    }
+    const product = await Product.findOneAndUpdate(
+        { _id: item.productId },
+        { $inc: { stock: qty } },
+        { new: true }
+    );
+    if (product) {
+        await logStockChange({
+            product: item.productId, variantId: null, scope: "stock", change: qty,
+            previousStock: Math.max(0, product.stock - qty), newStock: product.stock,
+            reason: "order_cancelled", order: item.orderId || null,
+            changedByType: item.changedByType || "system", changedBy: item.changedBy || null,
+            note: (item.name || "item")
+        });
+    }
+}
+
 // Restore stock for cancelled orders (once).
-async function restoreStockOnce(order) {
+async function restoreStockOnce(order, changedByType, changedBy) {
     if (!order.items) return;
-    for (const item of order.items) {
-        if (item.productId) {
-            await Product.findByIdAndUpdate(item.productId, { $inc: { stock: item.quantity } });
+    for (const sub of order.items) {
+        // Mongoose subdocuments do not expose their paths to Object.assign
+        // (fields live in _doc), so materialize a plain object first.
+        const item = sub && typeof sub.toObject === "function" ? sub.toObject() : sub;
+        if (item && item.productId) {
+            await restoreLine(Object.assign({}, item, { orderId: order._id, changedByType: changedByType, changedBy: changedBy }));
         }
     }
 }
@@ -236,7 +418,30 @@ async function applyCancellation(order, by) {
     if (order.status === "Cancelled") return { ok: false, message: "Order is already cancelled" };
     if (order.status === "Delivered") return { ok: false, message: "Delivered orders cannot be cancelled" };
 
-    await restoreStockOnce(order);
+    const byType = by && String(by).indexOf("admin:") === 0 ? "admin" : "customer";
+    const byId = by ? String(by).split(":")[1] : null;
+    await restoreStockOnce(order, byType, byId && require("mongoose").Types.ObjectId.isValid(byId) ? byId : null);
+
+    // Give the coupon use back exactly once; the flag makes cancellation
+    // idempotent even if it is attempted again later.
+    if (order.couponCode && !order.couponReleased) {
+        try {
+            if (order.user) {
+                const couponDoc = await Coupon.findOne({ code: order.couponCode });
+                if (couponDoc) {
+                    await Coupon.updateOne(
+                        { _id: couponDoc._id, usageCount: { $gt: 0 } },
+                        { $inc: { usageCount: -1 } }
+                    );
+                    await releaseCouponUsage(couponDoc._id, order.user);
+                }
+            }
+        } catch (e) {
+            console.warn("[coupon] release failed: " + (e && e.message ? e.message : "unknown"));
+        }
+        await Order.updateOne({ _id: order._id }, { $set: { couponReleased: true } });
+        order.couponReleased = true;
+    }
 
     if (order.paid || order.paymentStatus === "PAID") {
         // COD / UPI-manual payment was never settled through a gateway:
@@ -259,7 +464,7 @@ async function applyCancellation(order, by) {
 // ===============================
 exports.createOrder = async (req, res) => {
     try {
-        const { customer, items, payment, paymentMethod, paid, deliverySlot, subscription, subscriptionPlan, clientRef, paymentReference, couponCode } = req.body;
+        const { customer, items, payment, paymentMethod, paid, deliverySlot, subscription, subscriptionPlan, clientRef, paymentReference, couponCode, deliveryLocation } = req.body;
 
         // Server-side address validation
         const customerError = validateCustomer(customer);
@@ -276,7 +481,10 @@ exports.createOrder = async (req, res) => {
             }
         }
 
-        const totals = await computeServerTotals(items, { couponCode: couponCode });
+        // Optional GPS capture. Throws { status: 400 } on malformed values.
+        const deliveryLocationData = normalizeDeliveryLocation(deliveryLocation);
+
+        const totals = await computeServerTotals(items, { couponCode: couponCode, userId: req.user ? req.user._id : null });
 
         const orderNumber = generateOrderNumber();
         const trackingId = generateTrackingId();
@@ -302,6 +510,7 @@ exports.createOrder = async (req, res) => {
             discount: totals.discount,
             couponCode: totals.coupon ? totals.coupon.code : null,
             deliverySlot: deliverySlot || "Morning (8-11 AM)",
+            deliveryLocation: deliveryLocationData,
             subscription: subscription === true,
             subscriptionPlan: subscriptionPlan || null,
             total: totals.total,
@@ -357,35 +566,128 @@ exports.createOrder = async (req, res) => {
             if (!reservedCoupon) {
                 return res.status(400).json({ success: false, message: "This coupon has reached its usage limit" });
             }
+            // Per-customer cap (only for logged-in customers). Throws 400 when
+            // their allowance is spent, in which case the global increment is
+            // rolled back so no usage is burned by a rejected checkout.
+            if (req.user) {
+                try {
+                    await reserveCouponUsage(reservedCoupon, req.user._id);
+                } catch (perUserErr) {
+                    try { await Coupon.updateOne({ _id: reservedCoupon._id }, { $inc: { usageCount: -1 } }); } catch (e) { /* non-fatal */ }
+                    if (perUserErr && perUserErr.status) {
+                        return res.status(perUserErr.status).json({ success: false, message: perUserErr.message });
+                    }
+                    throw perUserErr;
+                }
+            }
         }
 
-        // Decrement stock (order created => reservation). Payment success/failure
-        // does not touch stock; only cancellation restores it (see cancellation).
-        const reservedProducts = [];
+        // Reserve item stock with an atomic guard so two parallel checkouts can
+        // never both oversell the last unit. On any failure ALL reservations so
+        // far (stock + coupon) are compensated before responding.
+        const reservedLines = [];
+        const restored = [];
         for (const item of totals.items) {
-            if (item.productId) {
-                reservedProducts.push(item.productId);
-                await Product.findByIdAndUpdate(item.productId, { $inc: { stock: -item.quantity } });
+            const product = await tryReserveLine(item);
+            if (!product) {
+                // Nothing reserved for this line: what is the actual shortfall?
+                for (const prev of reservedLines) {
+                    if (restored.indexOf(prev) === -1) {
+                        await restoreLine(prev);
+                        restored.push(prev);
+                    }
+                }
+                if (item.variantId) {
+                    const prod = await Product.findById(item.productId).lean();
+                    const variant = prod && prod.variants ? prod.variants.find(function (v) { return String(v._id) === String(item.variantId); }) : null;
+                    if (!prod || !variant || !variant.active) {
+                        return res.status(400).json({ success: false, message: (prod ? prod.name : item.name || "Item") + (variant ? " (" + variant.unit + ") is no longer available" : " pack is no longer available") });
+                    }
+                    return res.status(400).json({ success: false, message: "Only " + variant.stock + " of " + prod.name + " (" + variant.unit + ") left in stock" });
+                }
+                const prod = await Product.findById(item.productId).lean();
+                return res.status(400).json({ success: false, message: "Only " + (prod ? prod.stock : 0) + " units of " + (prod ? prod.name : item.name || "Item") + " left in stock" });
             }
+            reservedLines.push(Object.assign({}, item, { orderId: null }));
         }
 
         let order;
         try {
             order = await Order.create(Object.assign(orderData, { statusHistory: [{ status: "Placed", by: req.user ? "customer:" + String(req.user._id) : "guest", at: new Date() }] }));
         } catch (createError) {
-            // Compensate the reserved usage count so retries do not burn the limit.
+            // Compensate coupon usage + reserved stock so retries/aborts do not
+            // burn the coupon or the inventory.
             if (reservedCoupon) {
                 try { await Coupon.updateOne({ _id: reservedCoupon._id }, { $inc: { usageCount: -1 } }); } catch (e) { /* non-fatal */ }
+                if (req.user) { try { await releaseCouponUsage(reservedCoupon._id, req.user._id); } catch (e) { /* non-fatal */ } }
+            }
+            for (const prev of reservedLines) {
+                if (restored.indexOf(prev) === -1) { await restoreLine(prev); restored.push(prev); }
             }
             throw createError;
         }
+
+        // Audit trail tied to the real order id (read-only Product lookups; the
+        // quantities were already reserved atomically above).
+        for (const item of totals.items) {
+            const product = await Product.findById(item.productId).lean();
+            if (!product) continue;
+            if (item.variantId) {
+                const variant = product.variants ? product.variants.find(function (v) { return String(v._id) === String(item.variantId); }) : null;
+                if (variant) {
+                    await logStockChange({
+                        product: product._id, variantId: variant._id, scope: "variant", change: -item.quantity,
+                        previousStock: variant.stock + item.quantity, newStock: variant.stock,
+                        reason: "order_placed", order: order._id, changedByType: "system", note: product.name + " (" + variant.unit + ")"
+                    });
+                }
+            } else {
+                await logStockChange({
+                    product: product._id, variantId: null, scope: "stock", change: -item.quantity,
+                    previousStock: product.stock + item.quantity, newStock: product.stock,
+                    reason: "order_placed", order: order._id, changedByType: "system", note: product.name
+                });
+            }
+        }
+
+        // Low-stock alert to admins (awaited so the admin inbox is consistent
+        // by the time the response is received; a failure must never block the
+        // order, so it stays fully guarded by try/catch).
+        try {
+            const productIds = totals.items.filter(function (i) { return i.productId; }).map(function (i) { return i.productId; });
+            if (productIds.length) {
+                const products = await Product.find({ _id: { $in: productIds } }).select("_id name stock variants");
+                const low = products.filter(function (p) {
+                    if (p.variants && p.variants.length) {
+                        return p.variants.some(function (v) { return v.active && v.stock <= 5; });
+                    }
+                    return p.stock <= 5;
+                });
+                if (low.length) {
+                    const labels = low.map(function (p) {
+                        if (p.variants && p.variants.length) {
+                            const worst = p.variants.filter(function (v) { return v.active; }).sort(function (a, b) { return a.stock - b.stock; })[0];
+                            return p.name + " (" + worst.unit + ": " + worst.stock + " left)";
+                        }
+                        return p.name + " (" + p.stock + " left)";
+                    });
+                    await notificationController.notifyRole("admin", {
+                        type: "low_stock",
+                        title: "Low stock alert",
+                        message: labels.join(", ") + " — restock soon.",
+                        data: { link: "admin.html", count: low.length },
+                    });
+                }
+            }
+        } catch (e) { console.warn("[notification] low-stock failed: " + ((e && e.message) || "unknown")); }
 
         res.status(201).json({
             success: true,
             data: order
         });
 
-        // In-app inbox notifications (fire-and-forget; never affect the response).
+        // In-app inbox notification for the buyer (fire-and-forget; never affects
+        // the response).
         if (req.user) {
             notificationController.notifyBase(req.user._id, {
                 type: "order_status",
@@ -394,24 +696,6 @@ exports.createOrder = async (req, res) => {
                 data: { link: "orders.html", orderId: String(order._id), orderNumber: orderNumber },
             });
         }
-        (async () => {
-            try {
-                if (reservedProducts.length) {
-                    const lowStock = await Product.find({
-                        _id: { $in: reservedProducts },
-                        stock: { $lte: 5 },
-                    }).select("_id name stock");
-                    if (lowStock.length) {
-                        await notificationController.notifyRole("admin", {
-                            type: "low_stock",
-                            title: "Low stock alert",
-                            message: lowStock.map((p) => p.name + " (" + p.stock + " left)").join(", ") + " — restock soon.",
-                            data: { link: "admin.html", count: lowStock.length },
-                        });
-                    }
-                }
-            } catch (e) { console.warn("[notification] low-stock failed: " + ((e && e.message) || "unknown")); }
-        })();
 
         // Order confirmation email (fire-and-forget; never blocks or fails the
         // response). The flag is recorded only when the send actually succeeded,
@@ -545,7 +829,14 @@ exports.getOverview = async (req, res) => {
 exports.getMyOrders = async (req, res) => {
     try {
         const orders = await Order.find({ user: req.user._id }).sort({ createdAt: -1 });
-        res.json({ success: true, count: orders.length, data: orders });
+        const docs = [];
+        for (const order of orders) {
+            const doc = order.toObject ? order.toObject() : Object.assign({}, order);
+            const track = await deliveryTrackFor(order._id);
+            if (track) doc.deliveryTrack = track;
+            docs.push(doc);
+        }
+        res.json({ success: true, count: docs.length, data: docs });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
@@ -567,10 +858,14 @@ exports.getOrder = async (req, res) => {
         if (!isAdmin && !isOwner) {
             return res.status(403).json({ success: false, message: "Not authorized to view this order" });
         }
-        // Owner/admin view: include the assigned delivery partner (name + phone).
+        // Owner/admin view: include the assigned delivery partner (name + phone)
+        // and the latest delivery state. Admin additionally receives the
+        // partner's live location so the admin map can pin where they are now.
         const partner = await deliveryPartnerFor(order._id);
+        const track = await deliveryTrackFor(order._id, isAdmin);
         const doc = order.toObject ? order.toObject() : Object.assign({}, order);
         if (partner) doc.deliveryPartner = partner;
+        if (track) doc.deliveryTrack = track;
         res.json({ success: true, data: doc });
     } catch (error) {
         if (error && error.name === "CastError") {
@@ -757,16 +1052,19 @@ exports.getOrderByNumber = async (req, res) => {
         // The delivery partner's name (never their phone/address) is shown so the
         // customer can recognise whom to expect, when assigned.
         const partner = await deliveryPartnerFor(order._id);
+        const track = await deliveryTrackFor(order._id);
         res.json({
             success: true,
             data: {
                 orderNumber: order.orderNumber,
                 trackingId: order.trackingId,
                 status: order.status,
+                // Delivery pipeline state (safe status label; no PII).
+                deliveryStatus: track ? track.status : null,
                 paymentStatus: order.paymentStatus,
                 date: order.createdAt,
                 items: (order.items || []).map(function (i) {
-                    return { name: i.name || i.productName, quantity: i.quantity || 1, price: i.price || 0 };
+                    return { name: i.name || i.productName, quantity: i.quantity || 1, price: i.price || 0, variantUnit: i.variantUnit || null };
                 }),
                 total: order.total,
                 deliveryPartner: partner ? { name: partner.name } : null,

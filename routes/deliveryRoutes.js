@@ -74,6 +74,25 @@ function emailDelivered(assignment, order) {
         .catch(function (e) { /* non-fatal */ });
 }
 
+// In-app inbox update for the order owner when the delivery pipeline advances
+// (accepted / picked up / en route / rejected). Fire-and-forget; never blocks
+// the delivery flow.
+async function notifyCustomerAboutDelivery(orderId, title, message) {
+    try {
+        const orderDoc = await Order.findById(orderId).select("user orderNumber");
+        if (!orderDoc || !orderDoc.user) return;
+        const notificationController = require("../controllers/notificationController");
+        await notificationController.notifyBase(orderDoc.user, {
+            type: "order_status",
+            title: title,
+            message: message,
+            data: { link: "orders.html", orderId: String(orderDoc._id), orderNumber: orderDoc.orderNumber || "" },
+        });
+    } catch (e) {
+        console.warn("[notification] delivery status notify failed: " + ((e && e.message) || "unknown"));
+    }
+}
+
 // ===============================
 // ASSIGN (ADMIN ONLY)
 // ===============================
@@ -192,7 +211,7 @@ router.get("/today", protect, delivery, async (req, res) => {
             deliveryUser: req.user.id,
             status: { $in: ["ASSIGNED", "ACCEPTED", "PICKED_UP", "EN_ROUTE"] },
         })
-            .populate("order", "orderNumber items total status paymentStatus paymentMethod deliverySlot customer customerEmail")
+            .populate("order", "orderNumber items total status paymentStatus paymentMethod deliverySlot customer customerEmail deliveryLocation")
             .sort({ assignedAt: -1 });
 
         return res.json({
@@ -242,6 +261,8 @@ router.put("/accept", protect, delivery, async (req, res) => {
         assignment.acceptedAt = new Date();
         await assignment.save();
 
+        notifyCustomerAboutDelivery(assignment.order, "Delivery accepted", "Your delivery partner has accepted order " + (assignment.order && assignment.order.orderNumber ? assignment.order.orderNumber : "") + ".");
+
         return res.json({
             success: true,
             message: "Assignment accepted successfully",
@@ -281,6 +302,8 @@ router.put("/reject", protect, delivery, async (req, res) => {
 
         assignment.status = "REJECTED";
         await assignment.save();
+
+        notifyCustomerAboutDelivery(assignment.order, "Delivery reassign pending", "Your delivery partner could not take order " + (assignment.order && assignment.order.orderNumber ? assignment.order.orderNumber : "") + ". An admin will reassign it shortly.");
 
         return res.json({
             success: true,
@@ -404,6 +427,13 @@ router.put("/status", protect, delivery, async (req, res) => {
 
         assignment.status = status;
         await assignment.save();
+
+        // Keep the customer informed as the parcel moves through the pipeline.
+        if (status === "PICKED_UP") {
+            notifyCustomerAboutDelivery(assignment.order, "Order picked up", "Your order has been picked up by the delivery partner.");
+        } else if (status === "EN_ROUTE") {
+            notifyCustomerAboutDelivery(assignment.order, "Order on the way", "Your order is out for delivery and on its way to you!");
+        }
 
         // On delivered: sync the parent Order, credit the delivery fee to the
         // partner's earnings, and send the delivery-complete email.
