@@ -65,17 +65,36 @@ async function sendEmail({ to, subject, html }) {
         });
         return { sent: true, messageId: info ? info.messageId : "" };
     } catch (err) {
-        // Never log the SMTP password or any secret. A transport-level error
-        // is intentionally swallowed (delivery failure is reported to the caller).
-        // Only a sanitized failure code (e.g. EAUTH / 535 / ETIMEDOUT) is
-        // exposed for diagnostics - never the underlying SMTP response text.
-        const code = err ? (err.responseCode || err.code) : undefined;
+        // Never log the SMTP password, username or any secret. A transport-level
+        // error is intentionally swallowed (delivery failure is reported to the
+        // caller alongside a SAFE diagnostic). Only a sanitized failure code
+        // (e.g. EAUTH / 535 / ETIMEDOUT) and a non-secret hint are exposed -
+        // never the underlying SMTP response text.
+        const errCode = err ? (err.code || err.name) : "unknown";
+        const responseCode = err ? (err.responseCode !== undefined && err.responseCode !== null ? err.responseCode : undefined) : undefined;
+        const code = responseCode !== undefined ? String(responseCode) : errCode;
         return {
             sent: false,
             reason: "smtp_error",
-            code: (code !== undefined && code !== null) ? String(code) : (err && err.name) || "unknown"
+            code: code,
+            hint: smtpHint(code)
         };
     }
+}
+
+// Map a sanitized SMTP error code to a human, NON-SECRET hint so the log line
+// tells the operator which failure class occurred without leaking credentials
+// or the mail server's response body.
+function smtpHint(code) {
+    const c = String(code || "").toUpperCase();
+    if (c === "EAUTH" || c === "535" || c.indexOf("535") === 0) return "credentials-rejected-by-server";
+    if (c === "EENVELOPE") return "invalid-recipient-address";
+    if (c === "EMESSAGE") return "invalid-email-message";
+    if (c === "ETLS") return "tls-not-negotiated";
+    if (c.indexOf("ECONN") === 0) return "cannot-connect-to-mail-server";
+    if (c === "ETIMEDOUT" || c.indexOf("ESOCKET") === 0) return "connection-timed-out";
+    if (c.indexOf("TLS") >= 0 || c.indexOf("CERT") >= 0 || c.indexOf("DEPTH") >= 0) return "tls-certificate-error";
+    return "other-smtp-error";
 }
 
 // Send a 6-digit OTP email to the user. The OTP is only used to build the
@@ -207,4 +226,4 @@ async function sendDeliveryConfirmation({ to, order }) {
     });
 }
 
-module.exports = { sendOtpEmail, sendEmail, sendOrderConfirmation, sendOrderStatusUpdate, sendDeliveryConfirmation };
+module.exports = { sendOtpEmail, sendEmail, sendOrderConfirmation, sendOrderStatusUpdate, sendDeliveryConfirmation, smtpHint };
