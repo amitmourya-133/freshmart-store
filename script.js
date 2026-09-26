@@ -2409,11 +2409,125 @@ function loadCheckout() {
         renderCheckout();
     });
     loadSavedAddresses();
+    armAddressEditTracking();
 }
 
 // ===============================
 // SAVED ADDRESS + LOCATION (checkout)
 // ===============================
+
+// Canonical checkout location state. The hidden fields are the source of truth
+// for the payload; this mirror lets the UI + pre-submit guard know whether the
+// current address text was derived from the SAME captured pin (synced), was
+// typed by the customer afterwards (handledManually), or is untrusted leftover
+// text next to a fresh pin (neither → submit refused).
+var fmCheckoutLocation = null;
+
+function currentCheckoutLocationMeta() {
+    var lat = document.getElementById("deliveryLat");
+    var lng = document.getElementById("deliveryLng");
+    var at = document.getElementById("deliveryLocAt");
+    if (!lat || !lng || !lat.value || !lng.value) return null;
+    var can = canonicalLocation(lat.value, lng.value,
+        document.getElementById("deliveryAcc") ? document.getElementById("deliveryAcc").value : "",
+        at ? at.value : "");
+    if (!can) return null;
+    return {
+        pin: true,
+        latitude: can.latitude,
+        longitude: can.longitude,
+        accuracy: can.accuracy != null ? can.accuracy : 0,
+        capturedAt: can.capturedAt,
+        source: (fmCheckoutLocation && fmCheckoutLocation.source) || "unknown",
+        synced: !!(fmCheckoutLocation && fmCheckoutLocation.synced),
+        handledManually: !!(fmCheckoutLocation && fmCheckoutLocation.handledManually),
+        resolved: (fmCheckoutLocation && fmCheckoutLocation.resolved) || null
+    };
+}
+
+// Persist ONE canonical coordinate set into the hidden fields + meta.
+function setCapturedLocation(coords) {
+    if (!coords) return null;
+    var can = canonicalLocation(coords.latitude, coords.longitude, coords.accuracy, coords.capturedAt);
+    if (!can) return null;
+    var set = function(id, v) { var el = document.getElementById(id); if (el) el.value = (v == null) ? "" : String(v); };
+    set("deliveryLat", can.latitude);
+    set("deliveryLng", can.longitude);
+    set("deliveryAcc", can.accuracy != null ? can.accuracy : "");
+    set("deliveryLocAt", can.capturedAt);
+    fmCheckoutLocation = {
+        pin: true,
+        latitude: can.latitude,
+        longitude: can.longitude,
+        accuracy: can.accuracy != null ? can.accuracy : 0,
+        capturedAt: can.capturedAt,
+        source: coords.source || "gps",
+        synced: false,
+        handledManually: false,
+        resolved: null
+    };
+    var clear = document.getElementById("clearLocBtn");
+    if (clear) clear.style.display = "inline-block";
+    return fmCheckoutLocation;
+}
+
+// Clear ONLY the captured pin (coords/preview/meta). Used by "✕ Clear" and when
+// selecting a saved address card (which has no coordinates of its own).
+function clearCheckoutLocation() {
+    ["deliveryLat", "deliveryLng", "deliveryAcc", "deliveryLocAt"].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.value = "";
+    });
+    fmCheckoutLocation = null;
+    var cap = document.getElementById("locCaptured");
+    if (cap) { cap.textContent = ""; cap.style.display = "none"; }
+    var clear = document.getElementById("clearLocBtn");
+    if (clear) clear.style.display = "none";
+    var preview = document.getElementById("locMapPreview");
+    if (preview) { preview.innerHTML = ""; preview.style.display = "none"; }
+}
+
+// Clear the address TEXT fields without touching the captured pin. Crucially
+// this runs right after a fresh GPS/map capture so stale saved/typed text
+// (e.g. an old Bareilly address) can NEVER ride along under the new pin.
+function clearCheckoutAddressFields() {
+    var set = function(id) { var el = document.getElementById(id); if (el) el.value = ""; };
+    set("customerAddress");
+    set("customerCity");
+    set("customerState");
+    set("customerPincode");
+    detectPincodeInfo();
+    if (fmCheckoutLocation) fmCheckoutLocation.synced = false;
+}
+
+// Track whether the customer typed their own address after a capture whose
+// auto-address was unavailable — that is a deliberate decision, not stale text.
+function armAddressEditTracking() {
+    ["customerAddress", "customerCity", "customerState", "customerPincode"].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (!el || el.dataset.fmTracked) return;
+        el.dataset.fmTracked = "1";
+        el.addEventListener("input", function() {
+            if (fmCheckoutLocation && !fmCheckoutLocation.synced) fmCheckoutLocation.handledManually = true;
+        });
+    });
+}
+
+// Render "captured" status + accuracy + the mini-map preview for the ACTIVE pin.
+function fillFromResolvedLocation(loc) {
+    if (!loc) return;
+    var cap = document.getElementById("locCaptured");
+    if (cap) {
+        cap.style.display = "inline-block";
+        var accTxt = loc.accuracy ? " · Accuracy: ±" + Math.round(loc.accuracy) + " m" : "";
+        if (loc.resolved && loc.resolved.full) {
+            cap.textContent = "📍 " + loc.resolved.full + accTxt;
+        } else {
+            cap.textContent = "✅ Location captured" + (loc.accuracy ? " (±" + Math.round(loc.accuracy) + " m)" : "") + " — enter street, city & pincode.";
+        }
+    }
+    buildLocationPreview(loc.latitude, loc.longitude);
+}
 
 // Populate address book options when a logged-in customer has saved addresses.
 function loadSavedAddresses() {
@@ -2452,6 +2566,7 @@ function selectSavedAddress(idx) {
         set("customerState", a.state || "");
         set("customerPincode", a.pincode || "");
         detectPincodeInfo();
+        clearCheckoutLocation(); // saved cards carry no coords — drop any stale pin
         var items = document.querySelectorAll(".saved-addr-item");
         items.forEach(function(el) { el.classList.remove("selected"); });
         if (items[idx]) items[idx].classList.add("selected");
@@ -2546,57 +2661,113 @@ function openCheckoutMapPicker() {
 }
 
 // Capture the customer's current GPS position and auto-fill the full address.
+// Fresh GPS becomes authoritative: it overwrites whatever address text was
+// showing (saved/autofilled/typed) and its OWN reverse-geocoded address fills
+// the fields. If geocoding fails the fields are cleared — never left stale.
 function captureCheckoutLocation() {
     var btn = document.getElementById("useLocBtn");
     var err = document.getElementById("locErr");
-    if (btn) { btn.disabled = true; btn.textContent = "📍 Locating…"; }
-    if (err) err.style.display = "none";
+    if (btn) { btn.disabled = true; btn.textContent = "📍 Getting your location…"; }
+    if (err) { err.style.display = "none"; err.innerHTML = ""; }
     captureCurrentLocation().then(function(loc) {
-        document.getElementById("deliveryLat").value = String(loc.latitude);
-        document.getElementById("deliveryLng").value = String(loc.longitude);
-        document.getElementById("deliveryAcc").value = loc.accuracy != null ? String(loc.accuracy) : "";
-        document.getElementById("deliveryLocAt").value = loc.capturedAt || new Date().toISOString();
+        var can = canonicalLocation(loc.latitude, loc.longitude, loc.accuracy, loc.capturedAt);
+        var saved = setCapturedLocation({
+            latitude: can.latitude, longitude: can.longitude,
+            accuracy: can.accuracy, capturedAt: can.capturedAt, source: "gps"
+        });
+        if (!saved) { if (err) { err.style.display = "block"; err.textContent = "⚠️ Could not save the captured location. Please try again."; } resetUseLocButton(btn); return; }
+        var isStillCurrent = function() { return fmCheckoutLocation && fmCheckoutLocation.latitude === can.latitude && fmCheckoutLocation.longitude === can.longitude; };
+        clearCheckoutAddressFields();
         var cap = document.getElementById("locCaptured");
-        if (cap) {
-            cap.style.display = "inline-block";
-            cap.textContent = "📍 Resolving your address…";
-        }
-        var clear = document.getElementById("clearLocBtn");
-        if (clear) clear.style.display = "inline-block";
-        showToast("Location captured — resolving your address…", "info");
-        reverseGeocode(loc.latitude, loc.longitude).then(function(addr) {
+        if (cap) { cap.style.display = "inline-block"; cap.textContent = "📍 Resolving your address…"; }
+        reverseGeocode(can.latitude, can.longitude).then(function(addr) {
+            if (!isStillCurrent()) return;
+            fmCheckoutLocation.synced = true;
+            fmCheckoutLocation.resolved = addr;
             fillAddressFromLocation(addr);
-            if (cap) cap.textContent = "📍 " + addr.full;
+            fillFromResolvedLocation(fmCheckoutLocation);
             showToast("Address auto-filled from your location. Adjust on the map if needed.", "success");
         }).catch(function() {
-            if (cap) {
-                cap.textContent = "📍 Captured: " + Number(loc.latitude).toFixed(5) + ", " + Number(loc.longitude).toFixed(5) + (loc.accuracy ? " (±" + loc.accuracy + "m)" : "");
-            }
-            showToast("Location captured — please fill the address details manually.", "info");
+            if (!isStillCurrent()) return;
+            clearCheckoutAddressFields();
+            fillFromResolvedLocation(fmCheckoutLocation);
+            showToast("Location captured — enter your street, city & pincode so we can reach you.", "info");
         });
-        buildLocationPreview(loc.latitude, loc.longitude);
     }).catch(function(e) {
-        if (err) { err.style.display = "block"; err.textContent = "⚠️ " + ((e && e.message) || "Could not get your location."); }
-        clearCheckoutLocation();
-    }).then(function() {
-        if (btn) {
-            btn.disabled = false;
-            btn.textContent = "📍 Use My Current Location";
+        var msg = (e && e.message) || "Could not get your location.";
+        if (err) {
+            err.style.display = "block";
+            var span = document.createElement("span");
+            span.textContent = "⚠️ " + msg + " ";
+            var tip = document.createElement("span");
+            tip.className = "loc-err-tip";
+            tip.textContent = geolocationRecoveryTip(e && e.locCode);
+            var manual = document.createElement("button");
+            manual.type = "button";
+            manual.className = "loc-secondary-btn";
+            manual.textContent = "✏️ Enter Address Manually";
+            manual.addEventListener("click", function() {
+                var a = document.getElementById("customerAddress");
+                if (a) { a.focus(); a.scrollIntoView({ behavior: "smooth", block: "center" }); }
+            });
+            while (err.firstChild) err.removeChild(err.firstChild);
+            err.appendChild(span);
+            err.appendChild(tip);
+            err.appendChild(manual);
         }
+        resetUseLocButton(btn);
     });
 }
 
-function clearCheckoutLocation() {
-    ["deliveryLat", "deliveryLng", "deliveryAcc", "deliveryLocAt"].forEach(function(id) {
-        var el = document.getElementById(id);
-        if (el) el.value = "";
+function resetUseLocButton(btn) {
+    if (btn) { btn.disabled = false; btn.textContent = "↻ Try Again — Use My Current Location"; }
+}
+
+// Short, non-scary recovery hint for each failure cause.
+function geolocationRecoveryTip(locCode) {
+    if (locCode === "denied") return "Tip: Location is blocked. On Android open Chrome → ⋮ → Settings → Site settings → Location and allow FreshMart, then tap Try Again.";
+    if (locCode === "insecure") return "Open this page over https:// to share your location.";
+    if (locCode === "timeout") return "Tip: step outdoors or near a window for a faster GPS fix, then tap Try Again.";
+    if (locCode === "unsupported") return "Your browser doesn't support sharing location — you can still enter your address or pick it on the map.";
+    return "You can still enter your address manually and adjust your spot on the map.";
+}
+
+// Interactive map picker: drag the marker / search / use GPS, then the picked
+// point's geocoded address fills the form (and ONLY that — any prior
+// saved/typed text is overwritten or cleared, never mixed with the pin).
+function openCheckoutMapPicker() {
+    var latEl = document.getElementById("deliveryLat");
+    var lngEl = document.getElementById("deliveryLng");
+    var accEl = document.getElementById("deliveryAcc");
+    var anyFix = latEl && lngEl && latEl.value && lngEl.value;
+    openMapPicker({
+        lat: anyFix ? Number(latEl.value) : undefined,
+        lng: anyFix ? Number(lngEl.value) : undefined,
+        accuracy: accEl && accEl.value ? Number(accEl.value) : undefined,
+        title: "Set your delivery location"
+    }).then(function(picked) {
+        if (!picked || !Number.isFinite(Number(picked.latitude))) return;
+        var saved = setCapturedLocation({
+            latitude: picked.latitude, longitude: picked.longitude,
+            accuracy: picked.accuracy, capturedAt: new Date().toISOString(), source: "picker"
+        });
+        if (!saved) { showToast("That pin could not be used. Please try again.", "error"); return; }
+        clearCheckoutAddressFields();
+        if (picked.address && picked.address.full) {
+            fmCheckoutLocation.synced = true;
+            fmCheckoutLocation.resolved = picked.address;
+            fillAddressFromLocation(picked.address);
+            fillFromResolvedLocation(fmCheckoutLocation);
+            showToast("Location saved — address auto-filled from your pin.", "success");
+        } else {
+            fillFromResolvedLocation(fmCheckoutLocation);
+            showToast("Pin saved — enter your street, city & pincode so we can reach you.", "info");
+        }
+    }).catch(function(e) {
+        if (e && e.cancelled) return;
+        var err = document.getElementById("locErr");
+        if (err) { err.style.display = "block"; err.textContent = "⚠️ " + ((e && e.message) || "Could not open the map."); }
     });
-    var cap = document.getElementById("locCaptured");
-    if (cap) { cap.textContent = ""; cap.style.display = "none"; }
-    var clear = document.getElementById("clearLocBtn");
-    if (clear) clear.style.display = "none";
-    var preview = document.getElementById("locMapPreview");
-    if (preview) { preview.innerHTML = ""; preview.style.display = "none"; }
 }
 
 // Attach optional captured coordinates to the order payload (server validates).
@@ -2810,6 +2981,14 @@ function placeOrder() {
     var address = document.getElementById("customerAddress").value.trim();
     var city = document.getElementById("customerCity").value.trim();
     var pincode = document.getElementById("customerPincode").value.trim();
+
+    // Consistency guard: a captured pin must NEVER travel with an unrelated
+    // (old saved / autofilled / stale typed) address. See locationSubmitGuard.
+    var locGuard = locationSubmitGuard(currentCheckoutLocationMeta());
+    if (!locGuard.ok) {
+        showToast(locGuard.message, "error");
+        return;
+    }
 
     if (!name || !phone || !address || !city || !pincode) {
         showToast("Please fill all delivery details.", "error");
