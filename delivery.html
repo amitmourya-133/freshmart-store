@@ -231,16 +231,24 @@
             const cardClass = rank >= 0 ? 'delivery-card' : 'delivery-card delivered';
             const proofImage = assignment.proofImage || '';
 
-            // Customer saved-location actions (map + open-in-maps).
+            // Customer saved-location actions (map + open-in-maps). Built only for
+            // genuinely valid coords — openInMapsHref refuses missing/invalid/0,0.
             let locActions = '';
-            if (order.deliveryLocation && Number.isFinite(Number(order.deliveryLocation.latitude)) && Number.isFinite(Number(order.deliveryLocation.longitude))) {
+            if (order.deliveryLocation) {
                 const dLat = Number(order.deliveryLocation.latitude);
                 const dLng = Number(order.deliveryLocation.longitude);
-                locActions = `
+                const dnHref = openInMapsHref(dLat, dLng);
+                locActions = dnHref
+                    ? `
                     <div class="detail-row">
                         <strong>Location:</strong>
                         <button type="button" class="loc-secondary-btn" onclick="viewDeliveryMap(${dLat}, ${dLng}, 'Customer Delivery Location')">View Map</button>
-                        <a class="loc-secondary-btn" style="text-decoration:none;display:inline-block;" href="${openInMapsHref(dLat, dLng)}" target="_blank" rel="noopener noreferrer">Open in Maps</a>
+                        <a class="loc-secondary-btn" style="text-decoration:none;display:inline-block;" href="${dnHref}" target="_blank" rel="noopener noreferrer">Open in Maps</a>
+                    </div>`
+                    : `
+                    <div class="detail-row">
+                        <strong>Location:</strong>
+                        <span class="loc-unavailable">Customer location is unavailable.</span>
                     </div>`;
             }
 

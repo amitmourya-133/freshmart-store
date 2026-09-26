@@ -4,7 +4,7 @@
 // ===============================
 
 const API = {
-    base: (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+    base: (typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"))
         ? "http://localhost:5000/api"
         : "/api"
 };
@@ -1132,16 +1132,72 @@ function captureCurrentLocation() {
     });
 }
 
+// ============================================================
+// COORDINATE SAFETY NET — THE single gate every coordinate passes.
+// Never converts missing/invalid coordinates to 0. A value is valid only when:
+//   - after Number() it is a finite number,
+//   - latitude in [-90, 90] and longitude in [-180, 180],
+//   - it is NOT (0,0) (rejected explicitly as an invalid delivery fallback).
+// Returns { latitude, longitude } or null. null => refuse everywhere.
+// ============================================================
+function toValidLatLng(lat, lng) {
+    var latNum = parseCoord(lat);
+    var lngNum = parseCoord(lng);
+    if (latNum === null || lngNum === null) return null;
+    if (Math.abs(latNum) > 90 || Math.abs(lngNum) > 180) return null;
+    if (latNum === 0 && lngNum === 0) return null;
+    return { latitude: latNum, longitude: lngNum };
+}
+
+// Number() implies Number("") === 0 and Number("  ") === 0, which silently
+// turned empty tracking fields into the dreaded 0,0 destination. parseCoord
+// instead rejects blank/undefined/null and any non-numeric string outright.
+function parseCoord(raw) {
+    if (raw === undefined || raw === null) return null;
+    if (typeof raw === "number") {
+        if (!Number.isFinite(raw)) return null;
+        return raw;
+    }
+    var s = String(raw).trim();
+    if (s === "") return null; // Number("") === 0 must NEVER slip through
+    var n = Number(s);
+    if (!Number.isFinite(n)) return null;
+    return n;
+}
+
+// Build a validated deliveryLocation payload for the order from raw field
+// values (the same inputs the checkout reads). Returns null when ANY axis is
+// missing/invalid — the caller must then omit coordinates entirely (never 0).
+function deliveryLocationPayload(latRaw, lngRaw, accRaw, atRaw) {
+    var v = toValidLatLng(latRaw, lngRaw);
+    if (!v) return null;
+    var accNum = parseCoord(accRaw);
+    var loc = {
+        latitude: Math.round(v.latitude * 1e6) / 1e6,
+        longitude: Math.round(v.longitude * 1e6) / 1e6,
+        capturedAt: (atRaw && String(atRaw).trim()) ? String(atRaw).trim() : new Date().toISOString()
+    };
+    if (accNum !== null && accNum >= 0 && accNum <= 5000) loc.accuracy = Math.round(accNum);
+    return loc;
+}
+
+// Google Maps link builder. REFUSES to create a URL for missing/invalid/0,0
+// coordinates and returns "" instead — callers must show "Customer location is
+// unavailable." rather than navigate to the Gulf of Guinea.
 function openInMapsHref(lat, lng) {
-    return "https://maps.google.com/?q=" + encodeURIComponent(String(lat) + "," + String(lng));
+    var v = toValidLatLng(lat, lng);
+    if (!v) return "";
+    return "https://maps.google.com/?q=" + encodeURIComponent(v.latitude + "," + v.longitude);
 }
 
 // Key-free OpenStreetMap embed inside a modal lightbox (DOM-built so no
 // untrusted text ever reaches a string-built HTML sink).
 function openMapView(lat, lng, title) {
-    var coordLat = Number(lat);
-    var coordLng = Number(lng);
-    if (!Number.isFinite(coordLat) || !Number.isFinite(coordLng)) return;
+    var v = toValidLatLng(lat, lng);
+    if (!v) return;
+
+    var coordLat = v.latitude;
+    var coordLng = v.longitude;
 
     var overlay = document.createElement("div");
     overlay.className = "map-modal-overlay";
@@ -1380,7 +1436,7 @@ function openMapPicker(opts) {
 
             var addrText = document.createElement("div");
             addrText.className = "map-picker-addr-text";
-            addrText.textContent = "Drag the marker, search, or use your GPS location — the full address fills automatically.";
+            addrText.textContent = "Tap the map, search your area/landmark, or use My Location — your pin becomes the exact delivery point and the full address fills automatically.";
             addrCard.appendChild(addrText);
 
             var foot = document.createElement("div");
@@ -1435,9 +1491,14 @@ function openMapPicker(opts) {
             cancelBtn.addEventListener("click", function() { fail({ cancelled: true }); });
 
             var map;
-            var marker;
+            var marker = null;
             var accCircle;
-            var lastPos = { latitude: startLat, longitude: startLng, accuracy: accuracy };
+            // NEVER pre-seed a location: when the picker opens without an existing
+            // valid fix there is NO default point. The customer must tap the map,
+            // search, or share GPS — otherwise Confirm stays disabled and 0,0 /
+            // an unrelated centre can never be committed.
+            var lastPos = { latitude: hasFix ? startLat : NaN, longitude: hasFix ? startLng : NaN, accuracy: accuracy };
+            var hasSelection = hasFix;
             var lastAddr = null;
             var lastAddrAt = null;
             var geocodeTimer = null;
@@ -1447,12 +1508,29 @@ function openMapPicker(opts) {
                 addrText.textContent = msg;
             }
 
+            function ensureMarker(lat, lng) {
+                if (!marker) {
+                    marker = L.marker([lat, lng], { draggable: true }).addTo(map);
+                    marker.on("dragend", function() {
+                        var ll = marker.getLatLng();
+                        setMarker(ll.lat, ll.lng, true);
+                    });
+                } else {
+                    marker.setLatLng([lat, lng]);
+                }
+                return marker;
+            }
+
             function setMarker(lat, lng, moveMap) {
-                lastPos.latitude = lat;
-                lastPos.longitude = lng;
-                if (marker) marker.setLatLng([lat, lng]);
-                if (accCircle) accCircle.setLatLng([lat, lng]);
-                if (moveMap && map) map.setView([lat, lng], Math.max(map.getZoom(), 16));
+                var v = toValidLatLng(lat, lng);
+                if (!v) return;
+                lastPos.latitude = v.latitude;
+                lastPos.longitude = v.longitude;
+                hasSelection = true;
+                if (confirmBtn) confirmBtn.disabled = false;
+                ensureMarker(v.latitude, v.longitude);
+                if (accCircle) accCircle.setLatLng([v.latitude, v.longitude]);
+                if (moveMap && map) map.setView([v.latitude, v.longitude], Math.max(map.getZoom(), 16));
                 setAddrText("Resolving address…", false);
                 geocodeDebounced();
             }
@@ -1524,8 +1602,13 @@ function openMapPicker(opts) {
             });
 
             confirmBtn.addEventListener("click", function() {
-                var lat = lastPos.latitude;
-                var lng = lastPos.longitude;
+                var v = toValidLatLng(lastPos.latitude, lastPos.longitude);
+                if (!v) {
+                    setAddrText("Please tap the map, search your area, or share GPS to choose a location first.", true);
+                    return;
+                }
+                var lat = v.latitude;
+                var lng = v.longitude;
                 confirmBtn.disabled = true;
                 confirmBtn.textContent = "Confirming…";
                 var apply = function(addr) {
@@ -1546,7 +1629,7 @@ function openMapPicker(opts) {
 
             map = L.map(mapDiv, {
                 center: [startLat, startLng],
-                zoom: 16,
+                zoom: hasFix ? 16 : 5,
                 scrollWheelZoom: false
             });
             L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -1554,23 +1637,32 @@ function openMapPicker(opts) {
                 attribution: "&copy; OpenStreetMap contributors"
             }).addTo(map);
 
-            marker = L.marker([startLat, startLng], { draggable: true }).addTo(map);
-
-            if (accuracy && accuracy > 0) {
-                accCircle = L.circle([startLat, startLng], { radius: accuracy, className: "map-picker-acc-circle" }).addTo(map);
+            // Marker appears ONLY when there is a genuinely valid starting fix —
+            // otherwise the customer must explicitly pick a point (no 0,0 and no
+            // unrelated default location can ever be committed).
+            if (hasFix && toValidLatLng(startLat, startLng)) {
+                ensureMarker(startLat, startLng);
+                if (accuracy && accuracy > 0) {
+                    accCircle = L.circle([startLat, startLng], { radius: accuracy, className: "map-picker-acc-circle" }).addTo(map);
+                }
+            } else {
+                setAddrText("Tap the map or search your area to place your delivery pin.", false);
             }
-
-            marker.on("dragend", function() {
-                var ll = marker.getLatLng();
-                setMarker(ll.lat, ll.lng, true);
-            });
 
             map.on("click", function(ev) {
                 setMarker(ev.latlng.lat, ev.latlng.lng, false);
             });
 
             // Initial resolve so the address card is populated right away.
-            geocodeDebounced();
+            if (hasFix && toValidLatLng(startLat, startLng)) {
+                geocodeDebounced();
+            }
         });
     });
+}
+
+// Node-visible surface used ONLY by automated regression suites — harmless in
+// the browser (typeof module is undefined there).
+if (typeof module !== "undefined" && module.exports) {
+    module.exports = { toValidLatLng: toValidLatLng, parseCoord: parseCoord, deliveryLocationPayload: deliveryLocationPayload, openInMapsHref: openInMapsHref, openMapView: openMapView, API: API };
 }

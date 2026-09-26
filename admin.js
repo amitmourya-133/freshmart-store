@@ -514,12 +514,14 @@ function adminAgoText(iso) {
 
 // Customer saved location card (map + open-in-maps, only from stored coords).
 function adminLocationBlock(order) {
-    if (!order.deliveryLocation || !Number.isFinite(Number(order.deliveryLocation.latitude)) || !Number.isFinite(Number(order.deliveryLocation.longitude))) return "";
+    if (!order.deliveryLocation) return "";
     var la = Number(order.deliveryLocation.latitude);
     var ln = Number(order.deliveryLocation.longitude);
+    var href = openInMapsHref(la, ln);
+    if (!href) return '<p>📍 Saved coords: Customer location is unavailable.</p>';
     return '<p>📍 Saved coords: ' + la.toFixed(5) + ', ' + ln.toFixed(5) + ' ' +
         '<button type="button" class="row-btn" onclick="showAdminMap(' + la + ',' + ln + ',\'Customer Saved Location\')">View Map</button> ' +
-        '<a class="row-btn" style="text-decoration:none;" href="' + openInMapsHref(la, ln) + '" target="_blank" rel="noopener noreferrer">Open in Maps</a></p>';
+        '<a class="row-btn" style="text-decoration:none;" href="' + href + '" target="_blank" rel="noopener noreferrer">Open in Maps</a></p>';
 }
 
 // Delivery assignment card. Shows the pipeline state and the partner's live
@@ -535,9 +537,14 @@ function adminDeliveryBlock(order) {
             var pln = Number(track.partner.lastLng);
             var age = track.partner.lastLocationAt ? adminAgoText(track.partner.lastLocationAt) : "unknown";
             if (track.partner.stale) age += " (stale)";
-            pupdate = '<p>🚚 Partner live location: ' + pla.toFixed(5) + ', ' + pln.toFixed(5) + ' (' + age + ') ' +
-                '<button type="button" class="row-btn" onclick="showAdminMap(' + pla + ',' + pln + ',\'Partner Live Location\')">View Map</button> ' +
-                '<a class="row-btn" style="text-decoration:none;" href="' + openInMapsHref(pla, pln) + '" target="_blank" rel="noopener noreferrer">Open in Maps</a></p>';
+            var plHref = openInMapsHref(pla, pln);
+            if (!plHref) {
+                pupdate = '<p>🚚 Partner live location: unavailable (invalid coordinates).</p>';
+            } else {
+                pupdate = '<p>🚚 Partner live location: ' + pla.toFixed(5) + ', ' + pln.toFixed(5) + ' (' + age + ') ' +
+                    '<button type="button" class="row-btn" onclick="showAdminMap(' + pla + ',' + pln + ',\'Partner Live Location\')">View Map</button> ' +
+                    '<a class="row-btn" style="text-decoration:none;" href="' + plHref + '" target="_blank" rel="noopener noreferrer">Open in Maps</a></p>';
+            }
         }
         var stamps = [
             ["Assigned", track.assignedAt], ["Accepted", track.acceptedAt],

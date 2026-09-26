@@ -2600,22 +2600,15 @@ function clearCheckoutLocation() {
 }
 
 // Attach optional captured coordinates to the order payload (server validates).
+// Empty/invalid values return null so a "0,0" deliveryLocation is NEVER sent —
+// the checked-in builder uses parseCoord (not Number()) which refuses blanks.
 function collectedDeliveryLocation() {
     var lat = document.getElementById("deliveryLat");
     var lng = document.getElementById("deliveryLng");
-    if (!lat || !lng) return undefined;
-    var nLat = Number(lat.value);
-    var nLng = Number(lng.value);
-    if (!Number.isFinite(nLat) || !Number.isFinite(nLng)) return undefined;
+    if (!lat || !lng) return null;
     var acc = document.getElementById("deliveryAcc");
     var at = document.getElementById("deliveryLocAt");
-    var loc = {
-        latitude: Math.round(nLat * 1e6) / 1e6,
-        longitude: Math.round(nLng * 1e6) / 1e6,
-        capturedAt: (at && at.value) ? at.value : new Date().toISOString()
-    };
-    if (acc && Number.isFinite(Number(acc.value))) loc.accuracy = Number(acc.value);
-    return loc;
+    return deliveryLocationPayload(lat.value, lng.value, acc ? acc.value : "", at ? at.value : "");
 }
 
 // ===============================
@@ -4017,8 +4010,15 @@ function renderOrdersListHTML(orders, offline) {
         if (order.customer && order.customer.state) {
             locLine += '<p><strong>State:</strong> ' + escHtml(order.customer.state) + '</p>';
         }
-        if (order.deliveryLocation && Number.isFinite(Number(order.deliveryLocation.latitude)) && Number.isFinite(Number(order.deliveryLocation.longitude))) {
-            locLine += '<p><strong>📍 Saved location:</strong> <a class="location-link" href="' + openInMapsHref(order.deliveryLocation.latitude, order.deliveryLocation.longitude) + '" target="_blank" rel="noopener noreferrer">Open in Maps</a> <button type="button" class="loc-secondary-btn" onclick="openMapView(' + Number(order.deliveryLocation.latitude) + ',' + Number(order.deliveryLocation.longitude) + ',\'My Delivery Location\')">View Map</button></p>';
+        if (order.deliveryLocation) {
+            var savedLat = order.deliveryLocation.latitude;
+            var savedLng = order.deliveryLocation.longitude;
+            var savedHref = openInMapsHref(savedLat, savedLng);
+            if (savedHref) {
+                locLine += '<p><strong>📍 Saved location:</strong> <a class="location-link" href="' + savedHref + '" target="_blank" rel="noopener noreferrer">Open in Maps</a> <button type="button" class="loc-secondary-btn" onclick="openMapView(' + Number(savedLat) + ',' + Number(savedLng) + ',\'My Delivery Location\')">View Map</button></p>';
+            } else {
+                locLine += '<p><strong>📍 Saved location:</strong> Customer location is unavailable.</p>';
+            }
         }
 
         ordersHTML += '<div class="order-card"><div class="order-header"><div><div class="order-id">' + escHtml(order.orderNumber || "Order") + '</div>' + trackLine + '<small>' + escHtml(formatOrderDate(order.createdAt || order.date)) + '</small></div><div class="order-status">' + escHtml(friendlyStatus(order.status || "Placed")) + '</div></div>' +
