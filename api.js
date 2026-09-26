@@ -1245,11 +1245,13 @@ function locationSubmitGuard(meta) {
 
 // Google Maps link builder. REFUSES to create a URL for missing/invalid/0,0
 // coordinates and returns "" instead — callers must show "Customer location is
-// unavailable." rather than navigate to the Gulf of Guinea.
+// unavailable." rather than navigate to the Gulf of Guinea. The validated
+// coordinates are finite Numbers, so they are emitted with a literal comma
+// (canonical ?q=lat,lng form) — never %-encoded, never /dir/.
 function openInMapsHref(lat, lng) {
     var v = toValidLatLng(lat, lng);
     if (!v) return "";
-    return "https://maps.google.com/?q=" + encodeURIComponent(v.latitude + "," + v.longitude);
+    return "https://maps.google.com/?q=" + v.latitude + "," + v.longitude;
 }
 
 // Key-free OpenStreetMap embed inside a modal lightbox (DOM-built so no
