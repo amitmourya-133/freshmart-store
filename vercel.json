@@ -42,6 +42,10 @@
       "use": "@vercel/static"
     },
     {
+      "src": "leaflet/**",
+      "use": "@vercel/static"
+    },
+    {
       "src": "groceries/**",
       "use": "@vercel/static"
     },
@@ -87,7 +91,7 @@
       "src": "/(.*)",
       "continue": true,
       "headers": {
-        "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.postalpincode.in; frame-src 'self' https://www.openstreetmap.org; font-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'",
+        "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.postalpincode.in https://nominatim.openstreetmap.org; frame-src 'self' https://www.openstreetmap.org; font-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'",
         "X-Content-Type-Options": "nosniff",
         "X-Frame-Options": "DENY",
         "Referrer-Policy": "strict-origin-when-cross-origin",

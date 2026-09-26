@@ -1127,7 +1127,7 @@ function captureCurrentLocation() {
             function() {
                 reject(new Error("Location access was denied or unavailable. You can still enter your address manually."));
             },
-            { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 }
+            { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
         );
     });
 }
@@ -1192,4 +1192,385 @@ function openMapView(lat, lng, title) {
 
     closeBtn.addEventListener("click", function() { overlay.remove(); });
     overlay.addEventListener("click", function(e) { if (e.target === overlay) overlay.remove(); });
+}
+
+// ---------- REVERSE GEOCODING + INTERACTIVE MAP PICKER ----------
+// Free, key-free OSM geocoding. "Pick on Map" auto-fills the FULL address
+// so the customer never re-types it, and the draggable marker lets them fix
+// a coarse GPS point (the usual cause of a "wrong location" being shared).
+
+// Map OSM Nominatim "address" components into FreshMart's address fields.
+function geocodeToAddress(nominatimData) {
+    var a = (nominatimData && nominatimData.address) || {};
+    var road = a.road || a.pedestrian || a.footway || a.service || a.residential || a.highway || "";
+    var house = a.house_number || "";
+    var area = a.neighbourhood || a.suburb || a.city_district || a.village || a.hamlet || a.town || "";
+    var addressLine = [house, road, area].filter(function(v) { return Boolean(v); }).join(", ");
+    var city = a.city || a.town || a.village || a.municipality || a.county || a.city_district || a.state_district || "";
+    var state = a.state || a.state_district || "";
+    var pincode = a.postcode || "";
+    var full = [];
+    if (addressLine) full.push(addressLine);
+    if (city) full.push(city);
+    if (state) full.push(state);
+    if (pincode) full.push(pincode);
+    return {
+        full: full.join(", "),
+        address: addressLine,
+        city: city,
+        state: state,
+        pincode: pincode,
+        countryCode: String(a.country_code || "").toUpperCase()
+    };
+}
+
+// Reverse-geocode lat/lng to a full address via OSM Nominatim (no key).
+function reverseGeocode(lat, lng) {
+    var url = "https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18" +
+        "&addressdetails=1&accept-language=en&lat=" + encodeURIComponent(lat) +
+        "&lon=" + encodeURIComponent(lng);
+    return fetch(url)
+        .then(function(res) {
+            if (!res.ok) throw new Error("Address lookup failed (" + res.status + ")");
+            return res.json();
+        })
+        .then(function(data) {
+            if (!data || !data.address) throw new Error("No address found for this spot");
+            return geocodeToAddress(data);
+        })
+        .catch(function(e) {
+            if (e && e.message) throw e;
+            throw new Error("Address lookup failed");
+        });
+}
+
+// Search a free-text place/area and return the best coordinate + address.
+function searchPlace(query) {
+    var url = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1" +
+        "&addressdetails=1&accept-language=en&q=" + encodeURIComponent(query);
+    return fetch(url)
+        .then(function(res) {
+            if (!res.ok) throw new Error("Place search failed (" + res.status + ")");
+            return res.json();
+        })
+        .then(function(data) {
+            if (!data || !data.length) throw new Error("No place found for \"" + query + "\"");
+            var r = data[0];
+            var addr = geocodeToAddress({ address: r.address || {} });
+            return {
+                latitude: Number(r.lat),
+                longitude: Number(r.lon),
+                displayName: r.display_name || query,
+                address: addr
+            };
+        })
+        .catch(function(e) {
+            if (e && e.message) throw e;
+            throw new Error("Place search failed");
+        });
+}
+
+// Load the self-hosted Leaflet library once (CSP-safe: same-origin script).
+function loadLeaflet() {
+    return new Promise(function(resolve, reject) {
+        if (typeof window.L !== "undefined") { resolve(window.L); return; }
+        var existing = document.getElementById("leafletScriptEl");
+        if (existing) {
+            var waitFor = function() {
+                if (typeof window.L !== "undefined") resolve(window.L);
+                else setTimeout(waitFor, 60);
+            };
+            waitFor();
+            return;
+        }
+        var s = document.createElement("script");
+        s.id = "leafletScriptEl";
+        s.src = "/leaflet/leaflet.js";
+        s.onload = function() {
+            if (typeof window.L !== "undefined") resolve(window.L);
+            else reject(new Error("Map library failed to initialise"));
+        };
+        s.onerror = function() { reject(new Error("Could not load the map library. Please try again.")); };
+        s.addEventListener("error", function() { reject(new Error("Could not load the map library. Please try again.")); });
+        (document.head || document.documentElement).appendChild(s);
+    });
+}
+
+// Interactive drag-to-place map picker used at checkout. Resolves with
+// { latitude, longitude, accuracy, address } or rejects with
+// { cancelled: true } when dismissed. All text is DOM-appended (no innerHTML).
+function openMapPicker(opts) {
+    opts = opts || {};
+    var existing = document.getElementById("mapPickerWrap");
+    if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+
+    var startLat = Number(opts.lat);
+    var startLng = Number(opts.lng);
+    var hasFix = Number.isFinite(startLat) && Number.isFinite(startLng);
+    if (!hasFix) { startLat = 28.6139; startLng = 77.2090; }
+    var accuracy = Number(opts.accuracy);
+    if (!Number.isFinite(accuracy) || accuracy <= 0) accuracy = 0;
+    var title = opts.title || "Set your delivery location";
+
+    if (!document.getElementById("leafletCssLink")) {
+        var css = document.createElement("link");
+        css.id = "leafletCssLink";
+        css.rel = "stylesheet";
+        css.href = "/leaflet/leaflet.css";
+        css.type = "text/css";
+        (document.head || document.documentElement).appendChild(css);
+    }
+
+    return loadLeaflet().then(function(L) {
+        return new Promise(function(resolve, reject) {
+            var overlay = document.createElement("div");
+            overlay.className = "map-picker-overlay";
+            overlay.setAttribute("role", "dialog");
+            overlay.setAttribute("aria-modal", "true");
+            overlay.setAttribute("aria-label", title);
+
+            var box = document.createElement("div");
+            box.className = "map-picker-box";
+
+            var head = document.createElement("div");
+            head.className = "map-picker-head";
+
+            var strong = document.createElement("strong");
+            strong.textContent = title;
+            head.appendChild(strong);
+
+            var closeBtn = document.createElement("button");
+            closeBtn.type = "button";
+            closeBtn.className = "map-modal-close";
+            closeBtn.setAttribute("aria-label", "Close map picker");
+            closeBtn.textContent = "✕";
+            head.appendChild(closeBtn);
+
+            var body = document.createElement("div");
+            body.className = "map-picker-body";
+
+            var searchRow = document.createElement("div");
+            searchRow.className = "map-picker-search";
+
+            var searchInput = document.createElement("input");
+            searchInput.type = "search";
+            searchInput.placeholder = "Search your area, locality or landmark…";
+            searchInput.setAttribute("aria-label", "Search area or landmark");
+            searchInput.autocomplete = "off";
+
+            var searchBtn = document.createElement("button");
+            searchBtn.type = "button";
+            searchBtn.className = "map-picker-search-btn";
+            searchBtn.textContent = "Search";
+
+            searchRow.appendChild(searchInput);
+            searchRow.appendChild(searchBtn);
+
+            var mapDiv = document.createElement("div");
+            mapDiv.className = "map-picker-map";
+            mapDiv.setAttribute("id", "mapPickerMap");
+
+            var addrCard = document.createElement("div");
+            addrCard.className = "map-picker-addr";
+
+            var addrLabel = document.createElement("div");
+            addrLabel.className = "map-picker-addr-label";
+            addrLabel.textContent = "Selected location";
+            addrCard.appendChild(addrLabel);
+
+            var addrText = document.createElement("div");
+            addrText.className = "map-picker-addr-text";
+            addrText.textContent = "Drag the marker, search, or use your GPS location — the full address fills automatically.";
+            addrCard.appendChild(addrText);
+
+            var foot = document.createElement("div");
+            foot.className = "map-picker-foot";
+
+            var useLocBtn = document.createElement("button");
+            useLocBtn.type = "button";
+            useLocBtn.className = "map-picker-loc-btn";
+            useLocBtn.textContent = "📍 Use My Location";
+
+            var cancelBtn = document.createElement("button");
+            cancelBtn.type = "button";
+            cancelBtn.className = "map-picker-cancel-btn";
+            cancelBtn.textContent = "Cancel";
+
+            var confirmBtn = document.createElement("button");
+            confirmBtn.type = "button";
+            confirmBtn.className = "map-picker-confirm-btn";
+            confirmBtn.textContent = "✓ Confirm Location";
+            confirmBtn.disabled = true;
+
+            foot.appendChild(useLocBtn);
+            foot.appendChild(cancelBtn);
+            foot.appendChild(confirmBtn);
+
+            body.appendChild(searchRow);
+            body.appendChild(mapDiv);
+            body.appendChild(addrCard);
+            body.appendChild(foot);
+
+            box.appendChild(head);
+            box.appendChild(body);
+            overlay.appendChild(box);
+            document.body.appendChild(overlay);
+
+            var done = false;
+            function finish(v) {
+                if (done) return;
+                done = true;
+                overlay.remove();
+                resolve(v);
+            }
+            function fail(e) {
+                if (done) return;
+                done = true;
+                overlay.remove();
+                reject(e);
+            }
+
+            closeBtn.addEventListener("click", function() { fail({ cancelled: true }); });
+            overlay.addEventListener("click", function(e) { if (e.target === overlay) fail({ cancelled: true }); });
+            cancelBtn.addEventListener("click", function() { fail({ cancelled: true }); });
+
+            var map;
+            var marker;
+            var accCircle;
+            var lastPos = { latitude: startLat, longitude: startLng, accuracy: accuracy };
+            var lastAddr = null;
+            var lastAddrAt = null;
+            var geocodeTimer = null;
+
+            function setAddrText(msg, isError) {
+                addrText.style.color = isError ? "#c0392b" : "";
+                addrText.textContent = msg;
+            }
+
+            function setMarker(lat, lng, moveMap) {
+                lastPos.latitude = lat;
+                lastPos.longitude = lng;
+                if (marker) marker.setLatLng([lat, lng]);
+                if (accCircle) accCircle.setLatLng([lat, lng]);
+                if (moveMap && map) map.setView([lat, lng], Math.max(map.getZoom(), 16));
+                setAddrText("Resolving address…", false);
+                geocodeDebounced();
+            }
+
+            function geocodeDebounced() {
+                if (geocodeTimer) clearTimeout(geocodeTimer);
+                geocodeTimer = setTimeout(function() {
+                    geocodeTimer = null;
+                    var reqLat = lastPos.latitude;
+                    var reqLng = lastPos.longitude;
+                    reverseGeocode(reqLat, reqLng)
+                        .then(function(addr) {
+                            if (reqLat !== lastPos.latitude || reqLng !== lastPos.longitude) { geocodeDebounced(); return; }
+                            lastAddr = addr;
+                            lastAddrAt = { latitude: reqLat, longitude: reqLng };
+                            setAddrText(addr.full || "Address found", false);
+                            confirmBtn.disabled = false;
+                        })
+                        .catch(function(e) {
+                            if (reqLat !== lastPos.latitude || reqLng !== lastPos.longitude) { geocodeDebounced(); return; }
+                            setAddrText((e && e.message) || "Could not auto-fill the address. You can still confirm the pin location.", true);
+                            confirmBtn.disabled = false;
+                        });
+                }, 450);
+            }
+
+            function runSearch() {
+                var q = searchInput.value.trim();
+                if (!q) { searchInput.focus(); return; }
+                setAddrText("Searching \u201C" + q + "\u201D…", false);
+                searchBtn.disabled = true;
+                searchPlace(q)
+                    .then(function(place) {
+                        searchBtn.disabled = false;
+                        searchInput.value = place.displayName;
+                        setMarker(place.latitude, place.longitude, true);
+                    })
+                    .catch(function(e) {
+                        searchBtn.disabled = false;
+                        setAddrText((e && e.message) || "Place not found. Try again.", true);
+                    });
+            }
+
+            useLocBtn.addEventListener("click", function() {
+                useLocBtn.disabled = true;
+                useLocBtn.textContent = "📍 Locating…";
+                setAddrText("Getting your live location…", false);
+                captureCurrentLocation()
+                    .then(function(loc) {
+                        useLocBtn.disabled = false;
+                        useLocBtn.textContent = "📍 Use My Location";
+                        lastPos.accuracy = loc.accuracy || 0;
+                        if (accCircle) {
+                            accCircle.setLatLng([loc.latitude, loc.longitude]);
+                            accCircle.setRadius(lastPos.accuracy || 50);
+                        }
+                        setMarker(loc.latitude, loc.longitude, true);
+                    })
+                    .catch(function(e) {
+                        useLocBtn.disabled = false;
+                        useLocBtn.textContent = "📍 Use My Location";
+                        setAddrText((e && e.message) || "Could not get your live location. Drag the marker instead.", true);
+                    });
+            });
+
+            searchBtn.addEventListener("click", runSearch);
+            searchInput.addEventListener("keydown", function(ev) {
+                if (ev.key === "Enter") { ev.preventDefault(); runSearch(); }
+            });
+
+            confirmBtn.addEventListener("click", function() {
+                var lat = lastPos.latitude;
+                var lng = lastPos.longitude;
+                confirmBtn.disabled = true;
+                confirmBtn.textContent = "Confirming…";
+                var apply = function(addr) {
+                    finish({
+                        latitude: lat,
+                        longitude: lng,
+                        accuracy: lastPos.accuracy || 0,
+                        address: addr
+                    });
+                };
+                // Fast path: only reuse the auto-filled address if the marker has
+                // NOT moved since it was resolved — otherwise always re-resolve the
+                // CURRENT pin so the shared location's own address fills.
+                var current = lastAddrAt !== null && lastAddrAt.latitude === lat && lastAddrAt.longitude === lng;
+                if (current && lastAddr) { apply(lastAddr); return; }
+                reverseGeocode(lat, lng).then(apply).catch(function() { apply(null); });
+            });
+
+            map = L.map(mapDiv, {
+                center: [startLat, startLng],
+                zoom: 16,
+                scrollWheelZoom: false
+            });
+            L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+                maxZoom: 19,
+                attribution: "&copy; OpenStreetMap contributors"
+            }).addTo(map);
+
+            marker = L.marker([startLat, startLng], { draggable: true }).addTo(map);
+
+            if (accuracy && accuracy > 0) {
+                accCircle = L.circle([startLat, startLng], { radius: accuracy, className: "map-picker-acc-circle" }).addTo(map);
+            }
+
+            marker.on("dragend", function() {
+                var ll = marker.getLatLng();
+                setMarker(ll.lat, ll.lng, true);
+            });
+
+            map.on("click", function(ev) {
+                setMarker(ev.latlng.lat, ev.latlng.lng, false);
+            });
+
+            // Initial resolve so the address card is populated right away.
+            geocodeDebounced();
+        });
+    });
 }
