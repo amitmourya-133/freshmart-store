@@ -25,12 +25,13 @@
             <button class="admin-tab" id="tabCustomersBtn" onclick="switchTab('customers')">👥 Customers</button>
             <button class="admin-tab" id="tabReviewsBtn" onclick="switchTab('reviews')">⭐ Reviews</button>
             <button class="admin-tab" id="tabCouponsBtn" onclick="switchTab('coupons')">🎟️ Coupons</button>
+            <button class="admin-tab" id="tabReturnsBtn" onclick="switchTab('returns')">📦 Returns</button>
             <button class="admin-tab" id="tabDeliveryBtn" onclick="switchTab('delivery')">🚚 Delivery</button>
             <button class="admin-tab" id="tabSettingsBtn" onclick="switchTab('settings')">⚙️ Settings</button>
 
             <div class="admin-tabs-actions">
                 <button type="button" class="secondary-btn" onclick="window.location.href='index.html'" title="Back to Store">← Store</button>
-                <button type="button" class="dark-mode-toggle" id="darkModeToggle" onclick="toggleDarkMode()" title="Toggle Dark Mode" aria-label="Toggle dark mode">🌙</button>
+                <button type="button" class="dark-mode-toggle" id="darkModeToggle" onclick="toggleDarkMode()" title="Toggle dark mode">🌙</button>
                 <button type="button" class="cart-btn logout-btn" onclick="adminLogout()" title="Log Out">Logout</button>
             </div>
         </div>
@@ -120,6 +121,7 @@
 
         </div>
 
+
         <div id="adminCustomersSection" class="admin-section" style="display:none;">
 
             <div class="admin-section-head">
@@ -148,6 +150,20 @@
 
         </div>
 
+        <div id="adminReturnsSection" class="admin-section" style="display:none;">
+
+            <div class="admin-section-head">
+                <h2>Return Requests</h2>
+            </div>
+
+            <input type="text" id="adminReturnSearch" class="admin-search" placeholder="Search returns (status / order / user)..." oninput="loadAdminReturns()">
+
+            <div id="adminReturnsList" class="admin-list">
+                <p style="text-align:center;color:var(--text-secondary);padding:40px;">Loading returns...</p>
+            </div>
+
+        </div>
+
         <div id="adminSettingsSection" class="admin-section" style="display:none;">
 
             <div class="admin-section-head">
@@ -163,7 +179,7 @@
         <div id="adminCouponsSection" class="admin-section" style="display:none;">
 
             <div class="admin-section-head">
-                <h2>Coupons &amp; Discounts</h2>
+                <h2>Coupons & Discounts</h2>
                 <button type="button" class="secondary-btn" onclick="openCouponModal()">+ New Coupon</button>
             </div>
 
@@ -226,6 +242,10 @@
 
                 <label>Stock</label>
                 <input type="number" id="pfStock" min="0" required>
+
+                <label>Variants (optional — e.g. 250g / 500g / 1kg)</label>
+                <div id="pfVariantsList" class="admin-variants-list"></div>
+                <button type="button" class="modal-cancel admin-variant-add" onclick="addVariantRow()" style="margin:6px 0 0 0;border:1px dashed var(--border-color);background:transparent;color:var(--green-primary);width:100%;">+ Add Variant</button>
 
                 <label>Rating (0–5)</label>
                 <input type="number" id="pfRating" min="0" max="5" step="0.1" placeholder="e.g. 4.5">
@@ -291,6 +311,10 @@
                 <label>Usage Limit (blank = unlimited)</label>
                 <input type="number" id="cfUsageLimit" min="1" step="1" placeholder="e.g. 100">
 
+                <label>Per-User Limit (blank = unlimited)</label>
+                <input type="number" id="cfPerUserLimit" min="1" step="1" placeholder="e.g. 1">
+
+
                 <label><input type="checkbox" id="cfActive" checked> Active</label>
 
                 <div class="modal-actions">
@@ -302,7 +326,6 @@
 
         </div>
     </div>
-
 
     <!-- Delivery Management Modal -->
     <div id="deliveryManagementSection" class="admin-section" style="display:none;">

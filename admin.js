@@ -47,6 +47,7 @@ function switchTab(tab) {
         products: "adminProductsSection",
         customers: "adminCustomersSection",
         reviews: "adminReviewsSection",
+        returns: "adminReturnsSection",
         coupons: "adminCouponsSection",
         delivery: "adminDeliverySection",
         settings: "adminSettingsSection"
@@ -57,6 +58,7 @@ function switchTab(tab) {
         products: "tabProductsBtn",
         customers: "tabCustomersBtn",
         reviews: "tabReviewsBtn",
+        returns: "tabReturnsBtn",
         coupons: "tabCouponsBtn",
         delivery: "tabDeliveryBtn",
         settings: "tabSettingsBtn"
@@ -74,6 +76,7 @@ function switchTab(tab) {
     else if (tab === "products") loadAdminProducts();
     else if (tab === "customers") loadAdminCustomers();
     else if (tab === "reviews") loadAdminReviews();
+    else if (tab === "returns") loadAdminReturns();
     else if (tab === "coupons") loadAdminCoupons();
     else if (tab === "delivery") loadAdminDelivery();
     else if (tab === "settings") renderSettingsTab();
@@ -409,7 +412,15 @@ function changeOrderStatus(orderId, status) {
 function openOrderDetail(orderId, skipReload) {
     var order = adminOrders.find(function(o) { return o._id === orderId; });
     if (!order) return;
-    showOrderDetail(order, skipReload);
+    // Always refresh the single order so admin sees the live delivery/location
+    // state (the list payload does not include deliveryTracking).
+    apiGetOrder(orderId).then(function(fresh) {
+        showOrderDetail(fresh || order, skipReload);
+        populateAssignOptions(fresh || order);
+    }).catch(function() {
+        showOrderDetail(order, skipReload);
+        populateAssignOptions(order);
+    });
 }
 
 // Render an order object into the detail modal (used by order list + customer history)
@@ -449,7 +460,9 @@ var timeline = (order.statusHistory || []).map(function(h) {
             '<p><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-telephone"><path d="M1.878 1.013a.945.945 0 1 1 1.654 1.297l-7.857 9.82c-.54.655-1.263.232-1.263-.395l7.53-6.878L1.878 1.013zm1.157 6.059L1.223.76c.331.455.606.77 1.04.893l6.315 3.06c.434.21.703.43.703.633 0 .206-.06.397-.175.557l-5.863 8.575L11.038 5.53c-.161-.455-.375-.77-1.04-.893l-6.282-3.05a.95.95 0 0 1-.052-.311zM3.835 1.808c.187-.35.375-.648.423-.883l.308-.75c.048-.124.073-.253.073-.386 0-.131-.025-.255-.073-.379l-.315.75c-.048.123-.073.252-.073.386 0 .134.025.258.073.381l.312.75c.001.136.01.266.01.395v.025l-.008-.002M5.335 1.575c-.287.08- .534.23.73.437l-.695.655c-.184.173-.353.322-.496.437l-.59 1.47c-.12.31-.189.596-.189.831s.069.52.189.83l.59 1.47c.107.283.266.432.496.437l.695.655c.196-.207.443-.358.73-.437l.695-.655c.287.08.534.23.73.437l.59-1.47c.12-.31.189-.52.189-.831s-.069-.52-.189-.83l-.59-1.47z"/></svg> ' + esc(customer.phone || order.phone || "") + '</p>' +
             '<p><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-envelope"><path d="M0 4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2V4zM1 3a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h2v1H1V4a1 1 0 0 0-1-1V3z"/></svg> ' + esc(customer.email || order.email || (order.user && order.user.email) || "") + '</p>' +
             '<p>' + (esc(customer.address || order.address || "") + (customer.city ? ", " + esc(customer.city) : "") + (customer.state ? ", " + esc(customer.state) : "") + (customer.pincode ? " - " + esc(customer.pincode) : "")) + '</p>' +
+            adminLocationBlock(order) +
         '</div>' +
+        adminDeliveryBlock(order) +
         '<div class="order-detail-block">' +
             '<h4>Payment</h4>' +
             payBadge(order) +
@@ -480,6 +493,122 @@ var timeline = (order.statusHistory || []).map(function(h) {
 
 function closeOrderDetail() {
     document.getElementById("orderDetailModal").style.display = "none";
+}
+
+// ===============================
+// DELIVERY / LOCATION VIEW (admin)
+// ===============================
+
+function adminAgoText(iso) {
+    if (!iso) return "";
+    var at = new Date(iso).getTime();
+    if (!Number.isFinite(at)) return "";
+    var secs = Math.round((Date.now() - at) / 1000);
+    if (secs < 60) return secs + "s ago";
+    var mins = Math.round(secs / 60);
+    if (mins < 60) return mins + "m ago";
+    var hrs = Math.round(mins / 60);
+    if (hrs < 24) return hrs + "h ago";
+    return Math.round(hrs / 24) + "d ago";
+}
+
+// Customer saved location card (map + open-in-maps, only from stored coords).
+function adminLocationBlock(order) {
+    if (!order.deliveryLocation || !Number.isFinite(Number(order.deliveryLocation.latitude)) || !Number.isFinite(Number(order.deliveryLocation.longitude))) return "";
+    var la = Number(order.deliveryLocation.latitude);
+    var ln = Number(order.deliveryLocation.longitude);
+    return '<p>📍 Saved coords: ' + la.toFixed(5) + ', ' + ln.toFixed(5) + ' ' +
+        '<button type="button" class="row-btn" onclick="showAdminMap(' + la + ',' + ln + ',\'Customer Saved Location\')">View Map</button> ' +
+        '<a class="row-btn" style="text-decoration:none;" href="' + openInMapsHref(la, ln) + '" target="_blank" rel="noopener noreferrer">Open in Maps</a></p>';
+}
+
+// Delivery assignment card. Shows the pipeline state and the partner's live
+// location when assigned; otherwise renders the Assign-partner dropdown.
+function adminDeliveryBlock(order) {
+    var track = order.deliveryTrack || null;
+    if (track && track.status && track.status !== "REJECTED") {
+        var pname = (track.partner && track.partner.name) ? esc(track.partner.name) : "Delivery Partner";
+        var pparts = '<p>Partner: ' + pname + (track.partner && track.partner.phone ? ' · ' + esc(track.partner.phone) : "") + '</p>';
+        var pupdate = "";
+        if (track.partner && Number.isFinite(Number(track.partner.lastLat)) && Number.isFinite(Number(track.partner.lastLng))) {
+            var pla = Number(track.partner.lastLat);
+            var pln = Number(track.partner.lastLng);
+            var age = track.partner.lastLocationAt ? adminAgoText(track.partner.lastLocationAt) : "unknown";
+            if (track.partner.stale) age += " (stale)";
+            pupdate = '<p>🚚 Partner live location: ' + pla.toFixed(5) + ', ' + pln.toFixed(5) + ' (' + age + ') ' +
+                '<button type="button" class="row-btn" onclick="showAdminMap(' + pla + ',' + pln + ',\'Partner Live Location\')">View Map</button> ' +
+                '<a class="row-btn" style="text-decoration:none;" href="' + openInMapsHref(pla, pln) + '" target="_blank" rel="noopener noreferrer">Open in Maps</a></p>';
+        }
+        var stamps = [
+            ["Assigned", track.assignedAt], ["Accepted", track.acceptedAt],
+            ["Picked up", track.pickedUpAt], ["En route", track.enRouteAt],
+            ["Delivered", track.deliveredAt]
+        ].map(function(pair) {
+            return pair[1] ? '<p>' + pair[0] + ': ' + esc(new Date(pair[1]).toLocaleString()) + '</p>' : "";
+        }).join("");
+        return '<div class="order-detail-block"><h4>Delivery</h4>' +
+            '<p>Status: <span class="admin-badge ' + (track.status === "DELIVERED" ? "badge-ok" : "badge-pending") + '">' + esc(track.status) + '</span></p>' +
+            pparts + pupdate + stamps +
+            (track.proofImage ? '<p><a href="' + esc(track.proofImage) + '" target="_blank" rel="noopener noreferrer">View proof image</a></p>' : "") +
+            '</div>';
+    }
+    // No active assignment -> admins can assign a partner (or reassign after reject).
+    return '<div class="order-detail-block"><h4>Delivery</h4>' +
+        '<p>No active delivery partner.</p>' +
+        '<div class="delivery-assign-row">' +
+        '<select id="assignPartnerSelect" class="status-select"><option value="">Select delivery partner…</option></select> ' +
+        '<button type="button" class="row-btn verify" onclick="adminAssignDelivery(\'' + order._id + '\')">Assign</button>' +
+        '</div>' +
+        '<div id="assignPartnerStatus"></div>' +
+        '</div>';
+}
+
+function populateAssignOptions(order) {
+    var sel = document.getElementById("assignPartnerSelect");
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Select delivery partner…</option>';
+    apiAdminDeliveryPartners().then(function(partners) {
+        if (!partners || partners.length === 0) {
+            sel.innerHTML = '<option value="">No delivery partners registered…</option>';
+            return;
+        }
+        partners.forEach(function(p) {
+            var label = p.name + (p.isAvailable ? " (online)" : " (offline)") + (p.stale ? " · no ping" : "");
+            var opt = document.createElement("option");
+            opt.value = p._id;
+            opt.textContent = label;
+            sel.appendChild(opt);
+        });
+    }).catch(function() {
+        sel.innerHTML = '<option value="">Could not load partners. Try again.</option>';
+    });
+}
+
+function adminAssignDelivery(orderId) {
+    var sel = document.getElementById("assignPartnerSelect");
+    var statusEl = document.getElementById("assignPartnerStatus");
+    var userId = sel ? sel.value : "";
+    if (!userId) {
+        if (statusEl) statusEl.innerHTML = '<p style="color:#e74c3c;">Please select a delivery partner first.</p>';
+        return;
+    }
+    if (statusEl) statusEl.innerHTML = '<p style="color:var(--text-secondary);">Assigning…</p>';
+    apiAdminAssignDelivery(orderId, userId).then(function() {
+        if (statusEl) statusEl.innerHTML = '<p style="color:#159447;">✅ Assigned. Refreshing…</p>';
+        setTimeout(function() {
+            apiGetOrder(orderId).then(function(fresh) {
+                showOrderDetail(fresh);
+                loadAdminDelivery();
+                loadAdminOrders();
+            }).catch(function() {});
+        }, 1200);
+    }).catch(function(err) {
+        if (statusEl) statusEl.innerHTML = '<p style="color:#e74c3c;">' + esc((err && err.message) || "Assignment failed") + '</p>';
+    });
+}
+
+function showAdminMap(lat, lng, title) {
+    if (typeof openMapView === "function") openMapView(lat, lng, title);
 }
 
 // ===============================
@@ -761,6 +890,59 @@ function setPfUploading(busy) {
     if (btn) btn.textContent = busy ? "�?� Uploading image…" : "📷 Upload Image / Take Photo";
 }
 
+// Variant editor helpers (pack-size variants: unit / price / stock / active).
+function resetVariantRows() {
+    var box = document.getElementById("pfVariantsList");
+    if (box) box.innerHTML = "";
+}
+
+function addVariantRow(v) {
+    var box = document.getElementById("pfVariantsList");
+    if (!box) return;
+    var row = document.createElement("div");
+    row.className = "admin-variant-row";
+    var unit = (v && v.unit) ? String(v.unit).replace(/"/g, "&quot;") : "";
+    var price = (v && v.price != null) ? v.price : "";
+    var stock = (v && v.stock != null) ? v.stock : "";
+    var active = (v && v.active != null) ? !!v.active : true;
+    if (v && v._id) row.setAttribute("data-id", String(v._id));
+    row.innerHTML =
+        '<input type="text" class="pfv-unit" placeholder="e.g. 500g" value="' + esc(unit) + '" maxlength="24">' +
+        '<input type="number" class="pfv-price" placeholder="Price (₹)" min="0" step="0.01" value="' + esc(String(price)) + '">' +
+        '<input type="number" class="pfv-stock" placeholder="Stock" min="0" step="1" value="' + esc(String(stock)) + '">' +
+        '<label class="pfv-active">Active <input type="checkbox" class="pfv-active-chk" ' + (active ? "checked" : "") + '></label>' +
+        '<button type="button" class="row-btn remove" onclick="removeVariantRow(this)" title="Remove variant">🗑</button>';
+    box.appendChild(row);
+}
+
+function removeVariantRow(btn) {
+    if (btn && btn.parentElement) btn.parentElement.remove();
+}
+
+function collectVariantRows() {
+    var box = document.getElementById("pfVariantsList");
+    if (!box) return [];
+    var rows = box.querySelectorAll(".admin-variant-row");
+    var out = [];
+    for (var i = 0; i < rows.length; i++) {
+        var unit = (rows[i].querySelector(".pfv-unit") || {}).value;
+        var price = parseFloat((rows[i].querySelector(".pfv-price") || {}).value);
+        var stock = parseInt((rows[i].querySelector(".pfv-stock") || {}).value, 10);
+        var chk = rows[i].querySelector(".pfv-active-chk");
+        if (!unit || !String(unit).trim()) continue;
+        if (!(price >= 0) || isNaN(price)) continue;
+        var item = {
+            unit: String(unit).trim(),
+            price: price,
+            stock: (stock >= 0 && !isNaN(stock)) ? stock : 0,
+            active: chk ? chk.checked : true
+        };
+        if (rows[i].getAttribute("data-id")) item._id = rows[i].getAttribute("data-id");
+        out.push(item);
+    }
+    return out;
+}
+
 function openAddProduct() {
     adminEditingId = null;
     document.getElementById("productModalTitle").innerText = "Add Product";
@@ -782,6 +964,7 @@ function openAddProduct() {
     var fileInput = document.getElementById("pfImageFile");
     if (fileInput) fileInput.value = "";
     document.getElementById("pfDescription").value = "";
+    resetVariantRows();
     updateImagePreview();
     document.getElementById("productModal").style.display = "flex";
 }
@@ -812,6 +995,8 @@ function openEditProduct(productId) {
     var fileInput = document.getElementById("pfImageFile");
     if (fileInput) fileInput.value = "";
     document.getElementById("pfDescription").value = p.description || "";
+    resetVariantRows();
+    (p.variants || []).forEach(function(v) { addVariantRow(v); });
     updateImagePreview();
     document.getElementById("productModal").style.display = "flex";
 }
@@ -842,7 +1027,8 @@ function saveProduct(event) {
         ratingCount: parseInt(document.getElementById("pfRatingCount").value, 10),
         image: document.getElementById("pfImageData").value ||
             document.getElementById("pfImage").value.trim(),
-        description: document.getElementById("pfDescription").value.trim()
+        description: document.getElementById("pfDescription").value.trim(),
+        variants: collectVariantRows()
     };
 
     if (!data.name) {
@@ -851,6 +1037,7 @@ function saveProduct(event) {
     }
     if (isNaN(data.rating)) delete data.rating;
     if (isNaN(data.ratingCount)) delete data.ratingCount;
+    if (!data.variants.length) delete data.variants;
 
     var request;
     if (adminEditingId) {
@@ -1005,6 +1192,7 @@ function viewCustomerOrderDetails(orderId) {
     apiGetOrder(orderId)
         .then(function(order) {
             showOrderDetail(order);
+            populateAssignOptions(order);
         })
         .catch(function(err) {
             showToast(err.message || "Failed to load order", "error");
@@ -1056,11 +1244,17 @@ function renderReviews() {
                 '<span class="admin-review-user"> by ' + esc(rev.userName || "Anonymous") + '</span></div>' +
                 '<div class="admin-review-actions">' +
                     '<span class="admin-review-rating">' + (typeof starHTML === "function" ? starHTML(rev.rating) : ("★".repeat(rev.rating) + "★".repeat(5 - rev.rating))) + '</span>' +
-                    '<button class="row-btn remove" onclick="deleteReview(\'' + rev._id + '\', \'' + String(rev.productName || "").replace(/[^a-zA-Z0-9 ]/g, "") + '\')" title="Delete review">🗑�?</button>' +
+                    returnStatusBadge(rev.moderationStatus || "PENDING") +
+                    '<button class="row-btn remove" onclick="deleteReview(\'' + rev._id + '\', \'' + String(rev.productName || "").replace(/[^a-zA-Z0-9 ]/g, "") + '\')" title="Delete review">🗑</button>' +
                 '</div>' +
             '</div>' +
             '<p class="admin-review-comment">' + esc(rev.comment || "") + '</p>' +
             '<div class="admin-review-date">' + date + '</div>' +
+            '<div class="admin-review-actions" style="margin-top:8px;">' +
+                '<button class="row-btn edit" onclick="adminModerate(\'' + rev._id + '\', \'APPROVED\')" title="Approve">✓ Approve</button>' +
+                '<button class="row-btn reject" onclick="adminModerate(\'' + rev._id + '\', \'REJECTED\')" title="Reject">✕ Reject</button>' +
+                '<button class="row-btn edit" onclick="adminModerate(\'' + rev._id + '\', \'HIDDEN\')" title="Hide">🙈 Hide</button>' +
+            '</div>' +
         '</div>';
     });
 
@@ -1076,6 +1270,149 @@ function deleteReview(reviewId, productName) {
         })
         .catch(function(err) {
             showToast(err.message || "Failed to delete review", "error");
+        });
+}
+
+function adminModerate(reviewId, moderationStatus) {
+    var label = moderationStatus === "APPROVED" ? "approve" : (moderationStatus === "REJECTED" ? "reject" : "hide");
+    if (!confirm("Moderate this review: " + moderationStatus + "?")) return;
+    apiModerateReview(reviewId, { moderationStatus: moderationStatus })
+        .then(function() {
+            showToast("Review " + label + "d", "success");
+            loadAdminReviews();
+        })
+        .catch(function(err) {
+            showToast(err.message || "Failed to moderate review", "error");
+        });
+}
+
+var adminReturns = [];
+
+// Valid transitions mirror returnController.TRANSITIONS so the UI can only
+// offer the next step the backend will actually accept.
+var RETURN_TRANSITIONS = {
+    SUBMITTED: ["PROCESSING", "REJECTED"],
+    PROCESSING: ["APPROVED", "REJECTED"],
+    APPROVED: ["REFUND_PENDING", "REPLACEMENT_INITIATED"],
+    REJECTED: [],
+    CANCELLED: [],
+    REFUND_PENDING: ["REFUND_PROCESSED"],
+    REFUND_PROCESSED: ["CLOSED"],
+    REPLACEMENT_INITIATED: ["REPLACEMENT_DELIVERED", "CLOSED"],
+    REPLACEMENT_DELIVERED: ["CLOSED"],
+    CLOSED: []
+};
+
+function returnStatusBadge(status) {
+    var cls = status === "REJECTED" || status === "CANCELLED" ? "badge-reject" :
+        (status === "SUBMITTED" || status === "PROCESSING" ? "badge-pending" : "badge-ok");
+    return '<span class="admin-badge ' + cls + '">' + esc(status) + '</span>';
+}
+
+function loadAdminReturns() {
+    var search = document.getElementById("adminReturnSearch");
+    var s = search ? search.value.trim() : "";
+    var statusFilter = "";
+    if (s) {
+        var up = s.toUpperCase();
+        if (Object.prototype.hasOwnProperty.call(RETURN_TRANSITIONS, up)) statusFilter = up;
+    }
+    var container = document.getElementById("adminReturnsList");
+    if (!container) return;
+    container.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:40px;">Loading returns...</p>';
+    adminListReturns(statusFilter || "ALL")
+        .then(function(list) {
+            adminReturns = list || [];
+            renderAdminReturns();
+        })
+        .catch(function(err) {
+            container.innerHTML = '<p style="text-align:center;color:#e74c3c;padding:40px;">' +
+                esc(err.message || "Failed to load returns.") + '</p>';
+        });
+}
+
+function renderAdminReturns() {
+    var container = document.getElementById("adminReturnsList");
+    if (!container) return;
+    var search = document.getElementById("adminReturnSearch");
+    var s = search ? search.value.trim().toLowerCase() : "";
+
+    if (!adminReturns.length) {
+        container.innerHTML = '<div class="cart-empty"><div class="cart-empty-icon">📦</div><h3>No return requests</h3><p>Customer returns will appear here.</p></div>';
+        return;
+    }
+
+    var list = adminReturns;
+    if (s) {
+        list = adminReturns.filter(function(r) {
+            var orderNum = (r.order && r.order.orderNumber) ? String(r.order.orderNumber) : "";
+            var userLabel = (r.user && r.user.email) ? String(r.user.email) : (r.customer ? String(r.customer.name || "") : "");
+            return orderNum.toLowerCase().indexOf(s) !== -1 ||
+                userLabel.toLowerCase().indexOf(s) !== -1 ||
+                String(r.returnNumber || "").toLowerCase().indexOf(s) !== -1 ||
+                String(r.status || "").toLowerCase().indexOf(s) !== -1;
+        });
+    }
+
+    if (!list.length) {
+        container.innerHTML = '<div class="cart-empty"><div class="cart-empty-icon">🔍</div><h3>No matches</h3><p>Nothing matched your search.</p></div>';
+        return;
+    }
+
+    var html = list.map(function(r) {
+        var next = RETURN_TRANSITIONS[r.status] || [];
+        var refundInfo = "";
+        if (r.refund && r.refund.computedAmount > 0) {
+            refundInfo = '<div class="admin-return-refund">Refundable: ₹' + esc(String(r.refund.computedAmount)) +
+                (r.refund.amount ? ' · Paid: ₹' + esc(String(r.refund.amount)) + ' via ' + esc(r.refund.method || "") : "") + '</div>';
+        }
+        var actions = "";
+        next.forEach(function(ns) {
+            actions += '<button class="row-btn edit" onclick="adminReturnNext(\'' + r._id + '\', \'' + ns + '\')" title="Move to ' + ns + '">' + esc(ns.replace(/_/g, " ")) + '</button>';
+        });
+
+        var itemSummary = (r.items || []).map(function(i) {
+            return esc(i.name) + (i.variantUnit ? " · " + esc(i.variantUnit) : "") + " × " + i.quantity;
+        }).join(", ");
+
+        return '<div class="admin-review-card">' +
+            '<div class="admin-review-head">' +
+                '<div><strong>' + esc(r.returnNumber || "Return") + '</strong>' +
+                '<span class="admin-review-user">' + (r.user ? esc(r.user.name || r.user.email || "User") : esc((r.customer && r.customer.name) || "Guest")) +
+                ' · ' + esc((r.order && r.order.orderNumber) || "No order") + '</span></div>' +
+                '<div class="admin-review-actions">' + returnStatusBadge(r.status) + '</div>' +
+            '</div>' +
+            '<p class="admin-review-comment">' + esc(r.reason || "") + (r.comments ? " — " + esc(r.comments) : "") + '</p>' +
+            '<div class="admin-review-date">' + esc(r.returnType || "") +
+                (r.customer ? " · " + esc(r.customer.phone || "") : "") +
+                (r.proofImage ? ' · <a href="' + esc(r.proofImage) + '" target="_blank" rel="noopener">proof</a>' : "") + '</div>' +
+            '<div class="admin-review-comment" style="font-size:12px;color:var(--text-secondary);">Items: ' + itemSummary + '</div>' +
+            refundInfo +
+            '<div class="admin-review-actions" style="margin-top:8px;">' + actions + '</div>' +
+        '</div>';
+    }).join("");
+    container.innerHTML = html;
+}
+
+function adminReturnNext(id, nextStatus) {
+    if (!confirm("Move this return to " + nextStatus + "?")) return;
+    var body = { status: nextStatus };
+    if (nextStatus === "REFUND_PROCESSED") {
+        var method = prompt("Refund method (cash / upi_transfer / bank_transfer / store_credit):", "cash");
+        if (!method) return;
+        var amount = prompt("Refund amount (₹), max is the computed refundable:", "");
+        if (!amount || isNaN(Number(amount))) { showToast("Valid refund amount required", "error"); return; }
+        var reference = prompt("Refund reference (optional):", "");
+        body.refund = { method: method, amount: Number(amount), reference: reference || "" };
+    }
+    adminUpdateReturnStatus(id, body)
+        .then(function() {
+            showToast("Return updated to " + nextStatus, "success");
+            loadAdminReturns();
+        })
+        .catch(function(err) {
+            showToast(err.message || "Could not update return", "error");
+            loadAdminReturns();
         });
 }
 
@@ -1419,12 +1756,13 @@ function renderAdminCoupons(list) {
         var typeLabel = c.discountType === "percentage" ? esc(c.discountValue) + "% off" : "₹" + esc(c.discountValue) + " off";
         var minNote = c.minimumOrderValue > 0 ? "Min order ₹" + esc(c.minimumOrderValue) : "No min order";
         var usageLabel = c.usageLimit ? (c.usageCount + " / " + c.usageLimit + " used") : (c.usageCount + " used");
+        var perUserLabel = c.perUserLimit ? (" • per-user " + c.perUserLimit) : "";
         var expired = c.expiryDate && new Date(c.expiryDate).getTime() < Date.now();
         var active = c.active && !expired;
         return '<div class="admin-coupon' + (active ? "" : " coupon-inactive") + '">' +
             '<div class="admin-coupon-main">' +
                 '<div class="admin-coupon-code">' + dashEsc(c.code) + '</div>' +
-                '<div class="admin-coupon-meta">' + typeLabel + ' • ' + minNote + ' • ' + usageLabel + ' • expires ' + new Date(c.expiryDate).toLocaleDateString() + '</div>' +
+                '<div class="admin-coupon-meta">' + typeLabel + ' • ' + minNote + ' • ' + usageLabel + perUserLabel + ' • expires ' + new Date(c.expiryDate).toLocaleDateString() + '</div>' +
             '</div>' +
             '<div class="admin-coupon-badges">' +
                 (active
@@ -1475,6 +1813,7 @@ function fillCouponForm(coupon) {
         exp.value = "";
     }
     document.getElementById("cfUsageLimit").value = coupon && coupon.usageLimit ? coupon.usageLimit : "";
+    document.getElementById("cfPerUserLimit").value = coupon && coupon.perUserLimit ? coupon.perUserLimit : "";
     document.getElementById("cfActive").checked = coupon ? !!coupon.active : true;
     document.getElementById("couponModalTitle").textContent = coupon ? "Edit Coupon" : "New Coupon";
     document.getElementById("couponModal").style.display = "flex";
@@ -1495,6 +1834,7 @@ function saveCoupon(event) {
         minimumOrderValue: parseFloat(document.getElementById("cfMinOrder").value) || 0,
         expiryDate: document.getElementById("cfExpiry").value,
         usageLimit: document.getElementById("cfUsageLimit").value ? parseInt(document.getElementById("cfUsageLimit").value, 10) : null,
+        perUserLimit: document.getElementById("cfPerUserLimit").value ? parseInt(document.getElementById("cfPerUserLimit").value, 10) : null,
         active: document.getElementById("cfActive").checked
     };
     var fn = id && id.length ? apiUpdateCoupon(id, payload) : apiCreateCoupon(payload);

@@ -231,6 +231,27 @@
             const cardClass = rank >= 0 ? 'delivery-card' : 'delivery-card delivered';
             const proofImage = assignment.proofImage || '';
 
+            // Customer saved-location actions (map + open-in-maps).
+            let locActions = '';
+            if (order.deliveryLocation && Number.isFinite(Number(order.deliveryLocation.latitude)) && Number.isFinite(Number(order.deliveryLocation.longitude))) {
+                const dLat = Number(order.deliveryLocation.latitude);
+                const dLng = Number(order.deliveryLocation.longitude);
+                locActions = `
+                    <div class="detail-row">
+                        <strong>Location:</strong>
+                        <button type="button" class="loc-secondary-btn" onclick="viewDeliveryMap(${dLat}, ${dLng}, 'Customer Delivery Location')">View Map</button>
+                        <a class="loc-secondary-btn" style="text-decoration:none;display:inline-block;" href="${openInMapsHref(dLat, dLng)}" target="_blank" rel="noopener noreferrer">Open in Maps</a>
+                    </div>`;
+            }
+
+            // Live-location sharing bar (available while an assignment is active).
+            const isTerminal = status === "DELIVERED" || status === "REJECTED" || status === "CANCELLED";
+            const shareBar = isTerminal ? '' : `
+                <div class="loc-share-bar" data-id="${assignment._id}">
+                    <button type="button" class="loc-action-btn share-live-btn" data-id="${assignment._id}" onclick="toggleLiveShare(this)">📡 Share My Live Location</button>
+                    <span class="loc-share-pill">Live location sharing…</span>
+                </div>`;
+
             return `
                 <div class="delivery-card ${cardClass}" data-assignment-id="${assignment._id}">
                     ${proofImage ? `
@@ -256,6 +277,7 @@
                         <div class="detail-row">
                             <strong>Address:</strong> ${address}
                         </div>
+                        ${locActions}
                         <div class="detail-row">
                             <strong>Slot:</strong> ${deliverySlot}
                         </div>
@@ -267,6 +289,7 @@
                         <strong>₹${Number(amount).toLocaleString('en-IN')}</strong>
                         <span class="payment-method">${paymentMethod}</span>
                     </div>
+                    ${shareBar}
                     <div class="delivery-actions">
                         ${actionsHtml}
                     </div>
@@ -415,6 +438,67 @@
                 status: "DELIVERED",
                 otp: otp
             });
+            // Delivery complete -> stop sharing the live location for this run.
+            if (typeof stopLiveShare === "function") stopLiveShare(assignmentId, true);
+        }
+
+        // ===============================
+        // LIVE LOCATION SHARING (partner)
+        // ===============================
+
+        const liveShareTimers = {};
+
+        function viewDeliveryMap(lat, lng, title) {
+            if (typeof openMapView === "function") openMapView(lat, lng, title);
+        }
+
+        function toggleLiveShare(btn) {
+            const id = btn && btn.getAttribute("data-id");
+            if (!id) return;
+            if (liveShareTimers[id]) stopLiveShare(id, false);
+            else startLiveShare(btn, id);
+        }
+
+        // Pushes the partner's real device position once (graceful denial).
+        function pushLiveLocation(id) {
+            return captureCurrentLocation().then(function(loc) {
+                return apiDeliveryShareLocation(loc.latitude, loc.longitude);
+            });
+        }
+
+        function startLiveShare(btn, id) {
+            const bar = btn && btn.parentElement;
+            const pill = bar ? bar.querySelector(".loc-share-pill") : null;
+            const setUi = (on) => {
+                if (btn) btn.textContent = on ? "⏹ Stop Sharing Location" : "📡 Share My Live Location";
+                if (pill) pill.style.display = on ? "inline-block" : "none";
+            };
+            pushLiveLocation(id).then(function() {
+                // Refresh every 15s while sharing; failures never break the loop.
+                liveShareTimers[id] = setInterval(function() {
+                    pushLiveLocation(id).catch(function() { /* transient error — keep trying */ });
+                }, 15000);
+                setUi(true);
+                showToast("Live location sharing started.", "success");
+            }).catch(function(err) {
+                setUi(false);
+                showToast((err && err.message) || "Could not start location sharing.", "error");
+            });
+        }
+
+        function stopLiveShare(id, quiet) {
+            if (liveShareTimers[id]) {
+                clearInterval(liveShareTimers[id]);
+                delete liveShareTimers[id];
+            }
+            const bar = document.querySelector('.loc-share-bar[data-id="' + id + '"]');
+            if (bar) {
+                const btn = bar.querySelector(".share-live-btn");
+                const pill = bar.querySelector(".loc-share-pill");
+                if (btn) btn.textContent = "📡 Share My Live Location";
+                if (pill) pill.style.display = "none";
+            }
+            if (!quiet) showToast("Live location sharing stopped.", "info");
         }
 
         // ===============================

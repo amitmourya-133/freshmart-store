@@ -42,6 +42,11 @@
             <fieldset class="checkout-fieldset">
                 <legend class="sr-only">Delivery details</legend>
 
+                <div id="savedAddrWrap" style="display:none;">
+                    <label>Saved Address</label>
+                    <div class="saved-addr-list" id="savedAddrList"></div>
+                </div>
+
                 <label for="customerName">Full Name</label>
 
                 <input
@@ -110,6 +115,18 @@
                 />
 
                 <div id="pincodeHint" class="pincode-hint" style="display:none;"></div>
+
+                <div class="loc-row">
+                    <button type="button" class="loc-action-btn" id="useLocBtn" onclick="captureCheckoutLocation()">📍 Use My Current Location</button>
+                    <span class="loc-captured" id="locCaptured"></span>
+                    <button type="button" class="loc-secondary-btn" id="clearLocBtn" style="display:none;" onclick="clearCheckoutLocation()">✕ Clear</button>
+                </div>
+                <div class="loc-err" id="locErr"></div>
+                <p class="loc-note">Optional — helps the delivery partner find your exact door. You can still place the order without sharing a location.</p>
+                <input type="hidden" id="deliveryLat">
+                <input type="hidden" id="deliveryLng">
+                <input type="hidden" id="deliveryAcc">
+                <input type="hidden" id="deliveryLocAt">
 
             </fieldset>
 

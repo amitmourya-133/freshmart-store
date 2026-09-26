@@ -4,8 +4,21 @@
 
 const Product = require("../models/Product");
 const mongoose = require("mongoose");
+const InventoryLog = require("../models/InventoryLog");
 const { normalizeProductImage, parseImageDataUri } = require("../utils/productImage");
 const { uploadImageBytes } = require("../utils/cloudinary");
+const { normalizeVariants } = require("../utils/variants");
+
+// Audit helper: record a stock movement (root or variant) and keep the trail
+// queryable from the admin inventory panel.
+async function logStockChange(entry) {
+    try {
+        await InventoryLog.create(entry);
+    } catch (e) {
+        // Logging must never break the business operation that triggered it.
+        console.error("InventoryLog write failed:", e.message);
+    }
+}
 
 function isBadObjectId(id) {
     return !mongoose.Types.ObjectId.isValid(String(id || ""));
@@ -93,8 +106,21 @@ exports.createProduct = async (req, res) => {
             }
             body.stock = Math.floor(s);
         }
+        if (body.variants !== undefined) {
+            const { variants } = normalizeVariants(body.variants);
+            body.variants = variants;
+        }
         if (body.image !== undefined) body.image = normalizeProductImage(body.image);
         const product = await Product.create(body);
+        // Audit the starting stock levels of any created variants.
+        if (product.variants && product.variants.length) {
+            for (const v of product.variants) {
+                await logStockChange({
+                    product: product._id, variantId: v._id, scope: "variant", change: v.stock,
+                    previousStock: 0, newStock: v.stock, reason: "variant_created", changedByType: "admin", changedBy: req.user ? req.user._id : null, note: product.name
+                });
+            }
+        }
         res.status(201).json({ success: true, data: product });
     } catch (error) {
         res.status(400).json({ success: false, message: error.message });
@@ -108,7 +134,7 @@ exports.updateProduct = async (req, res) => {
             return res.status(404).json({ success: false, message: "Product not found" });
         }
         const updates = {};
-        const allowed = ["name", "unit", "category", "emoji", "gradient", "description", "nutrition", "tips", "origin", "active", "rating", "ratingCount", "image"];
+        const allowed = ["name", "unit", "category", "emoji", "gradient", "description", "nutrition", "tips", "origin", "active", "rating", "ratingCount", "image", "variants"];
         allowed.forEach((k) => {
             if (req.body[k] !== undefined) updates[k] = req.body[k];
         });
@@ -127,12 +153,41 @@ exports.updateProduct = async (req, res) => {
             }
             updates.stock = Math.floor(s);
         }
+        let previousProduct = null;
+        if (updates.variants !== undefined) {
+            const { variants } = normalizeVariants(updates.variants);
+            previousProduct = await Product.findById(req.params.id);
+            if (!previousProduct) {
+                return res.status(404).json({ success: false, message: "Product not found" });
+            }
+            updates.variants = variants;
+        }
         const product = await Product.findByIdAndUpdate(req.params.id, updates, {
             new: true,
             runValidators: true
         });
         if (!product) {
             return res.status(404).json({ success: false, message: "Product not found" });
+        }
+        // Audit variant stock deltas caused by this admin edit. New variants log
+        // their full starting stock; changed ones log previous -> new.
+        if (updates.variants && product.variants) {
+            const beforeMap = new Map((previousProduct && previousProduct.variants || []).map(function (v) { return [String(v._id), v]; }));
+            for (const v of product.variants) {
+                const before = beforeMap.get(String(v._id));
+                if (!before) {
+                    await logStockChange({
+                        product: product._id, variantId: v._id, scope: "variant", change: v.stock,
+                        previousStock: 0, newStock: v.stock, reason: "variant_created", changedByType: "admin", changedBy: req.user ? req.user._id : null, note: product.name
+                    });
+                } else if (before.stock !== v.stock) {
+                    const delta = v.stock - before.stock;
+                    await logStockChange({
+                        product: product._id, variantId: v._id, scope: "variant", change: delta,
+                        previousStock: before.stock, newStock: v.stock, reason: "variant_updated", changedByType: "admin", changedBy: req.user ? req.user._id : null, note: product.name
+                    });
+                }
+            }
         }
         res.json({ success: true, data: product });
     } catch (error) {
@@ -177,8 +232,15 @@ exports.updateStock = async (req, res) => {
         if (!product) {
             return res.status(404).json({ success: false, message: "Product not found" });
         }
+        const previousStock = product.stock;
         product.stock = Math.floor(s);
         await product.save();
+        if (product.stock !== previousStock) {
+            await logStockChange({
+                product: product._id, variantId: null, scope: "stock", change: product.stock - previousStock,
+                previousStock: previousStock, newStock: product.stock, reason: "admin_update", changedByType: "admin", changedBy: req.user ? req.user._id : null, note: product.name
+            });
+        }
         res.json({ success: true, data: product });
     } catch (error) {
         res.status(400).json({ success: false, message: error.message });

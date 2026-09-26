@@ -135,13 +135,19 @@ function wantsToken(req) {
     return req.get("X-Request-Token") === "1" || String(req.query.token || "").toLowerCase() === "1";
 }
 
+// HTTPS detection is per-request: Vercel terminates TLS at the proxy
+// (x-forwarded-proto=https), while local dev runs plain http and would reject
+// a Secure cookie. Shared by the session cookie and the OAuth state cookie.
+function isSecureRequest(req) {
+    const forwardedProto = req.headers["x-forwarded-proto"];
+    return forwardedProto ? String(forwardedProto).split(",")[0].trim() === "https" : req.secure;
+}
+
 // HttpOnly session cookie options. The JWT is delivered in an httpOnly cookie
 // so page JS (and therefore any XSS payload) can never read it; `secure` is
-// detected per-request (Vercel terminates TLS at the proxy -> x-forwarded-proto
-// is https, while local dev runs plain http and would reject a Secure cookie).
+// detected per-request.
 function sessionCookieOptions(req) {
-    const forwardedProto = req.headers["x-forwarded-proto"];
-    const isHttps = forwardedProto ? String(forwardedProto).split(",")[0].trim() === "https" : req.secure;
+    const isHttps = isSecureRequest(req);
     return {
         httpOnly: true,
         sameSite: "lax",
@@ -588,10 +594,14 @@ exports.googleAuthStart = async (req, res) => {
         });
     }
     const state = googleAuth.randomState();
+    // Short-lived HttpOnly CSRF state cookie. Match the session cookie's
+    // Secure flag per-request so the state only travels over HTTPS in
+    // production (never in plain HTTP query strings).
+    const stateSecure = isSecureRequest(req) ? "; Secure" : "";
     res.setHeader(
         "Set-Cookie",
         "freshmart_oauth_state=" + state +
-        "; Path=/; HttpOnly; SameSite=Lax; Max-Age=300"
+        "; Path=/; HttpOnly; SameSite=Lax; Max-Age=300" + stateSecure
     );
     res.redirect(302, googleAuth.buildAuthorizeUrl(state));
 };
@@ -656,13 +666,26 @@ exports.googleLogin = async (req, res) => {
                 await user.save();
             } else {
                 // Google has already verified this email, so no OTP is needed.
-                user = await User.create({
-                    name: claims.name || claims.email.split("@")[0],
-                    email: claims.email,
-                    googleId: claims.sub,
-                    password: googleAuth.randomPassword(),
-                    emailVerified: true
-                });
+                // Wrap in a single duplicate-key retry so a race (two concurrent
+                // Google logins for the same brand-new account) cannot crash the
+                // request even after MongoDB gains a unique googleId index.
+                try {
+                    user = await User.create({
+                        name: claims.name || claims.email.split("@")[0],
+                        email: claims.email,
+                        googleId: claims.sub,
+                        password: googleAuth.randomPassword(),
+                        emailVerified: true
+                    });
+                } catch (raceError) {
+                    if (raceError && raceError.code === 11000) {
+                        user = await User.findOne({ email: claims.email }) ||
+                            await User.findOne({ googleId: claims.sub });
+                        if (!user) throw raceError;
+                    } else {
+                        throw raceError;
+                    }
+                }
             }
         }
 

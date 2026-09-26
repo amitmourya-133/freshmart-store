@@ -9,7 +9,10 @@ const cartItemSchema = new mongoose.Schema(
         product: { type: mongoose.Schema.Types.ObjectId, ref: "Product", required: true },
         quantity: { type: Number, required: true, min: 1, max: 99 },
         weight: { type: String, default: null },
-        unit: { type: String, default: null }
+        unit: { type: String, default: null },
+        // Pack-size variant id/unit when the product sells fixed-size variants.
+        variantId: { type: mongoose.Schema.Types.ObjectId, default: null },
+        variantUnit: { type: String, default: null }
     },
     { _id: false }
 );
