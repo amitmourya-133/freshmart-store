@@ -176,6 +176,12 @@ function normalizeDeliveryLocation(loc) {
     if (Math.abs(lat) > 90 || Math.abs(lng) > 180) {
         throw { status: 400, message: "Delivery location coordinates are out of range" };
     }
+    // Explicit (0,0) is never a real delivery point — it is the classic
+    // "empty or missing GPS became 0" fallback. Reject it outright so a bogus
+    // Gulf-of-Guinea destination can never be recorded or forwarded.
+    if (lat === 0 && lng === 0) {
+        throw { status: 400, message: "Delivery location coordinates are missing (0,0)" };
+    }
     if (Number.isFinite(accuracy) && (accuracy < 0 || accuracy > 5000)) {
         throw { status: 400, message: "Invalid delivery location accuracy" };
     }
