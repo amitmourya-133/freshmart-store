@@ -1103,32 +1103,74 @@ function apiAdminAssignDelivery(orderId, deliveryUserId) {
 
 // ---------- GEOLOCATION + MAPS (shared UI helpers) ----------
 
-// "Use My Current Location" capture with graceful degradation. Rejects with a
-// user-friendly message when the browser lacks geolocation or access is denied.
+// "Use My Current Location" capture with graceful degradation and DISTINCT
+// handling for every failure mode (denied / unavailable / timeout / insecure /
+// unsupported). Each rejection carries a stable `locCode` so callers and the
+// regression suite can branch on the real cause instead of a generic string.
+function locError(code, message) {
+    var e = new Error(message);
+    e.locCode = code;
+    return e;
+}
+
+// Map a browser PositionError (or a thrown error) to a {locCode, message}.
+function geolocationErrorFor(err) {
+    var c = err && err.code;
+    if (c === 1) {
+        return locError("denied", "Location permission was blocked. Please allow Location for Chrome/FreshMart in your device's settings, then tap \"Use My Current Location\" again.");
+    }
+    if (c === 2) {
+        return locError("unavailable", "Your location could not be determined right now. Move near a window or step outdoors and tap \"Use My Current Location\" again.");
+    }
+    if (c === 3) {
+        return locError("timeout", "We couldn't get your location in time. Tap \"Use My Current Location\" again — sharing it outdoors gives the most accurate pin.");
+    }
+    return locError("unavailable", "Location is unavailable right now. Please try again, or enter your address manually.");
+}
+
+// Fresh, high-accuracy fix. maximumAge:0 FORCES the browser to ask the radio/GPS
+// stack instead of replaying a stale cached position, so the shared pin is the
+// customer's current whereabouts — never an old one. A generous timeout avoids
+// Android Chrome's cold-start GPS taking longer than the timeout.
 function captureCurrentLocation() {
     return new Promise(function(resolve, reject) {
-        if (!("geolocation" in navigator)) {
-            reject(new Error("Location sharing is not supported by this browser. Please enter your address manually."));
+        if (typeof navigator === "undefined" || !navigator || !navigator.geolocation) {
+            reject(locError("unsupported", "Location sharing is not supported by this browser. Please enter your address manually, or pick your spot on the map."));
             return;
         }
-        navigator.geolocation.getCurrentPosition(
-            function(pos) {
-                if (!pos || !pos.coords) {
-                    reject(new Error("Could not read your location."));
-                    return;
-                }
-                resolve({
-                    latitude: pos.coords.latitude,
-                    longitude: pos.coords.longitude,
-                    accuracy: pos.coords.accuracy != null ? Math.round(pos.coords.accuracy) : null,
-                    capturedAt: new Date().toISOString()
-                });
-            },
-            function() {
-                reject(new Error("Location access was denied or unavailable. You can still enter your address manually."));
-            },
-            { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-        );
+        var ctx = (typeof window !== "undefined" && typeof window.isSecureContext === "boolean") ? window.isSecureContext : true;
+        if (!ctx) {
+            reject(locError("insecure", "Location sharing needs a secure (HTTPS) connection. Please open this page over https:// and try again."));
+            return;
+        }
+        var geo = navigator.geolocation;
+        var done = false;
+        var finish = function(pos) {
+            if (done) return;
+            done = true;
+            if (!pos || !pos.coords || pos.coords.latitude == null || pos.coords.longitude == null ||
+                !Number.isFinite(Number(pos.coords.latitude)) || !Number.isFinite(Number(pos.coords.longitude))) {
+                reject(locError("unavailable", "Could not read your location. Please try again."));
+                return;
+            }
+            var acc = pos.coords.accuracy;
+            resolve({
+                latitude: Number(pos.coords.latitude),
+                longitude: Number(pos.coords.longitude),
+                accuracy: acc != null && Number.isFinite(Number(acc)) ? Math.round(Number(acc) * 10) / 10 : null,
+                capturedAt: new Date().toISOString()
+            });
+        };
+        var fail = function(err) {
+            if (done) return;
+            done = true;
+            reject(geolocationErrorFor(err));
+        };
+        try {
+            geo.getCurrentPosition(finish, fail, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+        } catch (syncErr) {
+            fail(syncErr);
+        }
     });
 }
 
@@ -1165,20 +1207,40 @@ function parseCoord(raw) {
     return n;
 }
 
-// Build a validated deliveryLocation payload for the order from raw field
-// values (the same inputs the checkout reads). Returns null when ANY axis is
-// missing/invalid — the caller must then omit coordinates entirely (never 0).
-function deliveryLocationPayload(latRaw, lngRaw, accRaw, atRaw) {
+// Canonical captured-location object — the ONE shape shared by the mini-map,
+// the map picker, the checkout payload, and every downstream consumer
+// (admin/delivery partner maps read the very same object off the stored order).
+// Returns null for any missing/invalid axis (never 0, never partial coords).
+function canonicalLocation(latRaw, lngRaw, accRaw, atRaw) {
     var v = toValidLatLng(latRaw, lngRaw);
     if (!v) return null;
-    var accNum = parseCoord(accRaw);
     var loc = {
         latitude: Math.round(v.latitude * 1e6) / 1e6,
         longitude: Math.round(v.longitude * 1e6) / 1e6,
         capturedAt: (atRaw && String(atRaw).trim()) ? String(atRaw).trim() : new Date().toISOString()
     };
-    if (accNum !== null && accNum >= 0 && accNum <= 5000) loc.accuracy = Math.round(accNum);
+    var accNum = parseCoord(accRaw);
+    if (accNum !== null && accNum >= 0 && accNum <= 5000) loc.accuracy = Math.round(accNum * 10) / 10;
     return loc;
+}
+
+// The shipping payload is exactly the canonical object (same 1e-6 precision,
+// same accuracy rounding) so what the customer sees on the map is 1:1 with
+// what the delivery partner receives.
+function deliveryLocationPayload(latRaw, lngRaw, accRaw, atRaw) {
+    return canonicalLocation(latRaw, lngRaw, accRaw, atRaw);
+}
+
+// Last-line pre-submit guard for requirement "same selected location reaches
+// the order". A captured pin must travel with an address derived from THOSE
+// coordinates (synced) or one the customer explicitly fixed afterwards
+// (manual). A pin combined with untouched old-saved text (unsynced) is refused.
+// Pure/stateless so the regression suite can exercise every branch.
+function locationSubmitGuard(meta) {
+    if (!meta || !meta.pin) return { ok: true, state: "no-pin" };
+    if (meta.synced) return { ok: true, state: "synced" };
+    if (meta.handledManually) return { ok: true, state: "manual" };
+    return { ok: false, state: "unsynced", message: "We captured your pin, but its address was not auto-filled. Please confirm it on the map, or enter your street, city and pincode for your pin." };
 }
 
 // Google Maps link builder. REFUSES to create a URL for missing/invalid/0,0
@@ -1256,14 +1318,18 @@ function openMapView(lat, lng, title) {
 // a coarse GPS point (the usual cause of a "wrong location" being shared).
 
 // Map OSM Nominatim "address" components into FreshMart's address fields.
+// Uses a professional fallback hierarchy and NEVER invents data: empty inputs
+// produce empty outputs. town/village/municipality belong to the CITY field and
+// are NOT duplicated into the address line (neighbourhood/suburb are the
+// locality tokens that belong on the street line).
 function geocodeToAddress(nominatimData) {
     var a = (nominatimData && nominatimData.address) || {};
     var road = a.road || a.pedestrian || a.footway || a.service || a.residential || a.highway || "";
     var house = a.house_number || "";
-    var area = a.neighbourhood || a.suburb || a.city_district || a.village || a.hamlet || a.town || "";
+    var area = a.neighbourhood || a.suburb || a.city_district || a.hamlet || "";
     var addressLine = [house, road, area].filter(function(v) { return Boolean(v); }).join(", ");
     var city = a.city || a.town || a.village || a.municipality || a.county || a.city_district || a.state_district || "";
-    var state = a.state || a.state_district || "";
+    var state = a.state || a.state_district || a.county || a.region || "";
     var pincode = a.postcode || "";
     var full = [];
     if (addressLine) full.push(addressLine);
@@ -1363,7 +1429,10 @@ function openMapPicker(opts) {
     var startLat = Number(opts.lat);
     var startLng = Number(opts.lng);
     var hasFix = Number.isFinite(startLat) && Number.isFinite(startLng);
-    if (!hasFix) { startLat = 28.6139; startLng = 77.2090; }
+    // NO fake/default marker and NO 0,0. Without a confirmed GPS fix the map
+    // opens on a neutral country-level view (India centre) so the customer
+    // still sees India instead of blank water — and must place their own pin.
+    if (!hasFix) { startLat = 21.8; startLng = 77.5; }
     var accuracy = Number(opts.accuracy);
     if (!Number.isFinite(accuracy) || accuracy <= 0) accuracy = 0;
     var title = opts.title || "Set your delivery location";
@@ -1664,5 +1733,5 @@ function openMapPicker(opts) {
 // Node-visible surface used ONLY by automated regression suites — harmless in
 // the browser (typeof module is undefined there).
 if (typeof module !== "undefined" && module.exports) {
-    module.exports = { toValidLatLng: toValidLatLng, parseCoord: parseCoord, deliveryLocationPayload: deliveryLocationPayload, openInMapsHref: openInMapsHref, openMapView: openMapView, API: API };
+    module.exports = { toValidLatLng: toValidLatLng, parseCoord: parseCoord, canonicalLocation: canonicalLocation, deliveryLocationPayload: deliveryLocationPayload, locationSubmitGuard: locationSubmitGuard, geocodeToAddress: geocodeToAddress, captureCurrentLocation: captureCurrentLocation, geolocationErrorFor: geolocationErrorFor, openInMapsHref: openInMapsHref, openMapView: openMapView, API: API };
 }
