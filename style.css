@@ -4570,7 +4570,370 @@ body.dark-mode .auth-page {
     .order-summary {
         position: static;
     }
-    .checkout-container {
+.checkout-container {
         grid-template-columns: 1fr;
     }
+}
+
+/* ===============================
+   FRESHMART - DELIVERY PARTNER PANEL
+================================ */
+
+[data-page="delivery"] header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 5%;
+    background: var(--bg-secondary);
+    box-shadow: var(--shadow-sm);
+}
+
+[data-page="delivery"] main {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 28px 5% 40px;
+}
+
+[data-page="delivery"] footer {
+    text-align: center;
+    padding: 24px;
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+.delivery-header {
+    text-align: center;
+}
+
+.delivery-header h1 {
+    font-size: 28px;
+    color: var(--text-primary);
+    margin-bottom: 14px;
+}
+
+.availability-toggle {
+    display: flex;
+    justify-content: center;
+    margin: 6px 0 12px;
+}
+
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 52px;
+    height: 28px;
+}
+
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    inset: 0;
+    background: var(--border-color);
+    transition: var(--transition);
+    border-radius: 28px;
+}
+
+.slider:before {
+    content: "";
+    position: absolute;
+    height: 20px;
+    width: 20px;
+    left: 4px;
+    bottom: 4px;
+    background: #ffffff;
+    transition: var(--transition);
+    border-radius: 50%;
+}
+
+.switch input:checked + .slider {
+    background: var(--green-primary);
+}
+
+.switch input:checked + .slider:before {
+    transform: translateX(24px);
+}
+
+.switch input:disabled + .slider {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.earnings-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    justify-content: center;
+}
+
+.earning-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 14px 22px;
+    min-width: 130px;
+    box-shadow: var(--shadow-sm);
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+.earning-card .amount {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--green-primary);
+    margin-top: 4px;
+}
+
+.assignments h2 {
+    font-size: 20px;
+    color: var(--text-primary);
+    margin-bottom: 14px;
+    text-align: center;
+}
+
+.empty-state {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: 30px 0;
+    font-size: 15px;
+    display: none;
+}
+
+.assignments-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.delivery-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 18px;
+    box-shadow: var(--shadow-sm);
+    transition: var(--transition);
+}
+
+.delivery-card.delivered {
+    opacity: 0.75;
+}
+
+.delivery-proof {
+    margin-bottom: 12px;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.delivery-proof img {
+    display: block;
+    width: 100%;
+    max-height: 220px;
+    object-fit: cover;
+}
+
+.delivery-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.delivery-time {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 20px;
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+}
+
+.delivery-details {
+    display: grid;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.detail-row {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+.detail-row strong {
+    color: var(--text-primary);
+    margin-right: 6px;
+}
+
+.detail-row a {
+    color: var(--green-primary);
+}
+
+.delivery-items {
+    font-size: 14px;
+    color: var(--text-secondary);
+    padding: 10px 0;
+    border-top: 1px dashed var(--border-color);
+    border-bottom: 1px dashed var(--border-color);
+    margin-bottom: 12px;
+}
+
+.delivery-items strong {
+    color: var(--text-primary);
+}
+
+.delivery-amount {
+    font-size: 18px;
+    margin-bottom: 12px;
+    color: var(--text-primary);
+}
+
+.delivery-amount strong {
+    color: var(--green-primary);
+}
+
+.delivery-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.action-btn {
+    padding: 9px 18px;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition);
+    color: #ffffff;
+}
+
+.action-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.action-btn.accept {
+    background: var(--green-primary);
+}
+
+.action-btn.accept:hover:not(:disabled) {
+    background: var(--green-dark);
+}
+
+.action-btn.reject {
+    background: #dc3545;
+}
+
+.action-btn.reject:hover:not(:disabled) {
+    background: #b02a37;
+}
+
+.action-btn.pickup {
+    background: #0d6efd;
+}
+
+.action-btn.pickup:hover:not(:disabled) {
+    background: #0a58ca;
+}
+
+.action-btn.start {
+    background: #fd7e14;
+}
+
+.action-btn.start:hover:not(:disabled) {
+    background: #e86f0c;
+}
+
+.action-btn.proof {
+    background: #6f42c1;
+}
+
+.action-btn.proof:hover:not(:disabled) {
+    background: #5b33a3;
+}
+
+.action-btn.deliver {
+    background: var(--green-primary);
+}
+
+.action-btn.deliver:hover:not(:disabled) {
+    background: var(--green-dark);
+}
+
+body.dark-mode [data-page="delivery"] .delivery-proof img {
+    filter: brightness(0.9);
+}
+
+/* ---------- TOAST (delivery page) ---------- */
+[data-page="delivery"] .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--text-primary);
+    color: var(--bg-secondary);
+    padding: 12px 22px;
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    z-index: 9999;
+    box-shadow: var(--shadow-lg);
+}
+
+@media (max-width: 768px) {
+    [data-page="delivery"] .delivery-header {
+        flex-direction: column;
+        gap: 10px;
+        text-align: center;
+    }
+    .delivery-card {
+        padding: 14px;
+    }
+    .delivery-actions {
+        flex-direction: column;
+    }
+    .action-btn {
+        width: 100%;
+    }
+}
+
+/* ===============================
+   R14 - Notifications inbox / bell
+   =============================== */
+
+.fm-notif-badge {
+    position: relative;
+    top: -8px;
+    left: 2px;
+    background: #e74c3c;
+    color: #fff;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    padding: 3px 5px;
+    min-width: 16px;
+    text-align: center;
+}
+
+.fm-notif-card {
+    border-left: 4px solid #159447;
+    transition: opacity 0.2s ease;
+}
+
+.fm-notif-card.fm-notif-read {
+    border-left-color: #bbb;
+    opacity: 0.7;
 }

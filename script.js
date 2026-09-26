@@ -366,7 +366,7 @@ function redirectAfterLoginCheck(url) {
 // ===============================
 
 // Pages that a customer may only see after signing in.
-var AUTH_PROTECTED_PAGES = ["checkout", "orders", "help"];
+var AUTH_PROTECTED_PAGES = ["checkout", "orders", "help", "profile", "notifications"];
 
 function isProtectedPage(page) {
     return AUTH_PROTECTED_PAGES.indexOf(page) !== -1;
@@ -439,7 +439,7 @@ function updateAuthHeader() {
     var name = getAuthUserName();
     if (isLoggedIn() && name) {
         var safeName = String(name).replace(/[&<>"']/g, function(ch) {
-            return { "&": "&", "<": "<", ">": ">", '"': """, "'": "'" }[ch];
+            return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
         });
         var auth = getAuthUser() || {};
         var isAdminUser = auth.role === "admin" || auth.isAdmin;
@@ -449,15 +449,18 @@ function updateAuthHeader() {
         var nameBtnOnclick = isAdminUser ? "window.location.href='admin.html'" : "";
         // Profile button for all users (customer or admin)
         var profileBtn = '<button type="button" class="secondary-btn auth-name-btn" title="My Profile" onclick="window.location.href=\'profile.html\'">👤 Profile</button>';
-        area.innerHTML = adminBtn +
+        // Notifications bell (R14)
+        var bellBtn = '<button type="button" class="secondary-btn auth-name-btn fm-notif-bell" title="Notifications" onclick="window.location.href=\'notifications.html\'">🔔<span class="fm-notif-badge" id="notifBadge" style="display:none;"></span></button>';
+        area.innerHTML = bellBtn +
+            adminBtn +
             profileBtn +
             '<button type="button" class="secondary-btn hide-on-mobile-nav" onclick="window.location.href=\'help.html\'" title="Contact FreshMart Support">🆘 Help Center</button>' +
             '<button type="button" class="secondary-btn auth-name-btn" title="' + safeName + '"' + (nameBtnOnclick ? ' onclick="' + nameBtnOnclick + '"' : '') + '>👤 ' + safeName + '</button>' +
             '<button type="button" class="secondary-btn hide-on-mobile-nav" onclick="handleLogout()">Logout</button>';
+        updateNotifBadge();
     } else {
         area.innerHTML = '<button type="button" class="secondary-btn" onclick="window.location.href=\'signup.html\'">Create Account</button>' +
             '<button type="button" class="secondary-btn" onclick="window.location.href=\'login.html\'">Login</button>';
-    }
 }
 }
 
@@ -467,6 +470,23 @@ function requireAuthForCheckout() {
     storeAuthRedirect("checkout.html");
     window.location.href = "login.html";
     return false;
+}
+
+// Refresh the bell badge with the unread notification count (cookie-authed).
+function updateNotifBadge() {
+    var badge = document.getElementById("notifBadge");
+    if (!badge || !isLoggedIn()) return;
+    if (typeof apiUnreadCount !== "function") return;
+    apiUnreadCount()
+        .then(function(n) {
+            if (n > 0) {
+                badge.style.display = "inline-block";
+                badge.textContent = n > 99 ? "99+" : String(n);
+            } else {
+                badge.style.display = "none";
+            }
+        })
+        .catch(function() { /* non-fatal */ });
 }
 
 // ===============================
@@ -2819,6 +2839,12 @@ function initializePage() {
     loadWishlist();
     updateAuthHeader();
     initBottomNav();
+    initPwaHooks();
+
+    // Keep the notification bell fresh while the tab is open (cookie-authed).
+    if (typeof setInterval === "function") {
+        setInterval(function() { if (isLoggedIn()) updateNotifBadge(); }, 60000);
+    }
 
     // Refresh the stored profile with the backend role so the header can show the
     // Admin button for admins (even for sessions created before role was persisted).
@@ -2872,6 +2898,12 @@ function initializePage() {
         } else if (page === "detail") {
             loadCart();
             loadProductDetail();
+        } else if (page === "profile") {
+            loadCart();
+            if (typeof initProfile === "function") initProfile();
+        } else if (page === "notifications") {
+            loadCart();
+            if (typeof loadNotifications === "function") loadNotifications();
         } else {
             loadCart();
         }
@@ -2905,6 +2937,28 @@ function initializePage() {
 }
 
 document.addEventListener("DOMContentLoaded", initializePage);
+
+// ===============================
+// PWA HOOKS — manifest link + service worker registration.
+// Runs on every page (script.js is loaded site-wide). Network-first SW means
+// cached assets are only a fallback, so content is never stale.
+// ===============================
+function initPwaHooks() {
+    if (!window.location.protocol.match(/^(https?:)$/)) return;
+    if (!document.querySelector('link[rel="manifest"]')) {
+        var link = document.createElement("link");
+        link.rel = "manifest";
+        link.href = "manifest.json";
+        document.head.appendChild(link);
+    }
+    if ("serviceWorker" in navigator) {
+        var insecureRemote = window.location.protocol === "http:" &&
+            !window.location.hostname.match(/^localhost$|^127\.0\.0\.1$/);
+        if (!insecureRemote) {
+            navigator.serviceWorker.register("sw.js").catch(function () { /* non-fatal */ });
+        }
+    }
+}
 
 // ===============================
 // SIGNUP
@@ -3648,6 +3702,7 @@ function trackOrder() {
         out.innerHTML = '<div class="order-card">' +
             '<div class="order-header"><div><div class="order-id">#' + escHtml(data.orderNumber || ref) + '</div>' +
             (data.trackingId ? '<p><strong>Track ID:</strong> ' + escHtml(data.trackingId) + '</p>' : "") +
+            (data.deliveryPartner && data.deliveryPartner.name ? '<p><strong>👤 Assigned Delivery Partner:</strong> ' + escHtml(data.deliveryPartner.name) + '</p>' : "") +
             '<small>' + escHtml(formatOrderDate(data.date)) + '</small></div>' +
             '<div class="order-status">' + escHtml(friendlyStatus(data.status || "—")) + '</div></div>' +
             statusTrackerHTML(data.status || "Placed", true) +

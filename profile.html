@@ -6,7 +6,7 @@
     <title>FreshMart - My Profile</title>
     <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body data-page="profile">
     <header>
         <div class="container">
             <nav>
@@ -174,5 +174,222 @@
 
     <script src="api.js"></script>
     <script src="script.js"></script>
+    <script>
+        // ===============================
+        // PROFILE PAGE (real backend: /api/users/me)
+        // Session is the httpOnly cookie — no Authorization header needed.
+        // ===============================
+
+        var profileUser = null;
+        var editingAddressIndex = -1;
+
+        function esc(val) {
+            return String(val == null ? "" : val).replace(/[&<>"']/g, function(ch) {
+                return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
+            });
+        }
+
+        function initProfile() {
+            apiGetMe().then(function(user) {
+                profileUser = user;
+                document.getElementById("userName").textContent = user.name || "FreshMart Customer";
+                document.getElementById("userEmail").textContent = user.email || "";
+                document.getElementById("userPhone").textContent = user.phone ? ("📞 " + user.phone) : "";
+                renderAddresses(user.addresses || []);
+            }).catch(function(err) {
+                if (typeof showToast === "function") showToast((err && err.message) || "Could not load profile.", "error");
+            });
+        }
+
+        function toggleEdit(show) {
+            var form = document.getElementById("editForm");
+            if (form) form.style.display = show ? "block" : "none";
+            if (show && profileUser) {
+                document.getElementById("name").value = profileUser.name || "";
+                document.getElementById("phone").value = profileUser.phone || "";
+                document.getElementById("newPassword").value = "";
+            }
+        }
+
+        var profileForm = document.getElementById("profileForm");
+        if (profileForm) {
+            profileForm.addEventListener("submit", function(e) {
+                e.preventDefault();
+                var body = {
+                    name: String(document.getElementById("name").value || "").trim(),
+                    phone: String(document.getElementById("phone").value || "").trim()
+                };
+                var pw = document.getElementById("newPassword").value;
+                if (pw) {
+                    if (pw.length < 6) {
+                        if (typeof showToast === "function") showToast("Password must be at least 6 characters.", "error");
+                        return;
+                    }
+                    body.password = pw;
+                }
+                fetch(API.base + "/users/me", {
+                    method: "PUT",
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify(body)
+                })
+                .then(function(res) { return res.json(); })
+                .then(function(data) {
+                    if (!data.success) throw new Error(data.message || "Update failed");
+                    profileUser = data.data;
+                    document.getElementById("userName").textContent = profileUser.name || "FreshMart Customer";
+                    document.getElementById("userPhone").textContent = profileUser.phone ? ("📞 " + profileUser.phone) : "";
+                    toggleEdit(false);
+                    if (typeof showToast === "function") showToast("Profile updated successfully.", "success");
+                    if (typeof refreshAuthProfile === "function") refreshAuthProfile();
+                })
+                .catch(function(err) {
+                    if (typeof showToast === "function") showToast((err && err.message) || "Could not update profile.", "error");
+                });
+            });
+        }
+
+        function renderAddresses(addresses) {
+            var list = document.getElementById("addressesList");
+            if (!list) return;
+            if (!addresses || addresses.length === 0) {
+                list.innerHTML = '<p style="color:#888;">No saved addresses yet. Add one to speed up checkout.</p>';
+                return;
+            }
+            list.innerHTML = addresses.map(function(addr, i) {
+                var lines = [
+                    (addr.house || "") + (addr.street ? ", " + addr.street : ""),
+                    [addr.city, addr.state].filter(Boolean).join(", "),
+                    addr.pincode || ""
+                ].filter(Boolean).join(" · ");
+                return '<div class="profile-address" style="border:1px solid #eee;border-radius:10px;padding:12px;margin-bottom:10px;">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+                        '<strong>' + esc(addr.name || "Address " + (i + 1)) + (addr.isDefault ? ' <span style="color:#159447;">(Default)</span>' : '') + '</strong>' +
+                        (addr.phone ? '<span style="color:#666;">' + esc(addr.phone) + '</span>' : '') +
+                    '</div>' +
+                    '<div style="color:#555;margin:4px 0 8px;">' + esc(lines) + '</div>' +
+                    '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+                        (!addr.isDefault ? '<button type="button" class="secondary-btn" onclick="setDefaultAddress(' + i + ')">Make Default</button>' : '') +
+                        '<button type="button" class="secondary-btn" onclick="editAddress(' + i + ')">Edit</button>' +
+                        '<button type="button" class="secondary-btn" style="color:#e74c3c;" onclick="deleteAddress(' + i + ')">Delete</button>' +
+                    '</div>' +
+                '</div>';
+            }).join("");
+        }
+
+        function updateAddresses(nextAddresses) {
+            return fetch(API.base + "/users/me", {
+                method: "PUT",
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ addresses: nextAddresses })
+            })
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+                if (!data.success) throw new Error(data.message || "Save failed");
+                profileUser = data.data;
+                renderAddresses(profileUser.addresses || []);
+                return data.data;
+            });
+        }
+
+        function toggleAddressForm(show, index) {
+            editingAddressIndex = (typeof index === "number") ? index : -1;
+            var form = document.getElementById("addressForm");
+            if (!form) return;
+            form.style.display = show ? "block" : "none";
+            document.getElementById("addressFormTitle").textContent = (editingAddressIndex >= 0 ? "Edit Address" : "Add New Address");
+            if (!show) return;
+
+            var src = { name: "", phone: "", house: "", street: "", landmark: "", city: "", state: "", pincode: "", deliveryInstructions: "" };
+            if (editingAddressIndex >= 0 && profileUser && profileUser.addresses && profileUser.addresses[editingAddressIndex]) {
+                src = profileUser.addresses[editingAddressIndex];
+            }
+            document.getElementById("addrName").value = src.name || "";
+            document.getElementById("addrPhone").value = src.phone || "";
+            document.getElementById("addrHouse").value = src.house || "";
+            document.getElementById("addrStreet").value = src.street || "";
+            document.getElementById("addrLandmark").value = src.landmark || "";
+            document.getElementById("addrCity").value = src.city || "";
+            document.getElementById("addrState").value = src.state || "";
+            document.getElementById("addrPincode").value = src.pincode || "";
+            document.getElementById("addrInstructions").value = src.deliveryInstructions || "";
+        }
+
+        var addressFormElem = document.getElementById("addressFormElem");
+        if (addressFormElem) {
+            addressFormElem.addEventListener("submit", function(e) {
+                e.preventDefault();
+                if (!profileUser) return;
+                var addr = {
+                    name: document.getElementById("addrName").value.trim(),
+                    phone: document.getElementById("addrPhone").value.trim(),
+                    house: document.getElementById("addrHouse").value.trim(),
+                    street: document.getElementById("addrStreet").value.trim(),
+                    landmark: document.getElementById("addrLandmark").value.trim(),
+                    city: document.getElementById("addrCity").value.trim(),
+                    state: document.getElementById("addrState").value,
+                    pincode: document.getElementById("addrPincode").value.trim(),
+                    deliveryInstructions: document.getElementById("addrInstructions").value.trim()
+                };
+                if (!/^\d{6}$/.test(addr.pincode)) {
+                    if (typeof showToast === "function") showToast("Please enter a valid 6-digit pincode.", "error");
+                    return;
+                }
+                var list = (profileUser.addresses || []).slice();
+                if (editingAddressIndex >= 0 && list[editingAddressIndex]) {
+                    list[editingAddressIndex] = addr;
+                } else {
+                    if (list.length === 0) addr.isDefault = true;
+                    list.push(addr);
+                }
+                updateAddresses(list)
+                    .then(function() {
+                        toggleAddressForm(false);
+                        if (typeof showToast === "function") showToast("Address saved.", "success");
+                    })
+                    .catch(function(err) {
+                        if (typeof showToast === "function") showToast((err && err.message) || "Could not save address.", "error");
+                    });
+            });
+        }
+
+        function editAddress(index) { toggleAddressForm(true, index); }
+
+        function deleteAddress(index) {
+            if (typeof confirm === "function" && !confirm("Delete this address?")) return;
+            fetch(API.base + "/users/me", {
+                method: "PUT",
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ deleteAddressIndex: index })
+            })
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+                if (!data.success) throw new Error(data.message || "Delete failed");
+                profileUser = data.data;
+                renderAddresses(profileUser.addresses || []);
+                if (typeof showToast === "function") showToast("Address deleted.", "success");
+            })
+            .catch(function(err) {
+                if (typeof showToast === "function") showToast((err && err.message) || "Could not delete address.", "error");
+            });
+        }
+
+        function setDefaultAddress(index) {
+            fetch(API.base + "/users/me", {
+                method: "PUT",
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ setDefaultIndex: index })
+            })
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+                if (!data.success) throw new Error(data.message || "Update failed");
+                profileUser = data.data;
+                renderAddresses(profileUser.addresses || []);
+                if (typeof showToast === "function") showToast("Default address updated.", "success");
+            })
+            .catch(function(err) {
+                if (typeof showToast === "function") showToast((err && err.message) || "Could not update address.", "error");
+            });
+        }
+    </script>
 </body>
 </html>

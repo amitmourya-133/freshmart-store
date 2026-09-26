@@ -28,51 +28,8 @@
 
         <div class="sub-plans">
 
-            <!-- Plans will be loaded by JavaScript from the backend -->
-            <div class="sub-card">
-                <div class="sub-emoji">🥬</div>
-                <h3>Basic Box</h3>
-                <p class="sub-daily">Daily essentials for 2 people.</p>
-                <div class="sub-price">₹499<span>/week</span></div>
-                <ul>
-                    <li>15+ seasonal vegetables</li>
-                    <li>5kg approx</li>
-                    <li>Free delivery</li>
-                    <li>Skip anytime</li>
-                </ul>
-                <button class="sub-btn" data-plan="Basic Box" data-price="499">Choose Basic</button>
-            </div>
-
-            <div class="sub-card popular">
-                <div class="sub-tag">MOST POPULAR</div>
-                <div class="sub-emoji">🥦</div>
-                <h3>Standard Box</h3>
-                <p class="sub-desc">Everything for a family of 4.</p>
-                <div class="sub-price">₹899<span>/week</span></div>
-                <ul>
-                    <li>25+ seasonal vegetables</li>
-                    <li>8kg approx</li>
-                    <li>Free delivery</li>
-                    <li>+ 1kg fruits weekly</li>
-                    <li>Priority slots</li>
-                </ul>
-                <button class="sub-btn" data-plan="Standard Box" data-price="899">Choose Standard</button>
-            </div>
-
-            <div class="sub-card">
-                <div class="sub-emoji">🍅</div>
-                <h3>Family Box</h3>
-                <p class="sub-desc">For large families & kitchens.</p>
-                <div class="sub-price">₹1499<span>/week</span></div>
-                <ul>
-                    <li>40+ vegetables & fruits</li>
-                    <li>14kg approx</li>
-                    <li>Free delivery</li>
-                    <li>+ 2kg fruits weekly</li>
-                    <li>Customizable box</li>
-                </ul>
-                <button class="sub-btn" data-plan="Family Box" data-price="1499">Choose Family</button>
-            </div>
+            <!-- Plans are rendered by subscription.js from GET /api/subscriptions/plans -->
+            <p style="padding:24px;text-align:center;color:#666;">Loading subscription plans…</p>
 
         </div>
 
@@ -96,7 +53,7 @@
                     <option value="Evening (5-8 PM)">Evening (5-8 PM)</option>
                 </select>
 
-                <button class="sub-btn" onclick="confirmSubscription()">Confirm Subscription</button>
+                <button class="sub-btn" id="btnConfirmSubscription">Confirm Subscription</button>
             </div>
         </div>
 
@@ -115,7 +72,7 @@
                 <span>Status: <strong id="currStatus"></strong></span>
                 <span>Next Delivery: <strong id="currNextDelivery"></strong></span>
             </div>
-            <button class="secondary-btn" onclick="cancelSubscription()">Cancel Subscription</button>
+            <button class="secondary-btn" id="btnCancelSubscription">Cancel Subscription</button>
         </div>
 
     </section>
@@ -127,157 +84,7 @@
     </footer>
 
     <script src="api.js"></script>
-    <script>
-        // Initialize: fetch active subscription and render plans
-        document.addEventListener("DOMContentLoaded", function() {
-            // Fetch user's active subscription from backend
-            fetch("/api/subscriptions/my", {
-                headers: { "Authorization": "Bearer " + (window.freshmartToken || "") }
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success && data.subscription) {
-                    // Show user's active subscription
-                    document.getElementById("currentSubscription").style.display = "block";
-                    document.getElementById("currPlanName").textContent = data.subscription.plan.name;
-                    document.getElementById("currStatus").textContent = data.subscription.status;
-                    if (data.subscription.nextDeliveryDate) {
-                        document.getElementById("currNextDelivery").textContent = 
-                            new Date(data.subscription.nextDeliveryDate).toLocaleDateString("en-IN", {
-                                day: "2-digit", month: "short", year: "numeric"
-                            });
-                    }
-                    // Hide the plan cards for logged-in users with active subscription
-                    document.querySelectorAll(".sub-card").forEach(card => card.style.display = "none");
-                    // Show a message instead
-                    const subSection = document.querySelector(".sub-plans");
-                    if (subSection) {
-                        subSection.innerHTML = '<p style="padding:20px; text-align:center; color:#666;">You already have an active ' + 
-                            '<strong id="alreadyActivePlan"></strong> subscription. ' +
-                            'You can <button class="secondary-btn" onclick="cancelSubscription()">cancel</button> or <button class="secondary-btn" onclick="window.location.href=\'profile.html\'">manage from profile</button>.</p>';
-                        document.getElementById("alreadyActivePlan").textContent = data.subscription.plan.name;
-                    }
-                }
-            })
-            .catch(err => console.error("Error fetching subscription:", err));
-
-            // Render plan cards (for new subscribers or if no active subscription)
-            const plans = [
-                { name: "Basic Box", price: 499, features: ["15+ seasonal vegetables", "5kg approx", "Free delivery", "Skip anytime"] },
-                { name: "Standard Box", price: 899, features: ["25+ seasonal vegetables", "8kg approx", "Free delivery", "+ 1kg fruits weekly", "Priority slots"], popular: true },
-                { name: "Family Box", price: 1499, features: ["40+ vegetables & fruits", "14kg approx", "Free delivery", "+ 2kg fruits weekly", "Customizable box"] }
-            ];
-
-            const subPlansContainer = document.querySelector(".sub-plans");
-            if (subPlansContainer) {
-                subPlansContainer.innerHTML = plans.map(plan => {
-                    const isPopular = plan.popular || false;
-                    return `
-                        <div class="sub-card${isPopular ? ' popular' : ''}">
-                            <div class="sub-emoji">🥬</div>
-                            <h3>${plan.name}</h3>
-                            <p class="sub-desc">${plan.features[0]}</p>
-                            <div class="sub-price">₹${plan.price}<span>/week</span></div>
-                            <ul>
-                                ${plan.features.slice(1).map(f => `<li>${f}</li>`).join('')}
-                            </ul>
-                            <button class="sub-btn" data-plan="${plan.name}" data-price="${plan.price}">Choose ${plan.name}</button>
-                        </div>
-                    `;
-                }).join(''));
-
-                // Add click handlers to plan buttons
-                document.querySelectorAll(".sub-plans .sub-btn").forEach(btn => {
-                    btn.addEventListener("click", function() {
-                        const planName = this.getAttribute("data-plan");
-                        const planPrice = this.getAttribute("data-price");
-                        selectPlan(planName, planPrice);
-                    });
-                });
-            }
-        });
-
-        function selectPlan(planName, planPrice) {
-            document.getElementById("subFormTitle").textContent = `Subscribe to ${planName}`;
-            document.getElementById("subFormWrap").style.display = "block";
-            // Store plan info in hidden inputs or global vars for submit
-            window.selectedPlanName = planName;
-            window.selectedPlanPrice = planPrice;
-            
-            // Pre-fill address if user has saved addresses (we'll just show the form)
-            document.getElementById("subName").value = "";
-            document.getElementById("subPhone").value = "";
-            document.getElementById("subAddress").value = "";
-            document.getElementById("subSlot").value = "Morning (8-11 AM)";
-        }
-
-        async function confirmSubscription() {
-            const name = document.getElementById("subName").value.trim();
-            const phone = document.getElementById("subPhone").value.trim();
-            const address = document.getElementById("subAddress").value.trim();
-            const slot = document.getElementById("subSlot").value;
-
-            if (!name || !phone || !address) {
-                alert("Please fill in all fields");
-                return;
-            }
-
-            if (phone.length < 10) {
-                alert("Please enter a valid 10-digit phone number");
-                return;
-            }
-
-            // Call backend to create subscription
-            const resp = await fetch("/api/subscriptions/" + window.selectedPlanPrice, {
-                method: "POST",
-                headers: {
-                    "Authorization": "Bearer " + (window.freshmartToken || ""),
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    name,
-                    phone,
-                    address,
-                    deliverySlot: slot,
-                    planName: window.selectedPlanName,
-                    planPrice: window.selectedPlanPrice
-                })
-            });
-
-            const data = await resp.json();
-            if (data.success) {
-                showSubSuccess(data.subscription || "Subscription activated successfully");
-                // Refresh the page to show updated state
-                setTimeout(() => window.location.reload(), 1500);
-            } else {
-                alert(data.message || "Failed to activate subscription");
-            }
-        }
-
-        function showSubSuccess(msg) {
-            document.getElementById("subSuccessMsg").textContent = msg;
-            document.getElementById("subSuccess").style.display = "block";
-            document.getElementById("subFormWrap").style.display = "none";
-        }
-
-        async function cancelSubscription() {
-            if (!confirm("Are you sure you want to cancel your subscription?")) return;
-            
-            const resp = await fetch("/api/subscriptions/" + /* would need subscriptionId */, {
-                method: "PUT",
-                headers: { "Authorization": "Bearer " + (window.freshmartToken || "") },
-                body: JSON.stringify({ status: "cancelled" })
-            });
-
-            const data = await resp.json();
-            if (data.success) {
-                alert("Subscription cancelled successfully");
-                window.location.reload();
-            } else {
-                alert(data.message || "Failed to cancel subscription");
-            }
-        }
-    </script>
+    <script src="subscription.js"></script>
 
 </body>
 </html>

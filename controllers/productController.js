@@ -243,7 +243,8 @@ exports.addRating = async (req, res) => {
             return res.status(404).json({ success: false, message: "Product not found" });
         }
         const { rating } = req.body;
-        if (rating < 1 || rating > 5) {
+        const r = Number(rating);
+        if (!Number.isFinite(r) || r < 1 || r > 5) {
             return res.status(400).json({ success: false, message: "Rating must be 1-5" });
         }
         const product = await Product.findById(req.params.id);
@@ -252,7 +253,7 @@ exports.addRating = async (req, res) => {
         }
         // Update running average
         const newCount = product.ratingCount + 1;
-        product.rating = (product.rating * product.ratingCount + rating) / newCount;
+        product.rating = (product.rating * product.ratingCount + r) / newCount;
         product.ratingCount = newCount;
         await product.save();
         res.json({ success: true, data: product });

@@ -66,6 +66,18 @@
       "use": "@vercel/static"
     },
     {
+      "src": "sw.js",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "manifest.json",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "notifications.js",
+      "use": "@vercel/static"
+    },
+    {
       "src": "*.svg",
       "use": "@vercel/static"
     }

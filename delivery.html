@@ -52,6 +52,8 @@
             </div>
         </section>
 
+        <input type="file" id="proofFileInput" accept="image/png,image/jpeg,image/webp" style="display:none;" aria-hidden="true">
+
     </main>
 
     <footer>
@@ -76,27 +78,20 @@
         // ===============================
 
         function checkDeliveryAuth() {
-            // Verify delivery user is logged in
-            const token = window.freshmartToken || "";
-            if (!token) {
-                // No token - redirect to login
-                window.location.href = "login.html";
-                return;
-            }
-
-            // Fetch current user to verify role
-            fetch("/api/users/me", {
-                headers: { "Authorization": "Bearer " + token }
-            })
+            // The session JWT lives in an httpOnly cookie set at login; there is
+            // no readable window.freshmartToken. Verify identity + delivery role
+            // with the server — the cookie rides along automatically, so no
+            // Authorization header exists to send.
+            fetch("/api/users/me", { headers: getAuthHeaders() })
             .then(res => res.json())
             .then(data => {
-                if (!data.success || data.data.role !== "delivery") {
+                if (!data.success || !data.data || data.data.role !== "delivery") {
                     // Not a delivery user - redirect
                     window.location.href = "login.html";
                     return;
                 }
                 // User is verified - continue
-                initDashboard();
+                initDashboard(data.data);
             })
             .catch(err => {
                 console.error("Auth check failed:", err);
@@ -108,8 +103,10 @@
         // DASHBOARD INITIALISATION
         // ===============================
 
-        async function initDashboard() {
+        async function initDashboard(user) {
             // Fetch today's deliveries and earnings in parallel
+            setupProofFileInput();
+            initAvailability(user);
             await Promise.all([
                 loadTodayDeliveries(),
                 loadEarnings()
@@ -121,19 +118,17 @@
         // ===============================
 
         async function loadTodayDeliveries() {
-            const token = window.freshmartToken || "";
             const res = await fetch("/api/delivery/today", {
-                headers: { "Authorization": "Bearer " + token }
+                headers: getAuthHeaders()
             });
             const data = await res.json();
 
-            if (data.success && data.deliveries) {
+            if (data.success && Array.isArray(data.deliveries)) {
                 renderAssignments(data.deliveries);
                 document.getElementById("emptyState").style.display = "none";
             } else {
                 document.getElementById("assignmentsList").innerHTML = '';
                 document.getElementById("emptyState").style.display = "block";
-                showToast("No deliveries assigned at this time", "info");
             }
         }
 
@@ -161,27 +156,35 @@
 
         function createAssignmentCard(assignment, order, rank) {
             const orderNumber = order.orderNumber || assignment.orderId || 'N/A';
-            const customerName = order.customerName || order.name || 'Customer';
-            const customerPhone = order.phone || '';
-            const address = order.address || order.deliveryAddress || 'Address';
-            const items = order.items || assignment.notes || 'Items';
+            const customer = order.customer && typeof order.customer === 'object' ? order.customer : {};
+            const customerName = customer.name || order.customerName || order.name || 'Customer';
+            const customerPhone = customer.phone || order.phone || '';
+            const address = customer.address || order.address || order.deliveryAddress || 'Address';
+            const items = (Array.isArray(order.items) ? order.items.map(function(i) {
+                const q = (i && i.quantity) || 1;
+                const n = (i && i.name) || 'Item';
+                return n + ' × ' + q;
+            }).join(', ') : (order.items || assignment.notes || 'Items'));
             const amount = order.total || order.amount || 0;
             const paymentMethod = order.paymentMethod || order.paymentStatus || 'COD';
             const deliverySlot = order.deliverySlot || assignment.deliverySlot || 'Slot';
             const assignedAt = assignment.assignedAt ? new Date(assignment.assignedAt).toLocaleString() : '';
             const status = assignment.status || 'ASSIGNED';
 
+            // A button is enabled ONLY when its expected precondition status matches.
+            function isStatus(s) { return status === s; }
+            const disabledAttr = (enabled) => enabled ? '' : 'disabled';
+
             // Determine available actions based on status
             let actionsHtml = '';
-            const isDisabled = (current, allowed) => allowed.includes(current) ? '' : 'disabled';
 
             switch(status) {
                 case "ASSIGNED":
                     actionsHtml = `
-                        <button class="action-btn accept" title="Accept Assignment" ${isDisabled(status, ["ACCEPTED", "PICKED_UP"]) ? 'disabled' : ''} data-id="${assignment._id}">
+                        <button class="action-btn accept" title="Accept Assignment" ${disabledAttr(isStatus("ASSIGNED"))} data-id="${assignment._id}">
                             Accept
                         </button>
-                        <button class="action-btn reject" title="Reject Assignment" ${isDisabled(status, ["PICKED_UP"]) ? 'disabled' : ''} data-id="${assignment._id}">
+                        <button class="action-btn reject" title="Reject Assignment" ${disabledAttr(isStatus("ASSIGNED"))} data-id="${assignment._id}">
                             Reject
                         </button>
                     `;
@@ -189,7 +192,7 @@
 
                 case "ACCEPTED":
                     actionsHtml = `
-                        <button class="action-btn pickup" title="Mark Picked Up" ${isDisabled(status, ["EN_ROUTE"]) ? 'disabled' : ''} data-id="${assignment._id}">
+                        <button class="action-btn pickup" title="Mark Picked Up" ${disabledAttr(isStatus("ACCEPTED"))} data-id="${assignment._id}">
                             Pickup
                         </button>
                     `;
@@ -197,7 +200,7 @@
 
                 case "PICKED_UP":
                     actionsHtml = `
-                        <button class="action-btn start" title="Start Delivery" ${isDisabled(status, ["EN_ROUTE"]) ? 'disabled' : ''} data-id="${assignment._id}">
+                        <button class="action-btn start" title="Start Delivery" ${disabledAttr(isStatus("PICKED_UP"))} data-id="${assignment._id}">
                             Start Delivery
                         </button>
                     `;
@@ -205,7 +208,10 @@
 
                 case "EN_ROUTE":
                     actionsHtml = `
-                        <button class="action-btn deliver" title="Mark Delivered" ${isDisabled(status, ["DELIVERED"]) ? 'disabled' : ''} data-id="${assignment._id}">
+                        <button class="action-btn proof" title="Upload Delivery Proof Photo" data-id="${assignment._id}">
+                            Upload Proof
+                        </button>
+                        <button class="action-btn deliver" title="Mark Delivered" data-id="${assignment._id}">
                             Deliver
                         </button>
                     `;
@@ -223,11 +229,16 @@
                 `Assigned: ${assignedAt}` : '';
 
             const cardClass = rank >= 0 ? 'delivery-card' : 'delivery-card delivered';
+            const proofImage = assignment.proofImage || '';
 
             return `
                 <div class="delivery-card ${cardClass}" data-assignment-id="${assignment._id}">
+                    ${proofImage ? `
+                    <div class="delivery-proof">
+                        <img src="${proofImage}" alt="Delivery proof" title="Delivery proof photo">
+                    </div>` : ''}
                     <div class="delivery-header">
-                        <span class="status-badge" style="background:${rank >= 0 ? getStatusColor(status) : '#6c75'}">
+                        <span class="status-badge" style="background:${getStatusColor(status)}">
                             ${status}
                         </span>
                         <span class="delivery-time">${dateString}</span>
@@ -245,12 +256,16 @@
                         <div class="detail-row">
                             <strong>Address:</strong> ${address}
                         </div>
+                        <div class="detail-row">
+                            <strong>Slot:</strong> ${deliverySlot}
+                        </div>
                     </div>
                     <div class="delivery-items">
                         <strong>Items:</strong> ${items}
                     </div>
                     <div class="delivery-amount">
-                        <strong>₹${Number(amount).toLocaleString()}</strong>
+                        <strong>₹${Number(amount).toLocaleString('en-IN')}</strong>
+                        <span class="payment-method">${paymentMethod}</span>
                     </div>
                     <div class="delivery-actions">
                         ${actionsHtml}
@@ -263,7 +278,7 @@
             const colors = {
                 ASSIGNED: '#159447', ACCEPTED: '#ffc107',
                 PICKED_UP: '#fd7e14', EN_ROUTE: '#dc3545',
-                DELIVERED: '#28a745', REJECTED: #6c7575, CANCELLED: #6c7575
+                DELIVERED: '#28a745', REJECTED: '#6c7575', CANCELLED: '#6c7575'
             };
             return colors[status] || '#6c7575';
         }
@@ -285,6 +300,69 @@
             document.querySelectorAll('.deliver').forEach(btn => {
                 btn.addEventListener('click', () => handleDeliver(btn.dataset.id));
             });
+            document.querySelectorAll('.proof').forEach(btn => {
+                btn.addEventListener('click', () => handleProofUpload(btn.dataset.id));
+            });
+        }
+
+        // ===============================
+        // PROOF IMAGE UPLOAD
+        // ===============================
+
+        let proofUploadAssignmentId = null;
+
+        function handleProofUpload(assignmentId) {
+            proofUploadAssignmentId = assignmentId;
+            const input = document.getElementById("proofFileInput");
+            if (!input) return;
+            input.value = "";
+            input.click();
+        }
+
+        function setupProofFileInput() {
+            const input = document.getElementById("proofFileInput");
+            if (!input) return;
+            input.addEventListener("change", function() {
+                const file = input.files && input.files[0];
+                if (!file || !proofUploadAssignmentId) return;
+                const maxBytes = 1.5 * 1024 * 1024;
+                if (file.size > maxBytes) {
+                    showToast("Image too large. Maximum size is 1.5 MB.", "error");
+                    return;
+                }
+                if (!/^image\/(png|jpeg|webp)$/i.test(file.type)) {
+                    showToast("Invalid image type. Only PNG, JPEG, WebP are allowed.", "error");
+                    return;
+                }
+                const reader = new FileReader();
+                reader.onload = function() {
+                    const imageData = String(reader.result);
+                    uploadProofImage(proofUploadAssignmentId, imageData);
+                };
+                reader.onerror = function() {
+                    showToast("Could not read the selected image.", "error");
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function uploadProofImage(assignmentId, imageData) {
+            try {
+                const res = await fetch("/api/delivery/proof-image", {
+                    method: "POST",
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({ assignmentId, imageData })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(data.message || "Proof image uploaded", "success");
+                    setTimeout(() => window.location.reload(), 1500);
+                } else {
+                    showToast(data.message || "Upload failed", "error");
+                }
+            } catch (err) {
+                showToast("Network error during upload", "error");
+            }
         }
 
         // ===============================
@@ -292,14 +370,10 @@
         // ===============================
 
         async function handleAssignId(assignmentId, action, body) {
-            const token = window.freshmartToken || "";
             const res = await fetch(`/api/delivery/${action}`, {
                 method: "PUT",
-                headers: {
-                    "Authorization": "Bearer " + token,
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify(body)
+                headers: getAuthHeaders(),
+                body: JSON.stringify(Object.assign({ assignmentId: assignmentId }, body || {}))
             });
             const data = await res.json();
 
@@ -337,9 +411,9 @@
                 return;
             }
 
-            await handleAssignId(assignmentId, "status", { 
-                status: "DELIVERED", 
-                otpCode: otp 
+            await handleAssignId(assignmentId, "status", {
+                status: "DELIVERED",
+                otp: otp
             });
         }
 
@@ -348,17 +422,16 @@
         // ===============================
 
         async function loadEarnings() {
-            const token = window.freshmartToken || "";
             const res = await fetch("/api/delivery/earnings", {
-                headers: { "Authorization": "Bearer " + token }
+                headers: getAuthHeaders()
             });
             const data = await res.json();
 
-            if (data.success && data.totalEarnings !== undefined) {
-                document.getElementById("earningsTodayAmount").textContent = `₹${data.totalEarnings.toLocaleString() || 0}`;
-                // If completedCount is available, we could split by time period
-                document.getElementById("earningsThisWeekAmount").textContent = `₹${(data.completedCount * 50).toLocaleString() || 0}`; // placeholder - actual would need per-delivery earnings
-                document.getElementById("earningsThisMonthAmount").textContent = `₹${(data.completedCount * 200).toLocaleString() || 0}`; // placeholder
+            if (data.success && data && typeof data.totalEarnings === "number") {
+                const inr = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');
+                document.getElementById("earningsTodayAmount").textContent = inr(data.today !== undefined ? data.today : data.totalEarnings);
+                document.getElementById("earningsThisWeekAmount").textContent = inr(data.week !== undefined ? data.week : data.totalEarnings);
+                document.getElementById("earningsThisMonthAmount").textContent = inr(data.month !== undefined ? data.month : data.totalEarnings);
             }
         }
 
@@ -366,35 +439,26 @@
         // AVAILABILITY TOGGLE
         // ===============================
 
-        function initAvailability() {
-            const token = window.freshmartToken || "";
-            fetch("/api/delivery/availability", {
-                headers: { "Authorization": "Bearer " + token }
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success !== false) {
-                    const checkbox = document.getElementById("availabilityInput");
-                    if (checkbox) {
-                        checkbox.checked = data.isAvailable;
-                        checkbox.disabled = false;
-                        checkbox.addEventListener('change', function() {
-                            toggleAvailability(this.checked);
-                        });
-                    }
-                }
-            })
-            .catch(err => console.error("Availability check failed:", err));
+        function initAvailability(user) {
+            const checkbox = document.getElementById("availabilityInput");
+            if (!checkbox) return;
+
+            // Initial state comes from the verified delivery user's profile.
+            checkbox.checked = !!(user && user.isAvailable);
+            checkbox.disabled = false;
+            checkbox.removeEventListener('change', handleAvailabilityChange);
+            checkbox.addEventListener('change', handleAvailabilityChange);
+        }
+
+        function handleAvailabilityChange() {
+            const checkbox = document.getElementById("availabilityInput");
+            toggleAvailability(checkbox.checked);
         }
 
         function toggleAvailability(isAvailable) {
-            const token = window.freshmartToken || "";
             fetch("/api/delivery/availability", {
                 method: "PUT",
-                headers: {
-                    "Authorization": "Bearer " + token,
-                    "Content-Type": "application/json"
-                },
+                headers: getAuthHeaders(),
                 body: JSON.stringify({ isAvailable })
             })
             .then(res => res.json())

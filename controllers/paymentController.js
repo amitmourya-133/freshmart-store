@@ -169,20 +169,36 @@ exports.webhookHandler = async (req, res) => {
 };
 
 // Get payment status for an order
+// Ownership-protected: the requester may only view orders they own;
+// admins may view any order. Prevents cross-customer data leakage (IDOR).
 exports.getPaymentStatus = async (req, res) => {
     try {
         const { orderId } = req.params;
 
-        // In a real implementation, we'd look up the payment by orderId
-        // For now, return the order's payment status
+        if (!orderId || !/^[0-9a-fA-F]{24}$/.test(String(orderId))) {
+            return res.status(400).json({
+                success: false,
+                message: "Valid order ID required",
+            });
+        }
+
         const order = await Order.findById(orderId).select(
-            "payment paymentMethod paymentStatus paymentReference paid paymentAt"
+            "_id user payment paymentMethod paymentStatus paymentReference paid paymentAt"
         );
 
         if (!order) {
             return res.status(404).json({
                 success: false,
                 message: "Order not found",
+            });
+        }
+
+        const isAdmin = req.user && req.user.role === "admin";
+        const isOwner = order.user && req.user && String(order.user) === String(req.user._id);
+        if (!isAdmin && !isOwner) {
+            return res.status(403).json({
+                success: false,
+                message: "Not authorized to view this order's payment status",
             });
         }
 

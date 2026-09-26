@@ -7,6 +7,7 @@ const Order = require("../models/Order");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
 const googleAuth = require("../utils/googleAuth");
 const { sendOtpEmail } = require("../utils/emailService");
 
@@ -492,27 +493,15 @@ exports.getMe = async (req, res) => {
 // Protected — customer can update their own profile
 exports.updateMe = async (req, res) => {
     try {
-        const updates = Object.keys(req.body);
-        const allowedUpdates = ["name", "phone", "addresses", "password"];
-        const isValidUpdate = updates.every((update) => allowedUpdates.includes(update));
+        let updates = Object.keys(req.body);
+        const allowedUpdates = ["name", "phone", "addresses", "password", "deleteAddressIndex", "setDefaultIndex"];
+        const isValidUpdate = updates.every((update) => allowedUpdates.includes(update.trim()));
 
         if (!isValidUpdate) {
             return res.status(400).json({
                 success: false,
                 message: "Invalid updates! Allowed updates: name, phone, addresses, password",
             });
-        }
-
-        // Handle password update separately
-        if (req.body.password) {
-            if (req.body.password.length < 6) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Password must be at least 6 characters",
-                });
-            }
-            // We'll handle password after applying other updates
-            // For now, just validate and remember to hash it later
         }
 
         // Handle address deletion request
@@ -533,22 +522,23 @@ exports.updateMe = async (req, res) => {
             }
         }
 
-        // Apply allowed updates (excluding password for now - handled separately)
-        var passwordToHash = null;
-        if (req.body.password && req.body.password.length >= 6) {
-            passwordToHash = req.body.password;
-            // Remove password from updates list so it's not applied as a string field
-            updates = updates.filter(function(u) { return u !== "password"; });
+        // Apply allowed updates. The password is hashed by the User model's
+        // pre-save hook (bcrypt) when it is modified — do NOT hash it twice here.
+        const applyKeys = ["name", "phone", "addresses"];
+        applyKeys.forEach((k) => {
+            if (req.body[k] !== undefined) req.user[k] = req.body[k];
+        });
+        if (req.body.password !== undefined) {
+            if (req.body.password.length < 6) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Password must be at least 6 characters",
+                });
+            }
+            req.user.password = String(req.body.password);
         }
 
-        updates.forEach((update) => (req.user[update] = req.body[update]));
-
-        if (passwordToHash) {
-            const salt = await bcrypt.genSalt(10);
-            req.user.password = await bcrypt.hash(passwordToHash, salt);
-        }
-
-        await req.user.save({ validateBeforeSave: false });
+        await req.user.save();
 
         // Build response - remove sensitive fields
         const userResponse = req.user.toObject();

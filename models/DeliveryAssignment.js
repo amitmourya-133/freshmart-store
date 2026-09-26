@@ -49,7 +49,18 @@ const DeliveryAssignmentSchema = new mongoose.Schema(
             type: String, // URL to proof image
         },
         otpCode: {
-            type: String, // 4-digit OTP for customer verification
+            type: String, // legacy plain OTP — no longer written (kept for compat)
+        },
+        // Delivery-completion OTP (only the SHA-256 hash is stored)
+        otpHash: {
+            type: String, // SHA-256 digest of the 4-digit OTP
+        },
+        otpExpiry: {
+            type: Date, // OTP valid until this timestamp
+        },
+        otpAttempts: {
+            type: Number,
+            default: 0, // incorrect attempts (max 5)
         },
         otpVerified: {
             type: Boolean,

@@ -842,3 +842,55 @@ function fetchAdminDashboard(from, to) {
             return data.data;
         });
 }
+
+// Notifications inbox (R14). All calls are cookie-authed and owner-scoped.
+function apiFetchNotifications(opts) {
+    var url = API.base + "/notifications";
+    var query = [];
+    if (opts) {
+        if (opts.limit) query.push("limit=" + encodeURIComponent(opts.limit));
+        if (opts.skip) query.push("skip=" + encodeURIComponent(opts.skip));
+        if (opts.type) query.push("type=" + encodeURIComponent(opts.type));
+        if (opts.read !== undefined) query.push("read=" + opts.read);
+    }
+    if (query.length) url += "?" + query.join("&");
+    return fetch(url, { headers: getAuthHeaders() })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed to load notifications");
+            return data; // { success, count, unreadCount, data: [...] }
+        });
+}
+
+function apiUnreadCount() {
+    return fetch(API.base + "/notifications/unread-count", { headers: getAuthHeaders() })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed to load unread count");
+            return Number(data.unreadCount) || 0;
+        });
+}
+
+function apiMarkNotificationRead(id) {
+    return fetch(API.base + "/notifications/" + encodeURIComponent(id) + "/read", {
+        method: "PUT",
+        headers: getAuthHeaders()
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed to update notification");
+            return data.data;
+        });
+}
+
+function apiMarkAllNotificationsRead() {
+    return fetch(API.base + "/notifications/read-all", {
+        method: "PUT",
+        headers: getAuthHeaders()
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Failed to update notifications");
+            return data;
+        });
+}
