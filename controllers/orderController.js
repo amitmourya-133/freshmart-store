@@ -35,7 +35,8 @@ async function notifyCustomer(emailFn, order, extra) {
             return { sent: true };
         }
         if (result && result.reason) {
-            console.warn("[email] " + (order.orderNumber || "?") + " " + (extra.tag || "") + " skipped: " + result.reason);
+            console.warn("[email] " + (order.orderNumber || "?") + " " + (extra.tag || "") + " skipped: " + result.reason +
+                (result.code ? "/" + result.code : "") + (result.hint ? " (" + result.hint + ")" : ""));
         }
         return { sent: false };
     } catch (e) {
