@@ -1358,24 +1358,53 @@ function openMapView(lat, lng, title) {
 // so the customer never re-types it, and the draggable marker lets them fix
 // a coarse GPS point (the usual cause of a "wrong location" being shared).
 
+// "Bengaluru Urban District" / "Saharanpur district" must read like a city name
+// in the CITY field, not like an administrative blob.
+function cleanCityName(value) {
+    var v = String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+    if (!v) return "";
+    var stripped = v.replace(/\s*[\(\[].*?[\)\]]\s*$/g, "").replace(/\s+(district|dist\.?)$/i, "").trim();
+    return stripped || v;
+}
+
 // Map OSM Nominatim "address" components into FreshMart's address fields.
 // Uses a professional fallback hierarchy and NEVER invents data: empty inputs
 // produce empty outputs. town/village/municipality belong to the CITY field and
 // are NOT duplicated into the address line (neighbourhood/suburb are the
 // locality tokens that belong on the street line).
+// Street-less pins (very common in India: village/colony/plot layouts) carry no
+// house_number/road token, so the nearest NAMED locality becomes the address
+// line instead of leaving the Address field empty with only City filled.
 function geocodeToAddress(nominatimData) {
-    var a = (nominatimData && nominatimData.address) || {};
-    var road = a.road || a.pedestrian || a.footway || a.service || a.residential || a.highway || "";
-    var house = a.house_number || "";
-    var area = a.neighbourhood || a.suburb || a.city_district || a.hamlet || "";
+    var data = nominatimData || {};
+    var a = data.address || {};
+    var first = function(keys) {
+        for (var i = 0; i < keys.length; i++) {
+            var v = a[keys[i]];
+            if (v) return String(v).replace(/\s+/g, " ").trim();
+        }
+        return "";
+    };
+    var house = first(["house_number"]);
+    var road = first(["road", "pedestrian", "footway", "path", "service", "residential", "highway", "square", "track"]);
+    var area = first(["neighbourhood", "suburb", "quarter", "locality", "borough", "city_district", "hamlet"]);
     var addressLine = [house, road, area].filter(function(v) { return Boolean(v); }).join(", ");
-    var city = a.city || a.town || a.village || a.municipality || a.county || a.city_district || a.state_district || "";
-    var state = a.state || a.state_district || a.county || a.region || "";
-    var pincode = a.postcode || "";
+    if (!addressLine) {
+        var locality = first(["neighbourhood", "suburb", "quarter", "locality", "borough",
+            "city_district", "hamlet", "village", "town", "district", "county", "state_district"]);
+        var placeName = String(data.name || "").replace(/\s+/g, " ").trim();
+        var cityName = first(["city", "town", "village", "municipality"]);
+        if (!locality && placeName && placeName !== cityName) locality = placeName;
+        addressLine = locality;
+    }
+    var city = cleanCityName(first(["city", "town", "village", "municipality"])) ||
+        cleanCityName(first(["county", "city_district", "state_district"]));
+    var state = first(["state", "state_district", "county", "region"]);
+    var pincode = first(["postcode"]);
     var full = [];
     if (addressLine) full.push(addressLine);
-    if (city) full.push(city);
-    if (state) full.push(state);
+    if (city && city !== addressLine) full.push(city);
+    if (state && state !== city) full.push(state);
     if (pincode) full.push(pincode);
     return {
         full: full.join(", "),
