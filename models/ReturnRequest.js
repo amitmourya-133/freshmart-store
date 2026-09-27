@@ -1,6 +1,6 @@
 // ===============================
 // RETURN / REPLACEMENT / REFUND REQUEST MODEL
-// COD-only workflow (no Razorpay refunds): a customer returns part/all of a
+// COD / manual-UPI workflow (no gateway refunds): a customer returns part/all of a
 // delivered order; support records the outcome as a refund (cash / UPI / bank /
 // store credit) or a replacement, with a strict status state machine.
 // ===============================

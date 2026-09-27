@@ -86,6 +86,10 @@ var LANGS = {
 
 var currentLang = "en";
 
+// Set true as soon as the visitor deliberately switches language so an async
+// server-profile load can never override their in-session choice.
+var userTouchedLang = false;
+
 function getCurrentLang() {
     var saved = null;
     try { saved = localStorage.getItem("freshMartLang"); } catch (e) {}
@@ -93,15 +97,46 @@ function getCurrentLang() {
     return "en";
 }
 
-function setLanguage(lang) {
-    currentLang = lang;
-    try { localStorage.setItem("freshMartLang", lang); } catch (e) {}
+// Persist the language to the user profile (server-side, real preference).
+// Guests simply keep the localStorage mirror; a failed request is ignored so
+// the toggle never blocks the UI. No private data is ever sent.
+function persistServerLanguage(lang) {
+    if (typeof getAuthHeaders !== "function" || typeof API === "undefined") return;
+    try {
+        fetch(API.base + "/users/me", {
+            method: "PUT",
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ language: lang === "hi" ? "hi" : "en" })
+        }).catch(function () { /* non-fatal */ });
+    } catch (e) { /* non-fatal */ }
+}
+
+// If the account has a stored language, adopt it (unless the visitor already
+// changed language in this session).
+function syncLanguageFromServer() {
+    if (typeof apiGetMe !== "function") return;
+    apiGetMe()
+        .then(function(user) {
+            if (!user || !user.language) return;
+            if ((user.language === "hi" || user.language === "en") && !userTouchedLang) {
+                if (user.language !== currentLang) setLanguage(user.language);
+            }
+        })
+        .catch(function () { /* guest / offline: keep local preference */ });
+}
+
+function setLanguage(lang, byUser) {
+    var next = lang === "hi" ? "hi" : "en";
+    currentLang = next;
+    if (byUser) userTouchedLang = true;
+    try { localStorage.setItem("freshMartLang", next); } catch (e) {}
+    if (byUser) persistServerLanguage(next);
     applyLanguage();
 }
 
 function toggleLanguage(btn) {
     var next = currentLang === "en" ? "hi" : "en";
-    setLanguage(next);
+    setLanguage(next, true);
 }
 
 function applyLanguage() {
@@ -129,6 +164,11 @@ function applyLanguage() {
     // Re-render dynamic product buttons (Add To Cart text) if available
     if (typeof updateAllCartControls === "function") {
         updateAllCartControls();
+    }
+
+    // Re-render the header auth area so "Login" follows the active language.
+    if (typeof updateAuthHeader === "function") {
+        updateAuthHeader();
     }
 
     // Re-render subscription banner if present
@@ -236,7 +276,7 @@ function startVoiceSearch() {
 
     if (!voiceRecognition) {
         voiceRecognition = new SpeechRecognition();
-        voiceRecognition.lang = "en-IN";
+        voiceRecognition.lang = currentLang === "hi" ? "hi-IN" : "en-IN";
         voiceRecognition.interimResults = false;
         voiceRecognition.maxAlternatives = 1;
         voiceRecognition.continuous = false;
@@ -273,8 +313,8 @@ function startVoiceSearch() {
         };
     }
 
-    // Language selector was removed, so voice always recognizes English.
-    voiceRecognition.lang = "en-IN";
+    // Match the speech recognizer to the active UI language (en-IN / hi-IN).
+    voiceRecognition.lang = currentLang === "hi" ? "hi-IN" : "en-IN";
     try {
         voiceRecognition.start();
         voiceListening = true;
@@ -378,7 +418,9 @@ function renderRecommendations() {
     recIndexes.forEach(function(index) {
         var product = products[index];
         if (!product) return;
-        var r = getProductRating(product.name);
+        // Use real product rating from server database
+        var ratingVal = product.rating !== undefined ? product.rating : 4.0;
+        var countVal = product.ratingCount !== undefined && product.ratingCount > 0 ? product.ratingCount : 0;
         var inCart = (window.cart || []).find(function(c) { return c.name === product.name; });
         var qty = inCart ? inCart.quantity : 0;
         var wishClass = isWishlisted(product.name) ? "wishlist-active" : "";
@@ -389,8 +431,8 @@ function renderRecommendations() {
                 '<button type="button" class="wishlist-heart ' + wishClass + '" data-name="' + escHtml(product.name) + '" onclick="event.stopPropagation(); toggleWishlist(\'' + safeName + '\')">♥</button>' +
                 '<div class="product-image" style="' + featuresImageStyle(product.name, product.gradient) + '">' + productImgHTML(product.name) + '</div>' +
                 '<h3>' + escHtml(product.name) + '</h3>' +
-                starHTML(r.rating) +
-                '<span class="rating-count">(' + r.count + ')</span>' +
+                starHTML(ratingVal) +
+                '<span class="rating-count">(' + countVal + ')</span>' +
                 '<p class="product-price">₹' + product.price + ' / ' + escHtml(product.unit) + '</p>' +
                 '<span class="product-badge">' + escHtml(product.category) + '</span>' +
                 cartControlsHTML(safeName, product.price, qty) +
@@ -401,6 +443,74 @@ function renderRecommendations() {
         container.innerHTML = html;
         section.style.display = "block";
     }
+}
+
+// ===============================
+// 3b. TRENDING NOW (real sales data)
+// ===============================
+
+// Renders the "Trending Now" section from /api/products/trending. That endpoint
+// ranks products by real recent order quantity + frequency (active, in-stock
+// only) and falls back to top-rated products when sales history is thin. The
+// section simply hides itself (graceful fallback) when the data is unavailable.
+function renderTrending() {
+    var section = document.getElementById("trendingSection");
+    var container = document.getElementById("trendingContainer");
+    if (!section || !container) return;
+
+    var apiBase = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+        ? "http://localhost:5000/api"
+        : "/api";
+
+    // Wait for the main catalog to load so "open details" opens the real product.
+    var attempt = function() {
+        if (!(typeof products !== "undefined" && products && products.length > 0)) return false;
+        fetch(apiBase + "/products/trending?limit=8")
+            .then(function(resp) { return resp.json(); })
+            .then(function(data) {
+                if (!data || !data.success || !Array.isArray(data.data) || data.data.length === 0) return;
+                var html = "";
+                var shown = 0;
+                data.data.forEach(function(t) {
+                    if (shown >= 6) return;
+                    var idx = products.findIndex(function(p) { return String(p._id) === String(t._id); });
+                    if (idx < 0) return; // never render a detail-less card
+                    var p = products[idx];
+                    var ratingVal = p.rating !== undefined ? p.rating : 4.0;
+                    var countVal = p.ratingCount !== undefined && p.ratingCount > 0 ? p.ratingCount : 0;
+                    var inCart = (window.cart || []).find(function(c) { return c.name === p.name; });
+                    var qty = inCart ? inCart.quantity : 0;
+                    var wishClass = isWishlisted(p.name) ? "wishlist-active" : "";
+                    var safeName = jsStr(p.name);
+                    shown++;
+                    html +=
+                        '<div class="product" data-category="' + escHtml(p.category) + '" onclick="openProductDetail(' + idx + ')">' +
+                            '<span class="product-badge trend-badge">Trending</span>' +
+                            '<button type="button" class="wishlist-heart ' + wishClass + '" data-name="' + escHtml(p.name) + '" onclick="event.stopPropagation(); toggleWishlist(\'' + safeName + '\')">♥</button>' +
+                            '<div class="product-image" style="' + featuresImageStyle(p.name, p.gradient) + '">' + productImgHTML(p.name) + '</div>' +
+                            '<h3>' + escHtml(p.name) + '</h3>' +
+                            starHTML(ratingVal) +
+                            '<span class="rating-count">(' + countVal + ')</span>' +
+                            '<p class="product-price">₹' + p.price + ' / ' + escHtml(p.unit) + '</p>' +
+                            '<span class="product-badge">' + escHtml(p.category) + '</span>' +
+                            cartControlsHTML(safeName, p.price, qty) +
+                        '</div>';
+                });
+                if (html) {
+                    container.innerHTML = html;
+                    section.style.display = "block";
+                }
+            })
+            .catch(function() { /* graceful fallback: section stays hidden */ });
+        return true;
+    };
+
+    if (attempt()) return;
+    var tries = 0;
+    var timer = setInterval(function() {
+        tries++;
+        if (attempt() || tries > 30) clearInterval(timer);
+    }, 300);
 }
 
 // ===============================
@@ -481,11 +591,15 @@ function initAdvancedFeatures() {
     if (typeof initDarkMode === "function") initDarkMode();
     currentLang = getCurrentLang();
     setLanguage(currentLang);
+    // Adopt a server-persisted language (e.g. after signing in on a new device)
+    // unless the visitor already toggled language this session.
+    syncLanguageFromServer();
 
     // Recommendations on home page
     if (document.body.dataset.page === "home") {
         setTimeout(function() {
             renderRecommendations();
+            renderTrending();
         }, 1400);
     }
 }

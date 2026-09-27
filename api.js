@@ -78,6 +78,32 @@ function fetchProducts() {
         });
 }
 
+// Search suggestions for the autocomplete dropdown (real catalog data).
+function apiGetSearchSuggestions(q, limit) {
+    var url = API.base + "/products/suggestions?q=" + encodeURIComponent(q) +
+        "&limit=" + (limit || 8);
+    return fetch(url)
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Suggestion search failed");
+            return data.suggestions || [];
+        });
+}
+
+// AI search. Secrets stay on the server; this only sends the plain query text.
+function apiAiSearch(query, limit) {
+    return fetch(API.base + "/products/ai-search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: query, limit: limit || 8 })
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Search failed");
+            return data;
+        });
+}
+
 // ---------- ORDERS ----------
 function submitOrder(order) {
     return fetch(API.base + "/orders", {
@@ -192,6 +218,19 @@ function apiUpdateSettings(data) {
         .then(function(res) {
             if (!res.success) throw new Error(res.message || "Failed to update settings");
             return res.data;
+        });
+}
+
+// Public coverage check (early warning at checkout). The server re-validates
+// everything at order creation, so this never has to be trusted.
+function apiDeliveryCoverage(lat, lng) {
+    return fetch(API.base + "/settings/delivery-check?lat=" + encodeURIComponent(lat) + "&lng=" + encodeURIComponent(lng), {
+        headers: { "Content-Type": "application/json" }
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Could not check delivery coverage");
+            return data.data;
         });
 }
 
@@ -1735,5 +1774,5 @@ function openMapPicker(opts) {
 // Node-visible surface used ONLY by automated regression suites — harmless in
 // the browser (typeof module is undefined there).
 if (typeof module !== "undefined" && module.exports) {
-    module.exports = { toValidLatLng: toValidLatLng, parseCoord: parseCoord, canonicalLocation: canonicalLocation, deliveryLocationPayload: deliveryLocationPayload, locationSubmitGuard: locationSubmitGuard, geocodeToAddress: geocodeToAddress, captureCurrentLocation: captureCurrentLocation, geolocationErrorFor: geolocationErrorFor, openInMapsHref: openInMapsHref, openMapView: openMapView, API: API };
+    module.exports = { toValidLatLng: toValidLatLng, parseCoord: parseCoord, canonicalLocation: canonicalLocation, deliveryLocationPayload: deliveryLocationPayload, locationSubmitGuard: locationSubmitGuard, geocodeToAddress: geocodeToAddress, captureCurrentLocation: captureCurrentLocation, geolocationErrorFor: geolocationErrorFor, openInMapsHref: openInMapsHref, openMapView: openMapView, API: API, apiDeliveryCoverage: apiDeliveryCoverage, apiGetSearchSuggestions: apiGetSearchSuggestions, apiAiSearch: apiAiSearch };
 }

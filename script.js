@@ -477,7 +477,7 @@ function updateAuthHeader() {
         updateNotifBadge();
     } else {
         area.innerHTML = '<button type="button" class="secondary-btn" onclick="window.location.href=\'signup.html\'">Create Account</button>' +
-            '<button type="button" class="secondary-btn" onclick="window.location.href=\'login.html\'">Login</button>';
+            '<button type="button" class="secondary-btn" onclick="window.location.href=\'login.html\'">' + (typeof i18n === "function" ? i18n("nav.login") : "Login") + '</button>';
 }
 }
 
@@ -982,13 +982,7 @@ function getCatalogIndices() {
     } else if (sort === "high") {
         list.sort(function(a, b) { return products[b].price - products[a].price || a - b; });
     } else if (sort === "popular") {
-        list.sort(function(a, b) {
-            var ra = getProductRating(products[a].name);
-            var rb = getProductRating(products[b].name);
-            if (rb.rating !== ra.rating) return rb.rating - ra.rating;
-            if (rb.count !== ra.count) return rb.count - ra.count;
-            return a - b;
-        });
+        list.sort(function(a, b) { return a - b; });
     }
 
     return list;
@@ -1001,7 +995,8 @@ function applyCatalogFilter() {
 
 function productCardHTML(index) {
     var product = products[index];
-    var r = getProductRating(product.name);
+    var rating = product.rating !== undefined ? product.rating : 0;
+    var ratingCount = product.ratingCount !== undefined ? product.ratingCount : 0;
     var inCart = cart.find(function(c) { return c.name === product.name; });
     var qty = inCart ? inCart.quantity : 0;
     var safeName = jsStr(product.name);
@@ -1017,8 +1012,8 @@ function productCardHTML(index) {
         '<div class="product-image" style="' + imageStyle(product.name, product.gradient) + '">' + productImgHTML(product.name) + '</div>' +
         stockBadge +
         '<h3>' + escHtml(product.name) + '</h3>' +
-        starHTML(r.rating) +
-        '<span class="rating-count">(' + r.count + ')</span>' +
+        starHTML(rating) +
+        '<span class="rating-count">(' + ratingCount + ')</span>' +
         '<p class="product-price">₹' + product.price + ' / ' + escHtml(product.unit) + (product.variants && product.variants.length > 0 ? '<br><small>Select variant</small>' : '') + '</p>' +
         '<span class="product-badge">' + escHtml(product.category) + '</span>' +
         '<div class="card-controls">' + cartControlsHTML(safeName, product.price, qty, product.unit) + (product.variants && product.variants.length > 0 ? '<div class="variant-chips">' + (function() { var v = product.variants; var html = '<select onchange="setVariant(' + index + ', this.value)">'; html += '<option value="">-- Select Variant --</option>'; v.forEach(function(v, i) { html += '<option value="' + i + '">' + v.unit + ' - ₹' + v.price + '</option>'; }); html += '</select>'; return html; }()) + '</div>' : '') + '</div>' +
@@ -1052,10 +1047,210 @@ function searchProducts() {
     var search = searchInput.value.toLowerCase().trim();
     if (searchTimer) clearTimeout(searchTimer);
     searchTimer = setTimeout(function() {
+        searchAiOverride = null;
         catalogFilters.search = search;
         applyCatalogFilter();
     }, 200);
 }
+
+// ===============================
+// SEARCH SUGGESTIONS + AI SEARCH
+// ===============================
+
+var searchSuggestTimer = null;
+var searchSuggestActive = -1;
+var searchSuggestList = [];
+var searchAiOverride = null;
+
+function onSearchInput() {
+    searchProducts();
+    requestSearchSuggestions();
+}
+
+function requestSearchSuggestions() {
+    var input = document.getElementById("searchInput");
+    if (!input) return;
+    var q = input.value.trim();
+    if (!q) {
+        closeSearchSuggest();
+        return;
+    }
+    if (searchSuggestTimer) clearTimeout(searchSuggestTimer);
+    searchSuggestTimer = setTimeout(function() {
+        searchSuggestTimer = null;
+        var snapshot = input.value.trim();
+        if (!snapshot) { closeSearchSuggest(); return; }
+        apiGetSearchSuggestions(snapshot, 8).then(function(list) {
+            if (document.getElementById("searchInput").value.trim() !== snapshot) return;
+            renderSearchSuggestions(list, snapshot);
+        }).catch(function() {
+            // suggestions are progressive enhancement; never break search
+            closeSearchSuggest();
+        });
+    }, 180);
+}
+
+function renderSearchSuggestions(list, query) {
+    var box = document.getElementById("searchSuggest");
+    if (!box) return;
+    searchSuggestActive = -1;
+    searchSuggestList = list || [];
+
+    var showAiRow = list.length === 0 && query.trim().length >= 3;
+    if (list.length === 0 && !showAiRow) { closeSearchSuggest(); return; }
+
+    var html = "";
+    list.forEach(function(item, i) {
+        if (item.type === "category") {
+            html += '<button type="button" role="option" id="sug-' + i + '" class="suggest-row suggest-cat" data-idx="' + i + '" aria-selected="false">' +
+                '<span class="suggest-ico sico-cat">📁</span>' +
+                '<span class="suggest-text">' + escHtml(item.name) + '</span>' +
+                '<span class="suggest-meta">' + item.count + ' items</span></button>';
+        } else {
+            html += '<button type="button" role="option" id="sug-' + i + '" class="suggest-row suggest-prod" data-idx="' + i + '" aria-selected="false">' +
+                '<span class="suggest-ico">' + escHtml(item.emoji || "🛒") + '</span>' +
+                '<span class="suggest-text">' + escHtml(item.name) +
+                '<span class="suggest-sub">' + escHtml(item.category) + ' · ₹' + item.price + '/' + escHtml(item.unit || "") + '</span></span></button>';
+        }
+    });
+    if (showAiRow) {
+        html += '<button type="button" role="option" id="sug-ai" class="suggest-row suggest-ai" data-idx="ai" aria-selected="false">' +
+            '<span class="suggest-ico sico-ai">✨</span>' +
+            '<span class="suggest-text">AI search <strong>' + escHtml(query) + '</strong>' +
+            '<span class="suggest-sub">Understands English &amp; Hinglish intents</span></span></button>';
+    }
+    box.innerHTML = html;
+    box.classList.add("open");
+    box.setAttribute("aria-expanded", "true");
+    var input = document.getElementById("searchInput");
+    if (input) input.setAttribute("aria-expanded", "true");
+}
+
+function closeSearchSuggest() {
+    var box = document.getElementById("searchSuggest");
+    if (box) { box.classList.remove("open"); box.innerHTML = ""; }
+    var input = document.getElementById("searchInput");
+    if (input) input.setAttribute("aria-expanded", "false");
+    searchSuggestActive = -1;
+    searchSuggestList = [];
+}
+
+function suggestionRowAt(i) {
+    var box = document.getElementById("searchSuggest");
+    if (!box) return null;
+    return box.querySelector('#sug-' + i) || (i === "ai" ? box.querySelector("#sug-ai") : null);
+}
+
+function setSuggestActive(i) {
+    var box = document.getElementById("searchSuggest");
+    if (!box) return;
+    searchSuggestActive = i;
+    var rows = box.querySelectorAll(".suggest-row");
+    rows.forEach(function(r) {
+        var active = r.getAttribute("data-idx") === String(i);
+        r.classList.toggle("active", active);
+        r.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    var input = document.getElementById("searchInput");
+    if (input) input.setAttribute("aria-activedescendant", i === "ai" ? "sug-ai" : "sug-" + i);
+}
+
+function onSearchKeydown(event) {
+    if (event.key === "Escape") {
+        closeSearchSuggest();
+        return;
+    }
+    var box = document.getElementById("searchSuggest");
+    if (!box || !box.classList.contains("open")) {
+        if (event.key === "Enter") {
+            closeSearchSuggest();
+            searchProducts();
+        }
+        return;
+    }
+    var total = box.querySelectorAll(".suggest-row").length;
+    if (total === 0) return;
+    if (event.key === "ArrowDown") {
+        event.preventDefault();
+        var next = searchSuggestActive === -1 ? 0 : (searchSuggestActive + 1) % total;
+        setSuggestActive(next);
+    } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        var prev = searchSuggestActive === -1 ? total - 1 : (searchSuggestActive - 1 + total) % total;
+        setSuggestActive(prev);
+    } else if (event.key === "Enter") {
+        event.preventDefault();
+        if (searchSuggestActive !== -1) {
+            var row = suggestionRowAt(searchSuggestActive);
+            if (row) { row.click(); return; }
+        }
+        closeSearchSuggest();
+        searchProducts();
+    }
+}
+
+function pickSearchSuggestion(index) {
+    var input = document.getElementById("searchInput");
+    var item = (typeof index === "number" && searchSuggestList[index]) || null;
+
+    if (index === "ai" || (item && item.type === "ai")) {
+        if (!input) return;
+        var q = input.value.trim();
+        closeSearchSuggest();
+        if (q) performAiSearch(q);
+        return;
+    }
+    if (item && item.type === "category") {
+        closeSearchSuggest();
+        if (input) input.value = "";
+        filterCategory(item.name);
+        return;
+    }
+    if (item && item.type === "product") {
+        closeSearchSuggest();
+        if (input) input.value = item.name;
+        searchProducts();
+        scrollToProducts();
+        return;
+    }
+    closeSearchSuggest();
+    searchProducts();
+}
+
+function performAiSearch(query) {
+    if (!query || typeof query !== "string") return;
+    var q = query.trim();
+    if (!q) return;
+    apiAiSearch(q, 8).then(function(result) {
+        searchAiOverride = { query: q, items: result.items || [], source: result.source || "local" };
+        goSection("products");
+        renderCatalog();
+    }).catch(function() {
+        showToast("AI search is unavailable right now.", "error");
+    });
+}
+
+function clearAiSearch() {
+    searchAiOverride = null;
+    var input = document.getElementById("searchInput");
+    if (input && input.value) {
+        catalogFilters.search = input.value.trim().toLowerCase();
+    }
+    renderProducts();
+}
+
+// Search suggestion delegation + outside-click close (module scope).
+document.addEventListener("click", function(e) {
+    var row = e.target.closest(".suggest-row");
+    if (row) {
+        var idx = row.getAttribute("data-idx");
+        if (idx === "ai") { pickSearchSuggestion("ai"); } else { pickSearchSuggestion(parseInt(idx, 10)); }
+        return;
+    }
+    var box = document.getElementById("searchSuggest");
+    if (box && box.classList.contains("open") && e.target.closest(".search-box")) return;
+    closeSearchSuggest();
+});
 
 function onPriceRangeChange() {
     var minEl = document.getElementById("priceMin");
@@ -1165,19 +1360,7 @@ function showSkeleton() {
 }
 
 // ===============================
-// RATINGS (deterministic seed)
 // ===============================
-
-function getProductRating(name) {
-    var seed = 0;
-    for (var i = 0; i < name.length; i++) {
-        seed += name.charCodeAt(i);
-    }
-    var rating = 3.5 + ((seed % 15) / 10);
-    if (rating > 5) rating = 5;
-    var count = 10 + (seed % 90);
-    return { rating: Math.round(rating * 10) / 10, count: count };
-}
 
 function starHTML(rating, size) {
     size = size || "";
@@ -1261,10 +1444,12 @@ function toggleWishlistPage() {
         filtered.forEach(function(name) {
             var product = products.find(function(p) { return p.name === name; });
             if (!product) return;
-            var r = getProductRating(product.name);
             var safeName = jsStr(product.name);
             var id = products.indexOf(product);
-            html += '<div class="wishlist-item"><div class="product-image" style="' + imageStyle(product.name, product.gradient) + '" onclick="openProductDetail(' + id + ')">' + productImgHTML(product.name) + '</div><div class="wishlist-item-info"><h4>' + escHtml(product.name) + '</h4>' + starHTML(r.rating) + '<p class="product-price">₹' + product.price + ' / ' + escHtml(product.unit) + '</p><div class="wishlist-item-actions"><button type="button" class="product-add-btn" onclick="event.stopPropagation(); addToCart(\'' + safeName + '\', ' + product.price + '); toggleWishlist(\'' + safeName + '\'); renderWishlistItems();">Move to Cart</button><button type="button" class="wishlist-remove-btn" onclick="event.stopPropagation(); toggleWishlist(\'' + safeName + '\'); renderWishlistItems();">Remove</button></div></div></div>';
+            // Use real product rating from server database
+            var ratingVal = product.rating !== undefined ? product.rating : 4.0;
+            var countVal = product.ratingCount !== undefined && product.ratingCount > 0 ? product.ratingCount : 0;
+            html += '<div class="wishlist-item"><div class="product-image" style="' + imageStyle(product.name, product.gradient) + '" onclick="openProductDetail(' + id + ')">' + productImgHTML(product.name) + '</div><div class="wishlist-item-info"><h4>' + escHtml(product.name) + '</h4>' + starHTML(ratingVal) + (countVal > 0 ? '<span class="rating-count">(' + countVal + ')</span>' : '') + '<p class="product-price">₹' + product.price + ' / ' + escHtml(product.unit) + '</p><div class="wishlist-item-actions"><button type="button" class="product-add-btn" onclick="event.stopPropagation(); addToCart(\'' + safeName + '\', ' + product.price + '); toggleWishlist(\'' + safeName + '\'); renderWishlistItems();">Move to Cart</button><button type="button" class="wishlist-remove-btn" onclick="event.stopPropagation(); toggleWishlist(\'' + safeName + '\'); renderWishlistItems();">Remove</button></div></div></div>';
         });
         items.innerHTML = html;
     }
@@ -1318,8 +1503,10 @@ function renderRecentlyViewed() {
     var html = "";
     validIds.forEach(function(id) {
         var product = products[id];
-        var r = getProductRating(product.name);
-        html += '<div class="product recent-product" onclick="openProductDetail(' + id + ')"><div class="product-image recent-img" style="' + imageStyle(product.name, product.gradient) + '">' + productImgHTML(product.name) + '</div><h3>' + escHtml(product.name) + '</h3>' + starHTML(r.rating) + '<p class="product-price">₹' + product.price + ' / ' + escHtml(product.unit) + '</p><button type="button" class="product-add-btn" onclick="event.stopPropagation(); addToCart(\'' + jsStr(product.name) + '\', ' + product.price + ')">Add To Cart</button></div>';
+        // Use real product rating from server database
+        var ratingVal = product.rating !== undefined ? product.rating : 4.0;
+        var countVal = product.ratingCount !== undefined && product.ratingCount > 0 ? product.ratingCount : 0;
+        html += '<div class="product recent-product" onclick="openProductDetail(' + id + ')"><div class="product-image recent-img" style="' + imageStyle(product.name, product.gradient) + '">' + productImgHTML(product.name) + '</div><h3>' + escHtml(product.name) + '</h3>' + starHTML(ratingVal) + (countVal > 0 ? '<span class="rating-count">(' + countVal + ')</span>' : '') + '<p class="product-price">₹' + product.price + ' / ' + escHtml(product.unit) + '</p><button type="button" class="product-add-btn" onclick="event.stopPropagation(); addToCart(\'' + jsStr(product.name) + '\', ' + product.price + ')">' + tCartAdd() + '</button></div>';
     });
 
     container.innerHTML = html;
@@ -1524,6 +1711,42 @@ function renderCatalog() {
     var container = document.getElementById("productContainer");
     if (!container) return;
 
+    var info = document.getElementById("resultsInfo");
+    var noResults = document.getElementById("noResults");
+
+    if (searchAiOverride) {
+        var html = "";
+        var used = 0;
+        searchAiOverride.items.forEach(function(item) {
+            var idx = -1;
+            for (var i = 0; i < products.length; i++) {
+                if (String(products[i]._id) === String(item._id)) { idx = i; break; }
+            }
+            if (idx === -1 && item.name) {
+                for (var j = 0; j < products.length; j++) {
+                    if (String(products[j].name).toLowerCase() === String(item.name).toLowerCase()) { idx = j; break; }
+                }
+            }
+            if (idx === -1) return;
+            html += productCardHTML(idx);
+            used++;
+        });
+        container.innerHTML = html || '<p class="no-result-text">No AI matches in the catalog for this query.</p>';
+
+        var loadMoreBtn = document.getElementById("loadMoreBtn");
+        if (loadMoreBtn) loadMoreBtn.style.display = "none";
+
+        if (info) {
+            info.innerHTML = 'Showing ' + used + ' AI result' + (used === 1 ? "" : "s") +
+                ' for <strong>' + escHtml(searchAiOverride.query) + '</strong> (source: ' + escHtml(searchAiOverride.source) + ') · ' +
+                '<button type="button" class="clear-ai-btn" onclick="clearAiSearch()">Clear AI results</button>';
+        }
+        if (noResults) noResults.style.display = "none";
+        updateWishlistUI();
+        updateAllCartControls();
+        return;
+    }
+
     var list = getCatalogIndices();
     var shown = Math.min(catalogPage * CATALOG_PAGE_SIZE, list.length);
     var html = "";
@@ -1539,10 +1762,8 @@ function renderCatalog() {
         loadMoreBtn.innerHTML = "<span>Load More</span> (" + (list.length - shown) + " more)";
     }
 
-    var info = document.getElementById("resultsInfo");
     if (info) info.innerText = list.length === 0 ? "" : "Showing " + shown + " of " + list.length + " products";
 
-    var noResults = document.getElementById("noResults");
     if (noResults) noResults.style.display = list.length === 0 ? "block" : "none";
 
     updateWishlistUI();
@@ -1559,6 +1780,13 @@ function loadMoreProducts() {
 // ===============================
 // CART CONTROLS (quantity selector)
 // ===============================
+
+// Translated "Add to cart" label (falls back to English when the i18n layer /
+// features.js is not loaded on this page). Guarded so product-detail pages that
+// do not load features.js keep working unchanged.
+function tCartAdd() {
+    return (typeof i18n === "function") ? i18n("cart.add") : "Add To Cart";
+}
 
 function cartControlsHTML(name, price, qty, unit) {
     var realName = unescapeJsStr(name);
@@ -1598,7 +1826,7 @@ function cartControlsHTML(name, price, qty, unit) {
         main = '<div class="qty-selector"><button type="button" class="qty-btn qty-minus" onclick="event.stopPropagation(); changeCardQty(\'' + escName + '\', -1, ' + price + ')">−</button><span class="qty-value">' + qty + '</span>' +
             '<button type="button" class="qty-btn qty-plus' + (atMax ? " qty-plus-muted" : "") + '" onclick="event.stopPropagation(); changeCardQty(\'' + escName + '\', 1, ' + price + ')"' + (atMax ? ' disabled' : '') + ' title="' + (atMax ? "Only " + stock + " available" : "") + '">+</button></div>';
     } else {
-        main = '<button type="button" class="product-add-btn" onclick="event.stopPropagation(); addToCart(\'' + escName + '\', ' + price + ',\'' + escUnit + '\')">Add To Cart</button>';
+        main = '<button type="button" class="product-add-btn" onclick="event.stopPropagation(); addToCart(\'' + escName + '\', ' + price + ',\'' + escUnit + '\')">' + tCartAdd() + '</button>';
     }
     var buy = '<button type="button" class="buy-now-btn" onclick="event.stopPropagation(); buyNow(\'' + escName + '\', ' + price + ',\'' + escUnit + '\')"' + (out ? ' disabled' : '') + '>Buy Now</button>';
 
@@ -1773,6 +2001,69 @@ function openProductDetail(index) {
     window.location.href = "product-detail.html?id=" + index;
 }
 
+// SEO: on the JS-rendered product page, set a distinct title, meta description,
+// canonical URL, Open Graph tags and Product schema for each product so search
+// engines get real per-item metadata. Never allowed to break the page.
+function injectDetailSeo(p, id) {
+    try {
+        if (!p || !p.name) return;
+        var base = window.location.origin + window.location.pathname + "?id=" + id;
+        var desc = "Order " + p.name + " (" + (p.unit || "unit") + ") at Rs. " + p.price + " on FreshMart - fresh everyday with fast home delivery.";
+
+        document.title = p.name + " | FreshMart";
+
+        var metaDesc = document.querySelector('meta[name="description"]');
+        if (!metaDesc) {
+            metaDesc = document.createElement("meta");
+            metaDesc.name = "description";
+            document.head.appendChild(metaDesc);
+        }
+        metaDesc.content = desc;
+
+        var canon = document.querySelector('link[rel="canonical"]');
+        if (canon) canon.href = base;
+
+        var ogTitle = document.querySelector('meta[property="og:title"]');
+        if (ogTitle) ogTitle.content = p.name + " | FreshMart";
+        var ogDesc = document.querySelector('meta[property="og:description"]');
+        if (ogDesc) ogDesc.content = desc;
+
+        var schema = {
+            "@context": "https://schema.org",
+            "@type": "Product",
+            "name": p.name,
+            "description": desc,
+            "url": base,
+            "offers": {
+                "@type": "Offer",
+                "price": p.price,
+                "priceCurrency": "INR",
+                "availability": "https://schema.org/InStock"
+            }
+        };
+        if (p.rating !== undefined && p.rating > 0 && (p.ratingCount || 0) > 0) {
+            var maxCount = Math.min(p.ratingCount || 0, 4000);
+            schema.aggregateRating = {
+                "@type": "AggregateRating",
+                "ratingValue": p.rating,
+                "bestRating": 5,
+                "ratingCount": maxCount
+            };
+        }
+
+        var ld = document.getElementById("product-jsonld");
+        if (!ld) {
+            ld = document.createElement("script");
+            ld.id = "product-jsonld";
+            ld.setAttribute("type", "application/ld+json");
+            document.head.appendChild(ld);
+        }
+        ld.textContent = JSON.stringify(schema);
+    } catch (e) {
+        // SEO enrichment must never break rendering.
+    }
+}
+
 function loadProductDetail() {
     var detailContainer = document.getElementById("productDetail");
     if (!detailContainer) return;
@@ -1786,7 +2077,9 @@ function loadProductDetail() {
     }
 
     var p = products[id];
-    var r = getProductRating(p.name);
+    // Use real product rating from server database
+    var ratingVal = p.rating !== undefined ? p.rating : 4.0;
+    var countVal = p.ratingCount !== undefined && p.ratingCount > 0 ? p.ratingCount : 0;
     var reviews = getReviews(p.name);
     var recent = [];
     var saved = readStorageValue("freshMartRecent", "[]");
@@ -1801,6 +2094,8 @@ function loadProductDetail() {
     var wishClass = isWishlisted(p.name) ? "wishlist-active" : "";
     var safeName = jsStr(p.name);
 
+    injectDetailSeo(p, id);
+
     var reviewsHTML = reviewsHTMLFor(p.name, reviews);
 
     var relatedHTML = "";
@@ -1813,9 +2108,11 @@ function loadProductDetail() {
 
     showRelated.forEach(function(item, i) {
         var origIndex = products.indexOf(item);
-        var ir = getProductRating(item.name);
+        // Use real product rating from server database
+        var ratingVal = item.rating !== undefined ? item.rating : 4.0;
+        var countVal = item.ratingCount !== undefined && item.ratingCount > 0 ? item.ratingCount : 0;
         var safeRelName = jsStr(item.name);
-        relatedHTML += '<div class="product" data-category="' + escHtml(item.category) + '" onclick="window.location.href=\'product-detail.html?id=' + origIndex + '\'"><div class="product-image" style="' + imageStyle(item.name, item.gradient) + '">' + productImgHTML(item.name) + '</div><h3>' + escHtml(item.name) + '</h3>' + starHTML(ir.rating) + '<p class="product-price">₹' + item.price + ' / ' + escHtml(item.unit) + '</p><button type="button" class="product-add-btn" onclick="event.stopPropagation(); addToCart(\'' + safeRelName + '\', ' + item.price + ')">Add To Cart</button></div>';
+        relatedHTML += '<div class="product" data-category="' + escHtml(item.category) + '" onclick="window.location.href=\'product-detail.html?id=' + origIndex + '\'"><div class="product-image" style="' + imageStyle(item.name, item.gradient) + '">' + productImgHTML(item.name) + '</div><h3>' + escHtml(item.name) + '</h3>' + starHTML(ratingVal) + (countVal > 0 ? '<span class="rating-count">(' + countVal + ')</span>' : '') + '<p class="product-price">₹' + item.price + ' / ' + escHtml(item.unit) + '</p><button type="button" class="product-add-btn" onclick="event.stopPropagation(); addToCart(\'' + safeRelName + '\', ' + item.price + ')">' + tCartAdd() + '</button></div>';
     });
 
     detailContainer.innerHTML = '' +
@@ -1826,7 +2123,7 @@ function loadProductDetail() {
             '<button type="button" class="whatsapp-share-btn detail-share" onclick="shareOnWhatsApp(\'' + safeName + '\',' + p.price + ',\'' + jsStr(p.unit) + '\',' + id + ')">WhatsApp Share</button>' +
             '<span class="product-badge">' + escHtml(p.category) + '</span>' +
             '<h1>' + escHtml(p.name) + '</h1>' +
-            '<div class="detail-rating">' + starHTML(r.rating) + '<span class="rating-count">' + r.rating.toFixed(1) + ' (' + r.count + ' ratings)</span></div>' +
+            '<div class="detail-rating">' + starHTML(ratingVal) + '<span class="rating-count">' + (countVal > 0 ? countVal.toFixed(1) + ' (' + countVal + ' ratings)' : 'No ratings') + '</span></div>' +
             '<div class="detail-price">₹' + p.price + ' / ' + escHtml(p.unit) + '</div>' +
             '<p class="detail-desc">' + escHtml(p.description) + '</p>' +
             '<div class="detail-origin">' + escHtml(p.origin) + '</div>' +
@@ -1955,7 +2252,7 @@ function detailControlsHTML(p) {
         return '<div class="detail-stock-unavailable">' +
             '<span class="stock-badge out">Out of Stock</span>' +
             '<p>This product is temporarily unavailable. Please check back soon.</p>' +
-            '<button type="button" class="detail-add-btn" disabled>Add To Cart</button>' +
+            '<button type="button" class="detail-add-btn" disabled>' + tCartAdd() + '</button>' +
             '<button type="button" class="buy-now-btn" disabled>⚡ Buy Now</button>' +
             '</div>';
     }
@@ -1967,7 +2264,7 @@ function detailControlsHTML(p) {
             '<button onclick="detailQtyChange(1)"' + (atMax ? ' disabled title="Limit reached"' : '') + '>+</button>' +
         '</div>' +
         '<div class="detail-btn-row">' +
-            '<button class="detail-add-btn" onclick="addDetailToCart(\'' + jsStr(p.name) + '\', ' + p.price + ')">Add To Cart</button>' +
+            '<button class="detail-add-btn" onclick="addDetailToCart(\'' + jsStr(p.name) + '\', ' + p.price + ')">' + tCartAdd() + '</button>' +
             '<button class="buy-now-btn" onclick="buyNowDetail(\'' + jsStr(p.name) + '\', ' + p.price + ', \'' + jsStr(p.unit) + '\')">⚡ Buy Now</button>' +
         '</div>';
 }
@@ -1984,7 +2281,7 @@ function detailQtyChange(delta) {
         var opt = getActiveOption(product.name, product.unit);
         var addBtn = document.querySelector(".detail-add-btn");
         if (addBtn) {
-            addBtn.innerText = "🛒 Add To Cart — ₹" + (Math.round(product.price * opt.mult * 100) / 100 * detailQtyValue);
+            addBtn.innerText = "🛒 " + tCartAdd() + " — ₹" + (Math.round(product.price * opt.mult * 100) / 100 * detailQtyValue);
         }
     }
 }
@@ -2521,11 +2818,15 @@ function fillFromResolvedLocation(loc) {
         cap.style.display = "inline-block";
         var accTxt = loc.accuracy ? " · Accuracy: ±" + Math.round(loc.accuracy) + " m" : "";
         if (loc.resolved && loc.resolved.full) {
-            cap.textContent = "📍 " + loc.resolved.full + accTxt;
+            cap.textContent = "✅ Location captured: " + loc.resolved.full + accTxt;
         } else {
-            cap.textContent = "✅ Location captured" + (loc.accuracy ? " (±" + Math.round(loc.accuracy) + " m)" : "") + " — enter street, city & pincode.";
+            cap.textContent = "✅ Delivery location captured" + (loc.accuracy ? " — Accuracy: ±" + Math.round(loc.accuracy) + " m" : "") + " — enter street, city & pincode.";
         }
     }
+    var updateBtn = document.getElementById("updateLocBtn");
+    if (updateBtn) updateBtn.style.display = "inline-block";
+    var warn = document.getElementById("locWarning");
+    if (warn) warn.style.display = "none";
     buildLocationPreview(loc.latitude, loc.longitude);
 }
 
@@ -3017,15 +3318,53 @@ function placeOrder() {
         return;
     }
 
+    var capturedLoc = currentCheckoutLocationMeta();
+    if (!capturedLoc || !capturedLoc.pin) {
+        var warnEl = document.getElementById("locWarning");
+        if (warnEl) warnEl.style.display = "block";
+        showToast("Please share your exact delivery location before placing the order.", "error");
+        return;
+    }
+
     var order = buildOrderObject();
     var method = getCurrentPaymentMethod();
 
-    // Review-first: nothing is submitted here. "Place Order" now opens
-    // the "Confirm Order" review; only the Confirm button in that review
-    // actually places the order (online -> existing QR/quote flow,
-    // COD -> existing finalizeOrder path).
+    // Early service-area check (delivery radius). Purely a UX pre-block: the
+    // server re-validates authoritatively at order creation, so a checklist
+    // failure here never trusts the client for anything.
+    if (capturedLoc.latitude && capturedLoc.longitude && typeof apiDeliveryCoverage === "function") {
+        var coverBtnEl = document.getElementById("placeOrderBtn");
+        if (coverBtnEl) coverBtnEl.disabled = true;
+        return apiDeliveryCoverage(capturedLoc.latitude, capturedLoc.longitude)
+            .then(function(cov) {
+                if (cov && cov.radiusEnabled && cov.inside === false) {
+                    var msg = "Sorry, we currently deliver only within " + cov.radiusKm + " km of our store";
+                    if (cov.distanceKm != null) msg += " (your location is about " + cov.distanceKm + " km away)";
+                    msg += ".";
+                    showToast(msg, "error");
+                    return null;
+                }
+                return order;
+            })
+            .catch(function() {
+                // Coverage API unavailable (offline/prod hiccup): let the server
+                // decide at submit — never block on a client-side failure.
+                return order;
+            })
+            .then(function(finalOrder) {
+                if (coverBtnEl) coverBtnEl.disabled = false;
+                if (!finalOrder) return;
+                postReviewDraft(finalOrder);
+            });
+    }
+
+    postReviewDraft(order);
+}
+
+function postReviewDraft(order) {
+    if (!order) return;
     lastDraftOrder = order;
-    showOrderConfirmModal(order, method);
+    showOrderConfirmModal(order, (order.paymentMethod && order.paymentMethod === "online") ? "online" : "cod");
 }
 
 // Draft being reviewed in the confirm modal (kept in memory only).
@@ -3170,7 +3509,8 @@ function finalizeOrder(order, isOnline) {
         delivery: order.delivery,
         total: order.total,
         paid: false, // the server decides COD-paid vs manual-pending (UPI)
-        deliverySlot: order.deliverySlot || getDeliverySlot()
+        deliverySlot: order.deliverySlot || getDeliverySlot(),
+        deliveryLocation: order.deliveryLocation || null
     };
     if (appliedCoupon) payload.couponCode = appliedCoupon;
     if (order.paymentMode) payload.paymentMode = order.paymentMode;
@@ -4112,6 +4452,14 @@ var DELIVERY_PIPES = [
     { key: "DELIVERED", label: "Delivered", icon: "🏠" }
 ];
 
+// Server-computed ETA line (rider-GPS / pipeline / slot). Hidden until eta arrives.
+function etaLineHTML(eta) {
+    if (!eta || !eta.text) return "";
+    var label = eta.source === "slot" ? "Estimated delivery window" : "Expected delivery ETA";
+    var note = eta.source === "rider" ? " (updated live from the delivery partner's location)" : "";
+    return '<p class="order-eta"><strong>' + escHtml(label) + ':</strong> ' + escHtml(eta.text) + note + '</p>';
+}
+
 function deliveryTrackerHTML(deliveryTrack) {
     var s = deliveryTrack && deliveryTrack.status ? String(deliveryTrack.status) : "";
     if (!s) return "";
@@ -4203,6 +4551,7 @@ function renderOrdersListHTML(orders, offline) {
         ordersHTML += '<div class="order-card"><div class="order-header"><div><div class="order-id">' + escHtml(order.orderNumber || "Order") + '</div>' + trackLine + '<small>' + escHtml(formatOrderDate(order.createdAt || order.date)) + '</small></div><div class="order-status">' + escHtml(friendlyStatus(order.status || "Placed")) + '</div></div>' +
             statusTrackerHTML(order.status || "Placed", true) +
             deliveryTrackerHTML(order.deliveryTrack) +
+            etaLineHTML(order.eta) +
             '<div class="order-pay-row">' + paymentStatusBadge(order.paymentStatus, order.paid, order.paymentMode) + (order.paymentMode === "manual" && order.paymentReference ? '<span class="pay-ref">UPI Ref: ' + escHtml(order.paymentReference) + '</span>' : "") + '</div>' +
             '<h3>Products</h3><div style="margin-top:10px;">' + productsHTML + '</div>' +
             '<div class="summary-row"><span>Subtotal</span><strong>₹' + Number(order.subtotal) + '</strong></div>' +
@@ -4251,6 +4600,7 @@ function trackOrder() {
             '<div class="order-status">' + escHtml(friendlyStatus(data.status || "—")) + '</div></div>' +
             statusTrackerHTML(data.status || "Placed", true) +
             deliveryTrackerHTML(data.deliveryStatus ? { status: data.deliveryStatus } : null) +
+            etaLineHTML(data.eta) +
             '<div class="order-pay-row">' + paymentStatusBadge(data.paymentStatus) + '</div>' +
             '<h3>Items</h3>' + itemsHtml +
             '<div class="order-total">Total: ₹' + (data.total || 0) + '</div>' +

@@ -15,6 +15,8 @@ const { getMultFromWeight, round2 } = require("../utils/pricing");
 const { findValidCoupon, computeCouponDiscount, normalizeCode, reserveCouponUsage, releaseCouponUsage } = require("../utils/coupons");
 const { assertVariantAvailable } = require("../utils/variants");
 const emailService = require("../utils/emailService");
+const { assertDeliveryWithinRadius } = require("../utils/geo");
+const { deliveryEta } = require("../utils/eta");
 
 // Best-effort audit log: stock reservations/restores never break the order
 // flow when logging fails.
@@ -55,12 +57,15 @@ async function recordNotify(order, field, at) {
 }
 
 // In-app inbox notification for the order owner (guests are skipped).
-function inboxNotify(order, title, message) {
+// eventKey scopes dedupe so repeated events (e.g. the same status posted twice)
+// never create a second inbox entry.
+function inboxNotify(order, title, message, eventKey) {
     if (!order || !order.user) return;
     notificationController.notifyBase(order.user, {
         type: "order_status",
         title: title,
         message: message,
+        dedupeKey: "order_inbox:" + String(order._id) + ":status:" + (eventKey || ""),
         data: {
             link: "orders.html",
             orderId: String(order._id),
@@ -491,6 +496,10 @@ exports.createOrder = async (req, res) => {
         // Optional GPS capture. Throws { status: 400 } on malformed values.
         const deliveryLocationData = normalizeDeliveryLocation(deliveryLocation);
 
+        // Authoritative delivery-radius enforcement (server-side only). Disabled
+        // when the admin has not set a radius, so address-only customers never break.
+        await assertDeliveryWithinRadius(deliveryLocationData);
+
         const totals = await computeServerTotals(items, { couponCode: couponCode, userId: req.user ? req.user._id : null });
 
         const orderNumber = generateOrderNumber();
@@ -554,6 +563,16 @@ exports.createOrder = async (req, res) => {
             orderData.paymentMode = "manual";
             orderData.paymentReference = (paymentReference && String(paymentReference).trim()) || null;
         }
+
+        // Notify admins about the new order (push notification, fire-and-forget).
+        try {
+            const pushController = require("../controllers/pushController");
+            pushController.sendPushToAdmins(
+                "New Order " + orderNumber,
+                "Order " + orderNumber + " placed. Total: ₹" + totals.total,
+                "/admin.html"
+            ).catch(function () { /* non-fatal */ });
+        } catch (e) { /* non-fatal */ }
 
         // Reserve coupon usage BEFORE persisting the order so concurrent orders
         // cannot overshoot the usage limit. The increment is compensated if the
@@ -700,6 +719,7 @@ exports.createOrder = async (req, res) => {
                 type: "order_status",
                 title: "Order placed",
                 message: "Your order " + orderNumber + " is placed and being packed.",
+                dedupeKey: "order_inbox:" + String(order._id) + ":status:Placed",
                 data: { link: "orders.html", orderId: String(order._id), orderNumber: orderNumber },
             });
         }
@@ -729,6 +749,13 @@ exports.createOrder = async (req, res) => {
 // ===============================
 exports.quoteOrder = async (req, res) => {
     try {
+        // Optional coverage pre-check: only when the caller supplies a delivery
+        // location. The authoritative gate remains createOrder; this simply lets
+        // the checkout surface the radius error before the final submit.
+        if (req.body.deliveryLocation) {
+            const checked = normalizeDeliveryLocation(req.body.deliveryLocation);
+            await assertDeliveryWithinRadius(checked);
+        }
         const totals = await computeServerTotals(req.body.items, { couponCode: req.body.couponCode });
         res.json({
             success: true,
@@ -841,6 +868,7 @@ exports.getMyOrders = async (req, res) => {
             const doc = order.toObject ? order.toObject() : Object.assign({}, order);
             const track = await deliveryTrackFor(order._id);
             if (track) doc.deliveryTrack = track;
+            doc.eta = await deliveryEta(order, track);
             docs.push(doc);
         }
         res.json({ success: true, count: docs.length, data: docs });
@@ -863,7 +891,7 @@ exports.getOrder = async (req, res) => {
         const ownerId = order.user && (order.user._id ? order.user._id : order.user);
         const isOwner = req.user && ownerId && String(ownerId) === String(req.user._id);
         if (!isAdmin && !isOwner) {
-            return res.status(403).json({ success: false, message: "Not authorized to view this order" });
+            return res.status(404).json({ success: false, message: "Order not found" });
         }
         // Owner/admin view: include the assigned delivery partner (name + phone)
         // and the latest delivery state. Admin additionally receives the
@@ -873,6 +901,7 @@ exports.getOrder = async (req, res) => {
         const doc = order.toObject ? order.toObject() : Object.assign({}, order);
         if (partner) doc.deliveryPartner = partner;
         if (track) doc.deliveryTrack = track;
+        doc.eta = await deliveryEta(order, track);
         res.json({ success: true, data: doc });
     } catch (error) {
         if (error && error.name === "CastError") {
@@ -938,7 +967,7 @@ exports.updateOrderStatus = async (req, res) => {
                 return res.status(400).json({ success: false, message: result.message });
             }
             emailOnStatusChange(result.order, previousStatus);
-            inboxNotify(result.order, "Order cancelled", "Order " + (result.order.orderNumber || "") + " was cancelled.");
+            inboxNotify(result.order, "Order cancelled", "Order " + (result.order.orderNumber || "") + " was cancelled.", "Cancelled");
             return res.json({ success: true, data: result.order });
         }
 
@@ -955,7 +984,7 @@ exports.updateOrderStatus = async (req, res) => {
         await order.save();
 
         emailOnStatusChange(order, previousStatus);
-        inboxNotify(order, "Order " + status, "Order " + order.orderNumber + " is now " + status + ".");
+        inboxNotify(order, "Order " + status, "Order " + order.orderNumber + " is now " + status + ".", status);
 
         res.json({ success: true, data: order });
     } catch (error) {
@@ -988,7 +1017,7 @@ exports.cancelOrder = async (req, res) => {
             return res.status(400).json({ success: false, message: result.message });
         }
         emailOnStatusChange(result.order, previousStatus);
-        inboxNotify(result.order, "Order cancelled", "Order " + (result.order.orderNumber || "") + " was cancelled.");
+        inboxNotify(result.order, "Order cancelled", "Order " + (result.order.orderNumber || "") + " was cancelled.", "Cancelled");
         res.json({ success: true, data: result.order });
     } catch (error) {
         if (error && error.name === "CastError") {
@@ -1060,6 +1089,7 @@ exports.getOrderByNumber = async (req, res) => {
         // customer can recognise whom to expect, when assigned.
         const partner = await deliveryPartnerFor(order._id);
         const track = await deliveryTrackFor(order._id);
+        const eta = await deliveryEta(order, track);
         res.json({
             success: true,
             data: {
@@ -1070,6 +1100,8 @@ exports.getOrderByNumber = async (req, res) => {
                 deliveryStatus: track ? track.status : null,
                 paymentStatus: order.paymentStatus,
                 date: order.createdAt,
+                // Real ETA when the pipeline/rider data exists, else the slot label.
+                eta: eta,
                 items: (order.items || []).map(function (i) {
                     return { name: i.name || i.productName, quantity: i.quantity || 1, price: i.price || 0, variantUnit: i.variantUnit || null };
                 }),

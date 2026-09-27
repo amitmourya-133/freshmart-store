@@ -4,7 +4,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FreshMart</title>
+    <title>FreshMart - Fresh Vegetables, Fruits & Groceries Delivered Home</title>
+    <meta name="description" content="Order fresh fruits, vegetables and groceries online at FreshMart. Everyday freshness, fair prices and fast home delivery.">
+    <link rel="canonical" href="https://freshmart-store-jet.vercel.app/index.html">
+    <meta name="robots" content="index, follow">
+    <meta name="theme-color" content="#159447">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🥬</text></svg>">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="FreshMart">
+    <meta property="og:title" content="FreshMart - Fresh Vegetables, Fruits & Groceries Delivered Home">
+    <meta property="og:description" content="Order fresh fruits, vegetables and groceries online at FreshMart. Fast home delivery at fair prices.">
+    <meta property="og:url" content="https://freshmart-store-jet.vercel.app/index.html">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "GroceryStore",
+      "name": "FreshMart",
+      "description": "Online fruit, vegetable and grocery store with fast home delivery.",
+      "url": "https://freshmart-store-jet.vercel.app/",
+      "priceRange": "₹"
+    }
+    </script>
     <link rel="stylesheet" href="style.css">
 </head>
 
@@ -28,7 +48,7 @@
             <button type="button" class="nav-link" onclick="goSection('products'); closeMobileNav()">Products</button>
         </nav>
         <div class="search-box">
-            <input type="text" id="searchInput" placeholder="Search vegetables, fruits, grocery..." oninput="searchProducts()">
+            <input type="text" id="searchInput" placeholder="Search vegetables, fruits, grocery..." data-i18n-placeholder="search.placeholder" oninput="onSearchInput()" onkeydown="onSearchKeydown(event)" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="searchSuggest" aria-haspopup="listbox" aria-label="Search products">
             <button type="button" id="voiceSearchBtn" class="voice-btn" onclick="startVoiceSearch()" aria-label="Voice Search" title="Voice Search" aria-pressed="false">
                 <svg viewBox="0 0 24 24" width="18" height="18" focusable="false" aria-hidden="true">
                     <path d="M12 14c1.66 0 3-1.34 3-3V6c0-1.66-1.34-3-3-3S9 4.34 9 6v5c0 1.66 1.34 3 3 3z"></path>
@@ -36,15 +56,17 @@
                 </svg>
             </button>
             <button type="button" onclick="searchProducts()">Search</button>
+            <div id="searchSuggest" class="search-suggest" role="listbox" aria-expanded="false"></div>
         </div>
     </div>
 
     <div class="header-actions">
-        <button type="button" class="secondary-btn" onclick="window.location.href='orders.html'">My Orders</button>
+        <button type="button" class="secondary-btn" data-i18n="nav.myorders" onclick="window.location.href='orders.html'">My Orders</button>
         <div class="auth-area" id="authArea"></div>
-        <button type="button" class="secondary-btn wishlist-btn-header hide-on-mobile-nav" onclick="toggleWishlistPage()">Wishlist <span id="wishlistCount">0</span></button>
+        <button type="button" class="secondary-btn wishlist-btn-header hide-on-mobile-nav" data-i18n="nav.wishlist" onclick="toggleWishlistPage()">Wishlist <span id="wishlistCount">0</span></button>
         <button type="button" class="dark-mode-toggle" id="darkModeToggle" onclick="toggleDarkMode()" title="Toggle Dark Mode" aria-label="Toggle dark mode">Dark mode</button>
-        <button type="button" class="cart-btn" onclick="openCart()">
+        <button type="button" class="secondary-btn lang-toggle-btn" id="langToggle" onclick="toggleLanguage(this)" title="Switch language (English / Hindi)" aria-label="Switch language">हिं EN</button>
+        <button type="button" class="cart-btn" data-i18n="nav.cart" onclick="openCart()">
             Cart <span id="cartCount">0</span>
         </button>
     </div>
@@ -53,9 +75,9 @@
 <!-- HERO -->
 <section class="hero" id="main-content">
     <div class="hero-content">
-        <h1>Freshness Delivered To Your Door</h1>
-        <p>Fresh vegetables, fruits and groceries at the best prices.</p>
-        <button type="button" onclick="scrollToProducts()">SHOP NOW</button>
+        <h1 data-i18n="hero.title">Freshness Delivered To Your Door</h1>
+        <p data-i18n="hero.subtitle">Fresh vegetables, fruits and groceries at the best prices.</p>
+        <button type="button" data-i18n="hero.cta" onclick="scrollToProducts()">SHOP NOW</button>
     </div>
 </section>
 
@@ -95,32 +117,32 @@
 
 <!-- CATEGORIES -->
 <section class="categories" id="categories">
-    <h2>Shop By Category</h2>
+    <h2 data-i18n="categories.title">Shop By Category</h2>
     <div class="category-container">
         <div class="category" onclick="filterCategory('Vegetables')">
             <div><img src="images/vegetables-category.webp" alt="Vegetables"></div>
-            <h3>Vegetables</h3>
+            <h3 data-i18n="cat.vegetables">Vegetables</h3>
         </div>
         <div class="category" onclick="filterCategory('Fruits')">
             <div><img src="https://images.unsplash.com/photo-1619546813926-a78fa6372cd2?auto=format&fit=crop&w=300&q=85" alt="Fruits"></div>
-            <h3>Fruits</h3>
+            <h3 data-i18n="cat.fruits">Fruits</h3>
         </div>
         <div class="category" onclick="filterCategory('Grocery')">
             <div><img src="images/groceries-category.webp" alt="Grocery items"></div>
-            <h3>Grocery</h3>
+            <h3 data-i18n="cat.grocery">Grocery</h3>
         </div>
     </div>
 </section>
 
 <!-- PRODUCTS -->
 <section class="products-section" id="products">
-    <h2>Fresh Products</h2>
+    <h2 data-i18n="products.title">Fresh Products</h2>
 
     <div class="cat-filter-bar">
-        <button class="cat-filter-btn cat-filter-active" data-cat="All" onclick="showAllProducts()">All</button>
-        <button class="cat-filter-btn" data-cat="Vegetables" onclick="filterCategory('Vegetables')">Vegetables</button>
-        <button class="cat-filter-btn" data-cat="Fruits" onclick="filterCategory('Fruits')">Fruits</button>
-        <button class="cat-filter-btn" data-cat="Grocery" onclick="filterCategory('Grocery')">Grocery</button>
+        <button class="cat-filter-btn cat-filter-active" data-cat="All" data-i18n="filter.all" onclick="showAllProducts()">All</button>
+        <button class="cat-filter-btn" data-cat="Vegetables" data-i18n="filter.vegetables" onclick="filterCategory('Vegetables')">Vegetables</button>
+        <button class="cat-filter-btn" data-cat="Fruits" data-i18n="filter.fruits" onclick="filterCategory('Fruits')">Fruits</button>
+        <button class="cat-filter-btn" data-cat="Grocery" data-i18n="filter.grocery" onclick="filterCategory('Grocery')">Grocery</button>
     </div>
 
     <div class="filter-row">
@@ -163,9 +185,16 @@
     </div>
 </section>
 
+<!-- TRENDING NOW (real order-based ranking) -->
+<section class="products-section" id="trendingSection" style="display:none;">
+    <h2>Trending Now</h2>
+    <div id="trendingContainer" class="product-container">
+    </div>
+</section>
+
 <!-- AI RECOMMENDATIONS -->
 <section class="products-section" id="recommendedSection" style="display:none;">
-    <h2>Aapko yeh bhi pasand aa sakta hai</h2>
+    <h2 data-i18n="recommended.title">Aapko yeh bhi pasand aa sakta hai</h2>
     <div id="recommendedContainer" class="product-container">
     </div>
 </section>
@@ -173,15 +202,15 @@
 <!-- SUBSCRIPTION CTA -->
 <section class="subscription-banner" onclick="window.location.href='subscription.html'">
     <div>
-        <h3>Weekly Veggie Box</h3>
-        <p>Fresh vegetables delivered every week. Save up to 20%!</p>
+        <h3 data-i18n="sub.banner.title">Weekly Veggie Box</h3>
+        <p data-i18n="sub.banner.desc">Fresh vegetables delivered every week. Save up to 20%!</p>
     </div>
-    <button type="button">Subscribe Now</button>
+    <button type="button" data-i18n="sub.banner.cta">Subscribe Now</button>
 </section>
 
 <!-- RECENTLY VIEWED -->
 <section class="products-section" id="recentlyViewedSection" style="display:none;">
-    <h2>Recently Viewed</h2>
+    <h2 data-i18n="recent.title">Recently Viewed</h2>
     <div id="recentlyViewedContainer" class="product-container">
     </div>
 </section>
@@ -189,16 +218,16 @@
 <!-- FEATURES -->
 <section class="features">
     <div>
-        <h3>Fast Delivery</h3>
-        <p>Quick delivery to your doorstep.</p>
+        <h3 data-i18n="features.fast.title">Fast Delivery</h3>
+        <p data-i18n="features.fast.desc">Quick delivery to your doorstep.</p>
     </div>
     <div>
-        <h3>Fresh Products</h3>
-        <p>Fresh vegetables and fruits.</p>
+        <h3 data-i18n="features.fresh.title">Fresh Products</h3>
+        <p data-i18n="features.fresh.desc">Fresh vegetables and fruits.</p>
     </div>
     <div>
-        <h3>Best Prices</h3>
-        <p>Affordable prices for everyone.</p>
+        <h3 data-i18n="features.price.title">Best Prices</h3>
+        <p data-i18n="features.price.desc">Affordable prices for everyone.</p>
     </div>
 </section>
 
@@ -217,7 +246,7 @@
         <div id="cartItems"></div>
         <h3 id="cartTotal">Total: ₹0</h3>
         <div id="minOrderNoteCart" class="min-order-note" style="display:none;"></div>
-        <button type="button" class="checkout-btn" onclick="proceedToCheckout()">Proceed To Checkout</button>
+        <button type="button" class="checkout-btn" data-i18n="checkout.proceed" onclick="proceedToCheckout()">Proceed To Checkout</button>
     </div>
 </div>
 

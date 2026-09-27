@@ -10,6 +10,35 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const googleAuth = require("../utils/googleAuth");
 const { sendOtpEmail } = require("../utils/emailService");
+const logger = require("../utils/logger");
+
+// Very common / weak passwords that are rejected regardless of length. This is
+// a minimal blocklist (not a dictionary); combined with the 8-character minimum
+// it defeats the most likely brute-force guesses without breaking legit users.
+const COMMON_PASSWORDS = new Set([
+    "12345678", "123456789", "1234567890", "password", "password1", "password123",
+    "password1234", "password12345", "password123456", "passw0rd", "iloveyou",
+    "letmein", "welcome", "welcome1", "admin", "admin123", "admin1234",
+    "admin12345", "administrator", "qwerty", "qwerty123", "qwertyuiop",
+    "abc123", "abc1234", "abc12345", "1234abcd", "11111111", "111111111",
+    "00000000", "123123", "123123123", "666666", "88888888", "football",
+    "monkey", "dragon", "master", "sunshine", "princess", "superman", "batman",
+    "trustno1", "1q2w3e4r", "qwer1234", "asdfgh", "zxcvbnm", "changeit",
+    "freshmart", "freshmart123", "freshmart@123", "freshmart12345"
+]);
+
+function passwordWeakReason(pw) {
+    if (typeof pw !== "string") return "Password is required.";
+    if (pw.length < 8) return "Password must be at least 8 characters long.";
+    if (COMMON_PASSWORDS.has(pw.trim().toLowerCase())) {
+        return "This password is too common. Please choose a stronger one.";
+    }
+    return null;
+}
+
+function validatePassword(pw) {
+    return passwordWeakReason(pw) === null;
+}
 
 // ---------- OTP / VERIFICATION CONSTANTS ----------
 const OTP_TTL_MS = 5 * 60 * 1000;          // OTP valid for 5 minutes
@@ -177,10 +206,6 @@ function publicUser(user) {
     };
 }
 
-function validatePassword(pw) {
-    return typeof pw === "string" && pw.length >= 6;
-}
-
 // ===============================
 // SIGNUP (email + password, OTP-verified)
 // ===============================
@@ -196,7 +221,8 @@ exports.signup = async (req, res) => {
             return res.status(400).json({ success: false, message: "Please enter a valid email address." });
         }
         if (!validatePassword(password)) {
-            return res.status(400).json({ success: false, message: "Password must be at least 6 characters long." });
+            const reason = passwordWeakReason(password);
+            return res.status(400).json({ success: false, message: reason || "Password must be at least 8 characters long." });
         }
 
         let user = await User.findOne({ email: normalized });
@@ -268,7 +294,10 @@ exports.signupVerifyOtp = async (req, res) => {
         if (result === "ok") {
             user.emailVerified = true;
             await user.save();
-            setAuthCookie(req, res, user._id);
+setAuthCookie(req, res, user._id);
+        if (user.role === "admin") {
+            logger.info({ ev: "admin_login", user: String(user._id) });
+        }
             const body = {
                 success: true,
                 message: "Email verified. Your account is ready!",
@@ -337,11 +366,13 @@ exports.login = async (req, res) => {
 
         const user = await User.findOne({ email: normalizeEmail(email) });
         if (!user) {
-            return res.status(400).json({ success: false, message: "No account found. Please create an account first." });
+            logger.warn({ ev: "auth_failed_login", email: normalizeEmail(email), reason: "no_account" });
+            return res.status(400).json({ success: false, message: "Invalid email or password" });
         }
 
         const isMatch = await user.matchPassword(password);
         if (!isMatch) {
+            logger.warn({ ev: "auth_failed_login", email: normalizeEmail(email), reason: "bad_password" });
             return res.status(400).json({ success: false, message: "Invalid email or password" });
         }
 
@@ -471,7 +502,7 @@ exports.forgotPasswordReset = async (req, res) => {
             return res.status(400).json({ success: false, message: "Reset token is required." });
         }
         if (!validatePassword(newPassword)) {
-            return res.status(400).json({ success: false, message: "New password must be at least 6 characters long." });
+            return res.status(400).json({ success: false, message: passwordWeakReason(newPassword) || "New password must be at least 8 characters long." });
         }
 
         const user = await User.findOne({ resetTokenHash: hashSecret(resetToken) });
@@ -500,7 +531,7 @@ exports.getMe = async (req, res) => {
 exports.updateMe = async (req, res) => {
     try {
         let updates = Object.keys(req.body);
-        const allowedUpdates = ["name", "phone", "addresses", "password", "deleteAddressIndex", "setDefaultIndex"];
+        const allowedUpdates = ["name", "phone", "addresses", "password", "deleteAddressIndex", "setDefaultIndex", "language"];
         const isValidUpdate = updates.every((update) => allowedUpdates.includes(update.trim()));
 
         if (!isValidUpdate) {
@@ -530,16 +561,17 @@ exports.updateMe = async (req, res) => {
 
         // Apply allowed updates. The password is hashed by the User model's
         // pre-save hook (bcrypt) when it is modified — do NOT hash it twice here.
-        const applyKeys = ["name", "phone", "addresses"];
+        if (req.body.language !== undefined && !["en", "hi"].includes(String(req.body.language))) {
+            return res.status(400).json({ success: false, message: "Language must be 'en' or 'hi'" });
+        }
+        const applyKeys = ["name", "phone", "addresses", "language"];
         applyKeys.forEach((k) => {
             if (req.body[k] !== undefined) req.user[k] = req.body[k];
         });
         if (req.body.password !== undefined) {
-            if (req.body.password.length < 6) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Password must be at least 6 characters",
-                });
+            const reason = passwordWeakReason(String(req.body.password || ""));
+            if (reason) {
+                return res.status(400).json({ success: false, message: reason });
             }
             req.user.password = String(req.body.password);
         }

@@ -3,11 +3,14 @@
 // ===============================
 
 const Product = require("../models/Product");
+const Order = require("../models/Order");
 const mongoose = require("mongoose");
 const InventoryLog = require("../models/InventoryLog");
 const { normalizeProductImage, parseImageDataUri } = require("../utils/productImage");
 const { uploadImageBytes } = require("../utils/cloudinary");
 const { normalizeVariants } = require("../utils/variants");
+const searchUtils = require("../utils/search");
+const aiProvider = require("../utils/aiProvider");
 
 // Audit helper: record a stock movement (root or variant) and keep the trail
 // queryable from the admin inventory panel.
@@ -23,6 +26,136 @@ async function logStockChange(entry) {
 function isBadObjectId(id) {
     return !mongoose.Types.ObjectId.isValid(String(id || ""));
 }
+
+// ===============================
+// SEARCH SUGGESTIONS (public, rate-limited)
+// Real autocomplete data straight from the product catalog: partial product
+// names and matching categories. Only public catalog fields are returned.
+// ===============================
+exports.getSuggestions = async (req, res) => {
+    try {
+        if (!req.query.q || String(req.query.q).trim() === "") {
+            // Blank query: nothing typed yet -> empty list (frontend never sends
+            // these; avoids a wasted suggestion query per keystroke boundary).
+            return res.json({ success: true, count: 0, suggestions: [] });
+        }
+        const v = searchUtils.validateSearchQuery(req.query.q, searchUtils.MAX_SUGGEST_QUERY_LENGTH);
+        if (!v.ok) {
+            // Overlong/sanitized-empty queries are simply rejected.
+            return res.status(400).json({ success: false, message: v.message });
+        }
+        const q = v.value;
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 8, 1), 10);
+
+        const re = searchUtils.nameRegexFor(q);
+        const [products, cats] = await Promise.all([
+            Product.find({ active: true, stock: { $gt: 0 }, name: { $regex: re, $options: "i" } })
+                .select("name price unit category emoji")
+                .limit(limit * 2)
+                .lean(),
+            searchUtils.getCategories()
+        ]);
+
+        const lowerQ = q.toLowerCase();
+        const productItems = products.map(function (p) {
+            return {
+                type: "product",
+                _id: String(p._id),
+                name: p.name,
+                price: p.price,
+                unit: p.unit,
+                category: p.category,
+                emoji: p.emoji
+            };
+        });
+        // Prefix matches first, then alphabetical.
+        productItems.sort(function (a, b) {
+            const aPrefix = a.name.toLowerCase().indexOf(lowerQ) === 0 ? 0 : 1;
+            const bPrefix = b.name.toLowerCase().indexOf(lowerQ) === 0 ? 0 : 1;
+            return (aPrefix - bPrefix) || a.name.localeCompare(b.name);
+        });
+
+        const categoryItems = cats
+            .filter(function (c) { return c.name.toLowerCase().indexOf(lowerQ) !== -1; })
+            .map(function (c) { return { type: "category", name: c.name, count: c.count }; });
+
+        const exactCategory = categoryItems.find(function (c) { return c.name.toLowerCase() === lowerQ; });
+
+        const combined = [];
+        if (exactCategory) combined.push(exactCategory);
+        productItems.forEach(function (it) { if (combined.length < limit) combined.push(it); });
+        categoryItems.forEach(function (it) {
+            if (combined.length < limit && combined.indexOf(it) === -1) combined.push(it);
+        });
+
+        res.json({ success: true, count: combined.length, suggestions: combined });
+    } catch (error) {
+        res.status(500).json({ success: false, message: "Suggestion search failed" });
+    }
+};
+
+// ===============================
+// AI SEARCH (public, rate-limited)
+// Frontend -> backend -> (optional) AI provider -> backend re-validates names
+// -> results come ONLY from the FreshMart database. With no provider key the
+// same endpoint answers deterministically from the real catalog.
+// The AI can never invent products or touch private data: it only picks names
+// from a server-side catalog list, and every name is re-validated here.
+// ===============================
+exports.aiSearch = async (req, res) => {
+    try {
+        const v = searchUtils.validateSearchQuery(
+            req.body && req.body.query,
+            searchUtils.MAX_AI_QUERY_LENGTH
+        );
+        if (!v.ok) {
+            return res.status(400).json({ success: false, message: v.message });
+        }
+        const query = v.value;
+        const limit = Math.min(Math.max(parseInt((req.body && req.body.limit), 10) || 8, 1), 12);
+
+        if (aiProvider.isConfigured()) {
+            const catalog = await Product.find({ active: true, stock: { $gt: 0 } })
+                .select("name")
+                .limit(300)
+                .lean();
+            const names = catalog.map(function (p) { return p.name; });
+
+            let picked = null;
+            try {
+                picked = await aiProvider.searchProductNames(query, names);
+            } catch (err) {
+                // Provider down/misconfigured/slow -> deterministic fallback.
+                picked = null;
+            }
+
+            if (Array.isArray(picked)) {
+                const items = await Product.find({
+                    active: true,
+                    stock: { $gt: 0 },
+                    name: { $in: picked }
+                })
+                    .select("name price unit category emoji gradient rating ratingCount image")
+                    .lean();
+                const order = {};
+                picked.forEach(function (n, i) { order[n] = i; });
+                items.sort(function (a, b) { return (order[a.name] || 0) - (order[b.name] || 0); });
+                return res.json({
+                    success: true,
+                    source: "ai",
+                    query: query,
+                    count: items.length,
+                    items: items
+                });
+            }
+        }
+
+        const items = await searchUtils.findProductsByIntent(query, limit);
+        res.json({ success: true, source: "local", query: query, count: items.length, items: items });
+    } catch (error) {
+        res.status(500).json({ success: false, message: "Search failed" });
+    }
+};
 
 // GET ALL PRODUCTS (public, only active)
 exports.getProducts = async (req, res) => {
@@ -45,7 +178,83 @@ exports.getProducts = async (req, res) => {
     }
 };
 
+// ===============================
+// TRENDING PRODUCTS (real order data)
+// Ranked by actual recent sales: quantity sold (weighted) + order frequency,
+// restricted to active, in-stock products. When there is not enough sales
+// history, falls back to the top-rated active products so the section never
+// renders empty. No customer/PII data is ever included.
+// ===============================
+exports.getTrendingProducts = async (req, res) => {
+    try {
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 8, 1), 20);
+        const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+        const agg = await Order.aggregate([
+            { $match: { status: { $ne: "Cancelled" }, createdAt: { $gte: since } } },
+            { $unwind: "$items" },
+            { $match: { "items.productId": { $exists: true, $ne: null } } },
+            { $group: {
+                _id: "$items.productId",
+                soldQty: { $sum: "$items.quantity" },
+                orderCount: { $sum: 1 },
+                lastOrder: { $max: "$createdAt" }
+            } },
+            { $lookup: { from: "products", localField: "_id", foreignField: "_id", as: "p" } },
+            { $unwind: { path: "$p", preserveNullAndEmptyArrays: false } },
+            { $match: { "p.active": true, "p.stock": { $gt: 0 } } },
+            { $addFields: { score: { $add: [{ $multiply: ["$soldQty", 2] }, "$orderCount"] } } },
+            { $sort: { score: -1, lastOrder: -1 } },
+            { $limit: limit },
+            { $project: {
+                _id: 1,
+                soldQty: 1,
+                orderCount: 1,
+                score: 1,
+                name: "$p.name",
+                price: "$p.price",
+                unit: "$p.unit",
+                category: "$p.category",
+                emoji: "$p.emoji",
+                gradient: "$p.gradient",
+                image: "$p.image",
+                rating: "$p.rating",
+                ratingCount: "$p.ratingCount"
+            } }
+        ]);
+
+        let data = agg.map((d) => ({ ...d, fromSales: true }));
+        if (data.length === 0) {
+            const fallback = await Product.find({ active: true, stock: { $gt: 0 } })
+                .sort({ rating: -1, ratingCount: -1 })
+                .limit(limit)
+                .lean();
+            data = fallback.map((p) => ({
+                _id: p._id,
+                name: p.name,
+                price: p.price,
+                unit: p.unit,
+                category: p.category,
+                emoji: p.emoji,
+                gradient: p.gradient,
+                image: p.image,
+                rating: p.rating,
+                ratingCount: p.ratingCount,
+                soldQty: 0,
+                orderCount: 0,
+                fromSales: false
+            }));
+        }
+
+        res.json({ success: true, count: data.length, data: data, fromSales: agg.length > 0 });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// ===============================
 // GET SINGLE PRODUCT
+// ===============================
 exports.getProduct = async (req, res) => {
     try {
         if (isBadObjectId(req.params.id)) {

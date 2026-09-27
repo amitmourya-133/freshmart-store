@@ -226,4 +226,39 @@ async function sendDeliveryConfirmation({ to, order }) {
     });
 }
 
-module.exports = { sendOtpEmail, sendEmail, sendOrderConfirmation, sendOrderStatusUpdate, sendDeliveryConfirmation, smtpHint };
+// D. New delivery assignment notification for the delivery partner.
+async function sendDeliveryAssignment({ to, order, partnerName }) {
+    const recipient = String((to || "").trim());
+    if (!recipient || !(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient))) {
+        return { sent: false, reason: "no_recipient" };
+    }
+    const html =
+        '<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;padding:24px;border:1px solid #e4e4e4;border-radius:12px;">' +
+        '<h2 style="color:#159447;margin:0 0 4px;">🥬 FreshMart</h2>' +
+        '<p style="color:#333;font-size:15px;font-weight:bold;margin:10px 0 2px;">New Delivery Assignment</p>' +
+        '<p style="color:#777;font-size:13px;margin:0 0 12px;">Order <strong>' + (order.orderNumber || "") + '</strong> • ' + indianDate(order.createdAt) + '</p>' +
+        '<p style="color:#333;font-size:14px;">Hi ' + (partnerName || "Partner") + ', a new order has been assigned to you for delivery.</p>' +
+        '<p style="color:#333;font-size:14px;margin-top:10px;">Delivery Address:<br><strong>' + escHtmlAddr(order.customer) + '</strong></p>' +
+        (order.deliveryLocation && order.deliveryLocation.latitude != null
+            ? '<p style="color:#666;font-size:13px;">GPS: ' + order.deliveryLocation.latitude.toFixed(6) + ', ' + order.deliveryLocation.longitude.toFixed(6) + '</p>'
+            : '') +
+        '<p style="color:#666;font-size:13px;margin-top:10px;">Payment: ' + (order.payment || "Cash On Delivery") + ' • Total: <strong>' + inr(order.total) + '</strong></p>' +
+        '<p style="color:#999;font-size:12px;margin-top:18px;">You will receive the delivery OTP from the customer at the time of delivery.</p>' +
+        '</div>';
+    return sendEmail({ to: recipient, subject: "New Delivery - FreshMart #" + (order.orderNumber || ""), html: html });
+}
+
+function escHtmlAddr(c) {
+    if (!c) return "";
+    const parts = [
+        c.name || "",
+        c.phone || "",
+        c.address || "",
+        c.city || "",
+        c.state || "",
+        c.pincode || ""
+    ];
+    return parts.filter(Boolean).join(", ");
+}
+
+module.exports = { sendOtpEmail, sendEmail, sendOrderConfirmation, sendOrderStatusUpdate, sendDeliveryConfirmation, sendDeliveryAssignment, smtpHint };

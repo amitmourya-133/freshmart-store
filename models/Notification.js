@@ -42,6 +42,13 @@ const NotificationSchema = new mongoose.Schema(
         readAt: {
             type: Date,
         },
+        // Optional idempotency key: when provided, notifyBase only creates the
+        // notification once per (user, dedupeKey), preventing duplicate inbox
+        // entries for the same event (e.g. repeated delivery status POSTs).
+        dedupeKey: {
+            type: String,
+            trim: true,
+        },
     },
     { timestamps: true }
 );
@@ -49,5 +56,10 @@ const NotificationSchema = new mongoose.Schema(
 // Per-recipient inbox queries (unread badge, list ordering)
 NotificationSchema.index({ user: 1, read: 1 });
 NotificationSchema.index({ user: 1, createdAt: -1 });
+// Exactly-once enforcement for dedupeKey-bearing notifications.
+NotificationSchema.index(
+    { user: 1, dedupeKey: 1 },
+    { unique: true, partialFilterExpression: { dedupeKey: { $type: "string" } } }
+);
 
 module.exports = mongoose.model("Notification", NotificationSchema);

@@ -6,11 +6,12 @@ const UserSubscription = require("../models/UserSubscription");
 const { protect, admin } = require("../middleware/auth");
 const notificationController = require("../controllers/notificationController");
 
-function inboxSub(userId, title, message, planName) {
+function inboxSub(userId, title, message, planName, dedupeKey) {
     notificationController.notifyBase(userId, {
         type: "subscription",
         title: title,
         message: message,
+        dedupeKey: dedupeKey || undefined,
         data: { link: "subscription.html", plan: planName || "" },
     });
 }
@@ -226,7 +227,7 @@ router.post("/:planId", protect, async (req, res) => {
         });
 
         await userSubscription.save();
-        inboxSub(req.user.id, "Subscription activated", "Your " + plan.name + " subscription is active. Next delivery " + nextDeliveryDate.toISOString().slice(0, 10) + ".", plan.name);
+        inboxSub(req.user.id, "Subscription activated", "Your " + plan.name + " subscription is active. Next delivery " + nextDeliveryDate.toISOString().slice(0, 10) + ".", plan.name, "sub:" + String(userSubscription._id) + ":activate");
 
         return res.json({
             success: true,
@@ -260,7 +261,7 @@ router.put("/:subscriptionId/pause", protect, async (req, res) => {
 
         subscription.status = "paused";
         await subscription.save();
-        inboxSub(req.user.id, "Subscription paused", "Your subscription is paused. Resume anytime.", "");
+        inboxSub(req.user.id, "Subscription paused", "Your subscription is paused. Resume anytime.", "", "sub:" + String(subscription._id) + ":pause");
 
         return res.json({
             success: true,
@@ -294,7 +295,7 @@ router.put("/:subscriptionId/resume", protect, async (req, res) => {
 
         subscription.status = "active";
         await subscription.save();
-        inboxSub(req.user.id, "Subscription resumed", "Your subscription is active again.", "");
+        inboxSub(req.user.id, "Subscription resumed", "Your subscription is active again.", "", "sub:" + String(subscription._id) + ":resume");
 
         return res.json({
             success: true,
@@ -329,7 +330,7 @@ router.put("/:subscriptionId/cancel", protect, async (req, res) => {
         subscription.status = "cancelled";
         subscription.cancelDate = new Date();
         await subscription.save();
-        inboxSub(req.user.id, "Subscription cancelled", "Your subscription has been cancelled.", "");
+        inboxSub(req.user.id, "Subscription cancelled", "Your subscription has been cancelled.", "", "sub:" + String(subscription._id) + ":cancel");
 
         return res.json({
             success: true,

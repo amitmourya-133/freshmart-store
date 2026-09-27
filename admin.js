@@ -10,20 +10,26 @@ var adminReviews = [];
 var adminEditingId = null;
 var activeTab = "orders";
 
-// DB-backed store configuration (delivery + low-stock threshold).
-var adminSettings = { deliveryCharge: 20, freeDeliveryThreshold: 500, lowStockThreshold: 20, minimumOrderValue: 0 };
+// DB-backed store configuration (delivery + low-stock threshold + radius/ETA).
+var adminSettings = { deliveryCharge: 20, freeDeliveryThreshold: 500, lowStockThreshold: 20, minimumOrderValue: 0, deliveryRadiusKm: 0, storeLat: 0, storeLng: 0, storeLocality: "Store", etaBaseMinutes: 45, etaMinutesPerKm: 3 };
 var adminSettingsLoaded = false;
 
 var ORDER_STATUSES = ["Placed", "Confirmed", "Preparing", "Out for Delivery", "Delivered", "Cancelled"];
 
 function loadAdminSettings() {
-    if (adminSettingsLoaded || typeof apiGetSettings !== "function") return Promise.resolve(adminSettings);
+    if (adminSettingsLoaded && typeof apiGetSettings !== "function") return Promise.resolve(adminSettings);
     return apiGetSettings().then(function(s) {
         adminSettings = {
             deliveryCharge: (typeof s.deliveryCharge === "number" && s.deliveryCharge >= 0) ? s.deliveryCharge : 20,
             freeDeliveryThreshold: (typeof s.freeDeliveryThreshold === "number" && s.freeDeliveryThreshold >= 0) ? s.freeDeliveryThreshold : 500,
             lowStockThreshold: (typeof s.lowStockThreshold === "number" && s.lowStockThreshold >= 1) ? s.lowStockThreshold : 20,
-            minimumOrderValue: (typeof s.minimumOrderValue === "number" && s.minimumOrderValue >= 0) ? s.minimumOrderValue : 0
+            minimumOrderValue: (typeof s.minimumOrderValue === "number" && s.minimumOrderValue >= 0) ? s.minimumOrderValue : 0,
+            deliveryRadiusKm: (typeof s.deliveryRadiusKm === "number" && s.deliveryRadiusKm > 0) ? s.deliveryRadiusKm : 0,
+            storeLat: (typeof s.storeLat === "number") ? s.storeLat : 0,
+            storeLng: (typeof s.storeLng === "number") ? s.storeLng : 0,
+            storeLocality: (typeof s.storeLocality === "string" && s.storeLocality.trim()) ? s.storeLocality.trim() : "Store",
+            etaBaseMinutes: (typeof s.etaBaseMinutes === "number" && s.etaBaseMinutes >= 0) ? s.etaBaseMinutes : 45,
+            etaMinutesPerKm: (typeof s.etaMinutesPerKm === "number" && s.etaMinutesPerKm >= 0) ? s.etaMinutesPerKm : 3
         };
         adminSettingsLoaded = true;
         return adminSettings;
@@ -578,6 +584,7 @@ function adminDeliveryBlock(order) {
         }).join("");
         return '<div class="order-detail-block"><h4>Delivery</h4>' +
             '<p>Status: <span class="admin-badge ' + (track.status === "DELIVERED" ? "badge-ok" : "badge-pending") + '">' + esc(track.status) + '</span></p>' +
+            (order.eta && order.eta.text ? '<p><strong>ETA:</strong> ' + esc(order.eta.text) + (order.eta.source === "rider" ? " (live, from partner location)" : "") + '</p>' : "") +
             pparts + pupdate + stamps +
             (track.proofImage ? '<p><a href="' + esc(track.proofImage) + '" target="_blank" rel="noopener noreferrer">View proof image</a></p>' : "") +
             '</div>';
@@ -1496,6 +1503,11 @@ function initAdminPage() {
 
     initDarkMode();
 
+    // Auto-subscribe admin to push notifications (for new order alerts).
+    if (typeof PushNotifications !== "undefined" && PushNotifications.autoSubscribeIfPossible) {
+        PushNotifications.autoSubscribeIfPossible();
+    }
+
     // Local UI flag only - real authorization is enforced by apiGetMe() +
     // the server-side admin middleware using the httpOnly cookie.
     if (!hasSession()) {
@@ -1553,12 +1565,38 @@ function renderSettingsTab() {
                     '<label for="setMinOrder">Minimum Order Value (₹) — 0 = no minimum</label>' +
                     '<input type="number" id="setMinOrder" class="stock-input" min="0" step="1" value="' + esc(s.minimumOrderValue) + '">' +
                 '</div>' +
-                '<div class="settings-row">' +
+'<div class="settings-row">' +
                     '<label for="setLowStock">Low-Stock Warning Threshold (units)</label>' +
                     '<input type="number" id="setLowStock" class="stock-input" min="1" step="1" value="' + esc(s.lowStockThreshold) + '">' +
                 '</div>' +
-                (badRange ? '<p class="settings-hint warn">⚠�? The free-delivery threshold is below the minimum order value. With this combination every order becomes eligible for free delivery — make sure that is intentional.</p>' : '') +
+                '<div class="settings-head"><h3>📍 Delivery Area & ETA</h3><p>The server measures the straight-line distance from the store location to the customer\'s captured GPS and blocks orders outside the radius. Radius 0 disables the service-area check entirely so address-only customers are never blocked.</p></div>' +
+                '<div class="settings-row">' +
+                    '<label for="setDeliveryRadius">Delivery Radius (km) — 0 = no limit</label>' +
+                    '<input type="number" id="setDeliveryRadius" class="stock-input" min="0" step="0.5" value="' + esc(s.deliveryRadiusKm) + '">' +
+                '</div>' +
+                '<div class="settings-row">' +
+                    '<label for="setStoreLat">Store Latitude</label>' +
+                    '<input type="number" id="setStoreLat" class="stock-input" min="-90" max="90" step="any" value="' + esc(s.storeLat) + '">' +
+                '</div>' +
+                '<div class="settings-row">' +
+                    '<label for="setStoreLng">Store Longitude</label>' +
+                    '<input type="number" id="setStoreLng" class="stock-input" min="-180" max="180" step="any" value="' + esc(s.storeLng) + '">' +
+                '</div>' +
+                '<div class="settings-row">' +
+                    '<label for="setStoreLocality">Store Locality (label customers see, e.g. "Noida")</label>' +
+                    '<input type="text" id="setStoreLocality" class="stock-input" maxlength="120" value="' + esc(s.storeLocality) + '">' +
+                '</div>' +
+                '<div class="settings-row">' +
+                    '<label for="setEtaBase">ETA Base (minutes) — floor for out-for-delivery orders</label>' +
+                    '<input type="number" id="setEtaBase" class="stock-input" min="0" step="5" value="' + esc(s.etaBaseMinutes) + '">' +
+                '</div>' +
+                '<div class="settings-row">' +
+                    '<label for="setEtaPerKm">ETA Minutes per km (used for live rider estimates)</label>' +
+                    '<input type="number" id="setEtaPerKm" class="stock-input" min="0" step="0.5" value="' + esc(s.etaMinutesPerKm) + '">' +
+                '</div>' +
+                (badRange ? '<p class="settings-hint warn">⚠️ The free-delivery threshold is below the minimum order value. With this combination every order becomes eligible for free delivery — make sure that is intentional.</p>' : '') +
                 '<p class="settings-hint">Customers automatically get FREE delivery on orders at or above the threshold. Setting the charge to 0 disables delivery fees; setting the threshold to 0 always charges. The minimum order value blocks below-threshold checkouts entirely (0 keeps the store fully open).</p>' +
+                '<p class="settings-hint">When the delivery radius is above 0, orders without a captured GPS location and destinations outside the radius are rejected with a clear message. Keep the radius at 0 until you have entered the store coordinates.</p>' +
                 '<button class="row-btn verify settings-save" onclick="saveAdminSettings()">💾 Save Settings</button>' +
                 '<div class="settings-status" id="settingsStatus" style="display:none;"></div>' +
             '</div>';
@@ -1573,6 +1611,12 @@ function saveAdminSettings() {
     var freeThreshold = parseFloat(document.getElementById("setFreeThreshold").value);
     var minOrder = parseFloat(document.getElementById("setMinOrder").value);
     var lowStock = parseInt(document.getElementById("setLowStock").value, 10);
+    var radius = parseFloat(document.getElementById("setDeliveryRadius").value);
+    var storeLat = parseFloat(document.getElementById("setStoreLat").value);
+    var storeLng = parseFloat(document.getElementById("setStoreLng").value);
+    var storeLocality = document.getElementById("setStoreLocality").value;
+    var etaBase = parseInt(document.getElementById("setEtaBase").value, 10);
+    var etaPerKm = parseFloat(document.getElementById("setEtaPerKm").value);
 
     if (isNaN(deliveryCharge) || deliveryCharge < 0) {
         showToast("Please enter a valid delivery charge.", "error");
@@ -1590,6 +1634,34 @@ function saveAdminSettings() {
         showToast("Low-stock threshold must be at least 1.", "error");
         return;
     }
+    if (isNaN(radius) || radius < 0 || radius > 500) {
+        showToast("Delivery radius must be between 0 and 500 km (0 disables the check).", "error");
+        return;
+    }
+    if (radius > 0 && isNaN(storeLat)) {
+        showToast("Enter a valid store latitude before enabling the delivery radius.", "error");
+        return;
+    }
+    if (radius > 0 && isNaN(storeLng)) {
+        showToast("Enter a valid store longitude before enabling the delivery radius.", "error");
+        return;
+    }
+    if (radius > 0 && storeLat === 0 && storeLng === 0) {
+        showToast("Store coordinates are still (0,0). Enter the real store latitude and longitude first.", "error");
+        return;
+    }
+    if (!String(storeLocality).trim()) {
+        showToast("Store locality cannot be empty.", "error");
+        return;
+    }
+    if (isNaN(etaBase) || etaBase < 0 || etaBase > 600) {
+        showToast("ETA base must be between 0 and 600 minutes.", "error");
+        return;
+    }
+    if (isNaN(etaPerKm) || etaPerKm < 0 || etaPerKm > 30) {
+        showToast("ETA minutes-per-km must be between 0 and 30.", "error");
+        return;
+    }
     if (typeof apiUpdateSettings !== "function") {
         showToast("Settings API unavailable.", "error");
         return;
@@ -1602,15 +1674,22 @@ function saveAdminSettings() {
         deliveryCharge: deliveryCharge,
         freeDeliveryThreshold: freeThreshold,
         minimumOrderValue: minOrder,
-        lowStockThreshold: lowStock
+        lowStockThreshold: lowStock,
+        deliveryRadiusKm: radius,
+        storeLat: storeLat,
+        storeLng: storeLng,
+        storeLocality: String(storeLocality).trim(),
+        etaBaseMinutes: etaBase,
+        etaMinutesPerKm: etaPerKm
     }).then(function(saved) {
         adminSettingsLoaded = false;
         loadAdminSettings().then(function() {
             if (status) {
                 status.style.display = "block";
                 status.className = "settings-status ok";
-                status.innerHTML = "✅ Settings saved. Delivery fee ₹" + esc(adminSettings.deliveryCharge) + " (free above ₹" + esc(adminSettings.freeDeliveryThreshold) + "), minimum order ₹" + esc(adminSettings.minimumOrderValue) + ", low-stock warning at " + esc(adminSettings.lowStockThreshold) + " units.";
-                setTimeout(function() { status.style.display = "none"; }, 6000);
+                status.innerHTML = "✅ Settings saved. Delivery fee ₹" + esc(adminSettings.deliveryCharge) + " (free above ₹" + esc(adminSettings.freeDeliveryThreshold) + "), minimum order ₹" + esc(adminSettings.minimumOrderValue) + ", low-stock warning at " + esc(adminSettings.lowStockThreshold) + " units." +
+                    (adminSettings.deliveryRadiusKm > 0 ? " Delivery radius: " + esc(adminSettings.deliveryRadiusKm) + " km from " + esc(adminSettings.storeLocality) + "." : " Delivery radius: off.");
+                setTimeout(function() { status.style.display = "none"; }, 7000);
             }
             showToast("Settings saved successfully.", "success");
         });

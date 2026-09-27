@@ -6,18 +6,50 @@ const Notification = require("../models/Notification");
 
 // Fire-and-forget inbox addition. Never throws and never affects the calling
 // request — a notification failure must not fail an order/payment/delivery.
+// When payload.dedupeKey is set the notification is created exactly once per
+// (recipient, dedupeKey) via an atomic upsert + unique partial index, which
+// prevents duplicate inbox entries for the same event. When the recipient has
+// Web Push subscriptions (opt-in), the same event is also delivered as a push.
 async function notifyBase(userId, payload) {
     if (!userId) return;
     try {
-        const doc = await Notification.create({
-            user: userId,
+        const base = {
             type: payload.type || "system",
             title: String(payload.title || "Update"),
             message: String(payload.message || ""),
             data: payload.data || {},
-        });
+        };
+
+        let doc;
+        if (payload.dedupeKey) {
+            const key = String(payload.dedupeKey).slice(0, 200);
+            const setOnInsert = Object.assign({ user: userId, dedupeKey: key }, base);
+            doc = await Notification.findOneAndUpdate(
+                { user: userId, dedupeKey: key },
+                { $setOnInsert: setOnInsert },
+                { upsert: true, new: true, setDefaultsOnInsert: true }
+            );
+        } else {
+            doc = await Notification.create(Object.assign({ user: userId }, base));
+        }
+
+        // Mirror the inbox event over Web Push when the recipient opted in
+        // (fire-and-forget; sendPushToUser exits immediately when push is not
+        // configured or the user has no subscriptions, so this never spams).
+        if (doc && payload.push !== false && payload.title !== undefined) {
+            try {
+                const pushController = require("./pushController");
+                const link = (payload.data && payload.data.link) || "notifications.html";
+                pushController
+                    .sendPushToUser(userId, String(payload.title), String(payload.message || ""), "/" + link)
+                    .catch(function () { /* non-fatal */ });
+            } catch (e) { /* non-fatal */ }
+        }
+
         return doc;
     } catch (e) {
+        // A duplicate insert under the unique (user, dedupeKey) index is an
+        // expected idempotent outcome — swallow it like any other failure.
         console.warn("[notification] create failed: " + ((e && e.message) || "unknown"));
         return null;
     }

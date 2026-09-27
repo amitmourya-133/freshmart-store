@@ -10,17 +10,6 @@ const paymentSchema = new Schema(
             unique: true,
         },
 
-        // Razorpay specific fields
-        razorpayOrderId: {
-            type: String,
-        },
-        razorpayPaymentId: {
-            type: String,
-        },
-        razorpaySignature: {
-            type: String,
-        },
-
         // Payment details
         amount: {
             type: Number,
@@ -45,10 +34,12 @@ const paymentSchema = new Schema(
             default: "created",
         },
 
-        // Payment method
+        // Payment method. "razorpay" was removed from the enum when the
+        // gateway integration was deprecated; historical records in MongoDB
+        // keep their stored value (no migration, no data change).
         paymentMethod: {
             type: String,
-            enum: ["cod", "razorpay", "upi_manual"],
+            enum: ["cod", "upi_manual"],
             default: "cod",
         },
 

@@ -20,3 +20,23 @@ Thumbs.db
 .idea/
 .vercel
 .env*
+
+# Runtime files (never commit)
+push-subscriptions.json
+
+# Backup / dump artifacts (never commit - contain full user/order PII)
+*.dump
+*.bson
+*.gz
+*.tar
+backup/
+dumps/
+
+# Local test output artifacts
+test-output/
+health.txt
+products.txt
+subs.txt
+profile.txt
+auth.txt
+safecheck.txt

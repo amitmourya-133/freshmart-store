@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { protect } = require("../middleware/auth");
 const notificationController = require("../controllers/notificationController");
+const pushController = require("../controllers/pushController");
 
 // All inbox routes are owner-scoped and require an authenticated user
 // (customer, delivery partner or admin).
@@ -17,5 +18,10 @@ router.put("/read-all", protect, notificationController.markAllRead);
 
 // PUT /api/notifications/:id/read — mark one notification read (owner)
 router.put("/:id/read", protect, notificationController.markRead);
+
+// Push notification routes
+router.get("/vapid-key", pushController.getVapidKey);
+router.post("/subscribe", protect, pushController.subscribe);
+router.post("/unsubscribe", protect, pushController.unsubscribe);
 
 module.exports = router;

@@ -12,6 +12,10 @@ const userSchema = new mongoose.Schema(
         phone: { type: String, trim: true },
         password: { type: String },
         role: { type: String, enum: ["customer", "admin", "delivery"], default: "customer" },
+        // Preferred interface language (customer-facing UI). Stored server-side
+        // so the preference is real and persists across devices, with a
+        // localStorage mirror for guests. Never includes private data.
+        language: { type: String, enum: ["en", "hi"], default: "en" },
         // OTP email-verification state. Only the SHA-256 hash is stored,
         // never the plain OTP.
         otpHash: { type: String },

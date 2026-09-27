@@ -87,6 +87,9 @@ app.use(cookieParser());
 
 app.use(express.json({ limit: "5mb" }));
 
+// Structured one-line-JSON request logging (see utils/logger.js).
+app.use(require("./utils/logger").requestLogger);
+
 // Security headers on every API (and locally-served static) response. On Vercel
 // the edge router also adds these for static files; here they guarantee the
 // API responses always carry them (and give local dev identical behaviour).
@@ -130,7 +133,7 @@ app.get("/api/health", (req, res) => {
 // Everything server-side (config, secrets, backend source, dependencies)
 // must NEVER be downloadable from the browser. This guard runs BEFORE
 // express.static and blocks any request that targets such files.
-const SERVED_ONLY_EXT = [".html", ".js", ".css", ".json", ".png", ".jpg", ".jpeg", ".jfif", ".webp", ".gif", ".svg", ".ico", ".txt"];
+const SERVED_ONLY_EXT = [".html", ".js", ".css", ".json", ".png", ".jpg", ".jpeg", ".jfif", ".webp", ".gif", ".svg", ".ico", ".txt", ".xml"];
 const NEVER_SERVE_PREFIX = [
     "/.env", "/.git", "/node_modules", "/server.js", "/app.js", "/seed.js",
     "/seedAdmin.js", "/package.json", "/package-lock.json", "/vercel.json",

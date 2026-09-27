@@ -77,7 +77,7 @@ function emailDelivered(assignment, order) {
 // In-app inbox update for the order owner when the delivery pipeline advances
 // (accepted / picked up / en route / rejected). Fire-and-forget; never blocks
 // the delivery flow.
-async function notifyCustomerAboutDelivery(orderId, title, message) {
+async function notifyCustomerAboutDelivery(orderId, title, message, dedupeKey) {
     try {
         const orderDoc = await Order.findById(orderId).select("user orderNumber");
         if (!orderDoc || !orderDoc.user) return;
@@ -86,6 +86,7 @@ async function notifyCustomerAboutDelivery(orderId, title, message) {
             type: "order_status",
             title: title,
             message: message,
+            dedupeKey: "order_inbox:" + String(orderDoc._id) + ":status:" + (dedupeKey || "Delivery"),
             data: { link: "orders.html", orderId: String(orderDoc._id), orderNumber: orderDoc.orderNumber || "" },
         });
     } catch (e) {
@@ -168,6 +169,17 @@ router.post("/assign", protect, admin, async (req, res) => {
             console.warn("[delivery-otp] email to customer failed: " + ((e && e.message) || "unknown"));
         }
 
+        // Email the delivery partner about the new assignment (fire-and-forget).
+        try {
+            await emailService.sendDeliveryAssignment({
+                to: deliveryUser.email,
+                order: order,
+                partnerName: deliveryUser.name,
+            });
+        } catch (e) {
+            console.warn("[delivery-assign] email to partner failed: " + ((e && e.message) || "unknown"));
+        }
+
         // In-app inbox: the partner sees the new assignment; the customer sees
         // that a partner is on the way. Fire-and-forget.
         try {
@@ -176,6 +188,7 @@ router.post("/assign", protect, admin, async (req, res) => {
                 type: "delivery_assignment",
                 title: "New delivery assignment",
                 message: "Order " + (order.orderNumber || "") + " is assigned to you. OTP required at delivery.",
+                dedupeKey: "delivery_assignment:" + String(order._id),
                 data: { link: "delivery.html", orderId: String(order._id), assignmentId: String(assignment._id) },
             });
             if (order.user) {
@@ -183,6 +196,7 @@ router.post("/assign", protect, admin, async (req, res) => {
                     type: "order_status",
                     title: "Delivery partner assigned",
                     message: "A delivery partner is picking up order " + (order.orderNumber || "") + ".",
+                    dedupeKey: "order_inbox:" + String(order._id) + ":status:Assignment",
                     data: { link: "orders.html", orderId: String(order._id), orderNumber: order.orderNumber || "" },
                 });
             }
@@ -213,6 +227,17 @@ router.get("/today", protect, delivery, async (req, res) => {
         })
             .populate("order", "orderNumber items total status paymentStatus paymentMethod deliverySlot customer customerEmail deliveryLocation")
             .sort({ assignedAt: -1 });
+
+        // Attach a real ETA per delivery (rider-GPS / pipeline / slot) so the
+        // partner sees expected drop pressure; uses only the partner's own data.
+        const deliveryEta = require("../utils/eta").deliveryEta;
+        for (const d of deliveries) {
+            if (d.order) {
+                try {
+                    d.order._doc.eta = await deliveryEta(d.order, d);
+                } catch (e) { /* non-fatal */ }
+            }
+        }
 
         return res.json({
             success: true,
@@ -261,7 +286,7 @@ router.put("/accept", protect, delivery, async (req, res) => {
         assignment.acceptedAt = new Date();
         await assignment.save();
 
-        notifyCustomerAboutDelivery(assignment.order, "Delivery accepted", "Your delivery partner has accepted order " + (assignment.order && assignment.order.orderNumber ? assignment.order.orderNumber : "") + ".");
+        notifyCustomerAboutDelivery(assignment.order, "Delivery accepted", "Your delivery partner has accepted order " + (assignment.order && assignment.order.orderNumber ? assignment.order.orderNumber : "") + ".", "Accepted");
 
         return res.json({
             success: true,
@@ -303,7 +328,7 @@ router.put("/reject", protect, delivery, async (req, res) => {
         assignment.status = "REJECTED";
         await assignment.save();
 
-        notifyCustomerAboutDelivery(assignment.order, "Delivery reassign pending", "Your delivery partner could not take order " + (assignment.order && assignment.order.orderNumber ? assignment.order.orderNumber : "") + ". An admin will reassign it shortly.");
+        notifyCustomerAboutDelivery(assignment.order, "Delivery reassign pending", "Your delivery partner could not take order " + (assignment.order && assignment.order.orderNumber ? assignment.order.orderNumber : "") + ". An admin will reassign it shortly.", "ReassignPending");
 
         return res.json({
             success: true,
@@ -430,9 +455,9 @@ router.put("/status", protect, delivery, async (req, res) => {
 
         // Keep the customer informed as the parcel moves through the pipeline.
         if (status === "PICKED_UP") {
-            notifyCustomerAboutDelivery(assignment.order, "Order picked up", "Your order has been picked up by the delivery partner.");
+            notifyCustomerAboutDelivery(assignment.order, "Order picked up", "Your order has been picked up by the delivery partner.", "Picked Up");
         } else if (status === "EN_ROUTE") {
-            notifyCustomerAboutDelivery(assignment.order, "Order on the way", "Your order is out for delivery and on its way to you!");
+            notifyCustomerAboutDelivery(assignment.order, "Order on the way", "Your order is out for delivery and on its way to you!", "Out for Delivery");
         }
 
         // On delivered: sync the parent Order, credit the delivery fee to the
@@ -455,6 +480,7 @@ router.put("/status", protect, delivery, async (req, res) => {
                             type: "order_status",
                             title: "Order delivered",
                             message: "Order " + (orderDoc.orderNumber || "") + " has been delivered. Enjoy!",
+                            dedupeKey: "order_inbox:" + String(orderDoc._id) + ":status:Delivered",
                             data: { link: "orders.html", orderId: String(orderDoc._id), orderNumber: orderDoc.orderNumber || "" },
                         });
                     }

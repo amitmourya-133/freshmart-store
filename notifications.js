@@ -1,91 +1,107 @@
 // ===============================
-// NOTIFICATIONS PAGE (R14)
-// Cookie-authed, owner-scoped /api/notifications.
+// PUSH NOTIFICATION SUBSCRIPTION (frontend)
+// Subscribes the user to Web Push notifications via the VAPID public key.
 // ===============================
 
-function notificationIcon(type) {
-    var map = {
-        order_status: "📦",
-        delivery_assignment: "🛵",
-        low_stock: "⚠️",
-        subscription: "📅",
-        payment: "💳",
-        review: "⭐",
-        system: "ℹ️"
-    };
-    return map[type] || "ℹ️";
-}
+const PushNotifications = (function () {
+    "use strict";
 
-function formatNotifDate(iso) {
-    if (!iso) return "";
-    try {
-        var d = new Date(iso);
-        var now = new Date();
-        var diff = (now.getTime() - d.getTime()) / 1000;
-        if (diff < 60) return "just now";
-        if (diff < 3600) return Math.floor(diff / 60) + " min ago";
-        if (diff < 86400) return Math.floor(diff / 3600) + " hr ago";
-        return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    } catch (e) { return ""; }
-}
+    let swRegistration = null;
 
-function loadNotifications() {
-    var container = document.getElementById("notificationsContainer");
-    if (!container) return;
-
-    container.innerHTML = '<p style="text-align:center;">Loading notifications...</p>';
-
-    apiFetchNotifications({ limit: 60 }).then(function(res) {
-        var list = res.data || [];
-        var unread = Number(res.unreadCount) || 0;
-        var summary = document.getElementById("notifSummary");
-        if (summary) summary.textContent = list.length + " notification(s) · " + unread + " unread";
-
-        var markAllBtn = document.getElementById("markAllBtn");
-        if (markAllBtn) markAllBtn.disabled = unread === 0;
-
-        if (list.length === 0) {
-            container.innerHTML = '<div class="empty-orders"><div class="empty-orders-icon">🔕</div><h2>No notifications yet</h2><p>Order updates, delivery alerts and low-stock warnings will appear here.</p></div>';
-            return;
+    async function init() {
+        if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+            return false;
         }
+        try {
+            swRegistration = await navigator.serviceWorker.ready;
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
 
-        container.innerHTML = list.map(function(n) {
-            var unreadCls = n.read ? " fm-notif-read" : "";
-            var link = n.data && n.data.link
-                ? '<button type="button" class="secondary-btn" onclick="window.location.href=\'' + jsStr(n.data.link) + '\'">View</button>'
-                : "";
-            var markBtn = n.read ? "" : '<button type="button" class="secondary-btn" onclick="markReadFromPage(\'' + jsStr(n._id) + '\')">Mark read</button>';
-            return '<div class="order-card fm-notif-card' + unreadCls + '">' +
-                '<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">' +
-                    '<div><div style="font-weight:600;">' + notificationIcon(n.type) + ' ' + escHtml(n.title) + '</div>' +
-                    '<small style="color:var(--text-secondary);">' + escHtml(formatNotifDate(n.createdAt)) + '</small></div>' +
-                    (n.read ? '<span style="color:#8a8a8a;font-size:12px;">read</span>' : '') +
-                '</div>' +
-                (n.message ? '<p style="margin:8px 0;">' + escHtml(n.message) + '</p>' : '') +
-                (link || markBtn ? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">' + link + markBtn + '</div>' : '') +
-                '</div>';
-        }).join("");
-    }).catch(function(err) {
-        container.innerHTML = '<div class="empty-orders"><div class="empty-orders-icon">⚠️</div><h2>Could not load notifications</h2><p>' + escHtml((err && err.message) || "Please try again.") + '</p></div>';
-    });
-}
+    async function getSubscription() {
+        if (!swRegistration) await init();
+        if (!swRegistration) return null;
+        return swRegistration.pushManager.getSubscription();
+    }
 
-function markReadFromPage(id) {
-    if (!id) return;
-    apiMarkNotificationRead(id).then(function() {
-        loadNotifications();
-        updateNotifBadge();
-    }).catch(function(err) {
-        if (typeof showToast === "function") showToast((err && err.message) || "Could not update notification.", "error");
-    });
-}
+    async function subscribe() {
+        if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+            return { ok: false, error: "unsupported" };
+        }
+        try {
+            swRegistration = await navigator.serviceWorker.ready;
+            const perm = await Notification.requestPermission();
+            if (perm !== "granted") {
+                return { ok: false, error: "denied" };
+            }
 
-function markAllReadFromPage() {
-    apiMarkAllNotificationsRead().then(function() {
-        loadNotifications();
-        updateNotifBadge();
-        if (typeof showToast === "function") showToast("All notifications marked as read.", "success");
-    }).catch(function(err) {
-        if (typeof showToast === "function") showToast((err && err.message) || "Could not update notifications.", "error");
-    });
-}
+            let sub = await swRegistration.pushManager.getSubscription();
+            if (!sub) {
+                const keyRes = await fetch("/api/notifications/vapid-key");
+                const keyData = await keyRes.json();
+                if (!keyData.publicKey) return { ok: false, error: "no_key" };
+
+                const appKey = urlBase64ToUint8Array(keyData.publicKey);
+                sub = await swRegistration.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: appKey
+                });
+            }
+
+            const res = await fetch("/api/notifications/subscribe", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ subscription: sub.toJSON() })
+            });
+            const data = await res.json();
+            return { ok: data.success === true, error: data.error };
+        } catch (e) {
+            return { ok: false, error: (e && e.message) || "error" };
+        }
+    }
+
+    async function unsubscribe() {
+        try {
+            swRegistration = await navigator.serviceWorker.ready;
+            const sub = await swRegistration.pushManager.getSubscription();
+            if (sub) {
+                await fetch("/api/notifications/unsubscribe", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ endpoint: sub.endpoint })
+                });
+                await sub.unsubscribe();
+            }
+            return { ok: true };
+        } catch (e) {
+            return { ok: false, error: (e && e.message) || "error" };
+        }
+    }
+
+    function urlBase64ToUint8Array(base64String) {
+        const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+        const base64 = (base64String + padding).replace(/\-/g, "+").replace(/_/g, "/");
+        const rawData = window.atob(base64);
+        const outputArray = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; ++i) {
+            outputArray[i] = rawData.charCodeAt(i);
+        }
+        return outputArray;
+    }
+
+    // Auto-subscribe on login when permission is already granted.
+    async function autoSubscribeIfPossible() {
+        if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+        if (Notification.permission !== "granted") return;
+        try {
+            const sub = await getSubscription();
+            if (!sub) await subscribe();
+        } catch (e) { /* silent */ }
+    }
+
+    return { init, subscribe, unsubscribe, autoSubscribeIfPossible, getSubscription };
+})();
+
+if (typeof module !== "undefined" && module.exports) module.exports = PushNotifications;

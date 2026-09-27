@@ -28,6 +28,40 @@ function isCacheable(request) {
     return true;
 }
 
+// Handle push notifications
+self.addEventListener("push", function (event) {
+    var data = {};
+    try { data = event.data ? event.data.json() : {}; } catch (e) {}
+    var title = data.title || "FreshMart";
+    var options = {
+        body: data.body || "",
+        icon: data.icon || "/jacfruit.png",
+        badge: data.icon || "/jacfruit.png",
+        data: { url: data.url || "/index.html" }
+    };
+    event.waitUntil(
+        self.registration.showNotification(title, options)
+    );
+});
+
+// Handle notification click
+self.addEventListener("notificationclick", function (event) {
+    event.notification.close();
+    var url = (event.notification.data && event.notification.data.url) || "/index.html";
+    event.waitUntil(
+        self.clients.matchAll({ type: "window" }).then(function (clientList) {
+            for (var i = 0; i < clientList.length; i++) {
+                if (clientList[i].url.indexOf(url) !== -1 && "focus" in clientList[i]) {
+                    return clientList[i].focus();
+                }
+            }
+            if (self.clients.openWindow) {
+                return self.clients.openWindow(url);
+            }
+        })
+    );
+});
+
 self.addEventListener("fetch", function (event) {
     var request = event.request;
     if (!isCacheable(request)) return;

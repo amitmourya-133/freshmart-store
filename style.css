@@ -239,6 +239,24 @@ header {
     transform: scale(1.1);
 }
 
+.lang-toggle-btn {
+    background: none;
+    border: 2px solid var(--border-color);
+    font-size: 13px;
+    font-weight: 700;
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--transition);
+    line-height: 1;
+    color: var(--green-dark, #159447);
+}
+
+.lang-toggle-btn:hover {
+    border-color: var(--green-primary);
+    transform: scale(1.05);
+}
+
 .search-box {
     display: flex;
     width: auto;
@@ -322,6 +340,67 @@ body.dark-mode .search-box button.voice-btn.listening {
     background: var(--green-primary);
     color: #fff;
 }
+
+/* ---------- SEARCH SUGGESTIONS ---------- */
+.search-box { position: relative; }
+
+.search-suggest {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    z-index: 1200;
+    display: none;
+    flex-direction: column;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+    overflow: hidden;
+    max-height: 320px;
+    overflow-y: auto;
+    padding: 4px;
+    gap: 2px;
+}
+body.dark-mode .search-suggest { background: var(--bg-tertiary); border-color: var(--border-color); }
+.search-suggest.open { display: flex; }
+
+.suggest-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 12px;
+    text-align: left;
+    background: transparent;
+    border: none;
+    border-radius: calc(var(--radius-sm) - 3px);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 14px;
+}
+.suggest-row:hover, .suggest-row.active {
+    background: rgba(21, 148, 71, 0.08);
+}
+.suggest-ico { font-size: 18px; line-height: 1; flex: 0 0 auto; }
+.sico-cat { font-size: 15px; }
+.sico-ai { font-size: 16px; }
+.suggest-text { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.suggest-sub { font-size: 12px; color: var(--text-secondary); }
+.suggest-meta { margin-left: auto; font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+.clear-ai-btn {
+    background: transparent;
+    border: 1px solid var(--green-primary);
+    color: var(--green-primary);
+    border-radius: var(--radius-sm);
+    padding: 2px 8px;
+    cursor: pointer;
+    font-size: 12px;
+    margin-left: 6px;
+}
+.clear-ai-btn:hover { background: var(--green-primary); color: #fff; }
+.no-result-text { text-align: center; color: var(--text-secondary); padding: 24px 0; }
 
 .cart-btn {
     background: var(--green-primary);
@@ -776,6 +855,18 @@ body.dark-mode .clear-filters-btn { background: var(--bg-tertiary); color: var(-
     font-size: 11px;
     font-weight: bold;
     margin-bottom: 12px;
+}
+
+.product-badge.trend-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 2;
+    background: #e74c3c;
+    color: #fff;
+    font-size: 10px;
+    letter-spacing: 0.03em;
+    margin-bottom: 0;
 }
 
 .product-add-btn {
@@ -3856,6 +3947,7 @@ body.dark-mode .banner-dot.active {
 /* ---- Customer order history page ---- */
 .order-pay-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 6px 0 2px; }
 .order-pay-row .pay-badge { margin: 0; }
+.order-eta { margin: 6px 0; padding: 8px 12px; background: rgba(39, 174, 96, 0.1); border-left: 3px solid #27ae60; border-radius: var(--radius-sm); color: var(--text-primary); }
 .pay-badge.pay-paid { background: #27ae60; }
 .pay-badge.pay-pending { background: #f39c12; }
 .pay-badge.pay-failed { background: #e74c3c; }
@@ -5092,3 +5184,4 @@ body.dark-mode [data-page="delivery"] .delivery-proof img {
 }
 .loc-share-pill.live { display: inline-block; }
 .loc-note { font-size: 12px; color: var(--text-secondary, #666); }
+.loc-warning { margin-top: 8px; padding: 10px 12px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; color: #856404; font-size: 13px; font-weight: 600; }

@@ -45,10 +45,6 @@ for f in js_files:
     if 'cloudinary' in content.lower():
         issues.append('Cloudinary reference found in JS')
     
-    # Check for Razorpay keys
-    if 'razorpay' in content.lower():
-        issues.append('Razorpay reference found in JS')
-    
     # Check for email passwords
     if re.search(r['"\"?EMAIL_PASS|EMAIL_USER["\']?\s*[:=]\s*["\']', content]:
         issues.append('email credentials possibly in JS')
