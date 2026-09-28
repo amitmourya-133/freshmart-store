@@ -31,6 +31,11 @@ const userSchema = new mongoose.Schema(
         resetTokenHash: { type: String },
         resetTokenExpiry: { type: Date },
         googleId: { type: String },
+        // AUD-19: timestamp of the last password change. The auth middleware
+        // rejects any JWT minted before this moment (credential pinning), so a
+        // leaked/old token stops working the instant the password is changed.
+        // null for accounts that have never set a password - no pin applies.
+        pwdChangedAt: { type: Date, default: null },
         // Email verification status. Defaults to true so pre-existing accounts
         // (which have no field at all) keep logging in as before. Only newly
         // created signup accounts start as emailVerified: false until their
@@ -81,11 +86,14 @@ const userSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
-// Hash password before saving
+// Hash password before saving; record the time it changed so auth middleware
+// can pin JWTs to the credential version (AUD-19).
 userSchema.pre("save", async function (next) {
-    if (!this.isModified("password") || !this.password) return next();
-    const salt = await bcrypt.genSalt(10);
-    this.password = await bcrypt.hash(this.password, salt);
+    if (this.isModified("password") && this.password) {
+        this.pwdChangedAt = new Date();
+        const salt = await bcrypt.genSalt(10);
+        this.password = await bcrypt.hash(this.password, salt);
+    }
     next();
 });
 

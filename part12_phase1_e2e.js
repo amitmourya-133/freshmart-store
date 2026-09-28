@@ -23,6 +23,9 @@ const URI = (envFile.match(/^MONGODB_URI=(.+)$/m) || [])[1];
 const JWT_SECRET = (envFile.match(/^JWT_SECRET=(.+)$/m) || [])[1];
 if (!URI) { console.error('MONGODB_URI not found'); process.exit(1); }
 if (!JWT_SECRET) { console.error('JWT_SECRET not found'); process.exit(1); }
+// AUD-01: refuse to open the production database from a test suite.
+const dbGuard = require(path.join(REPO, 'utils/dbGuard'));
+dbGuard.assertSafeDbUri(URI, { purpose: 'part12_phase1_e2e' });
 
 const TEST_TAG = '@freshmart.test';
 const testTag = 'part12' + Date.now() + TEST_TAG;

@@ -19,6 +19,9 @@ const Review = require(path.join(REPO, 'models/Review'));
 const envFile = fs.readFileSync(path.join(REPO, '.env'), 'utf8');
 const URI = (envFile.match(/^MONGODB_URI=(.+)$/m) || [])[1];
 if (!URI) { console.error('MONGODB_URI not found'); process.exit(1); }
+// AUD-01: refuse to open the production database from a test suite.
+const dbGuard = require(path.join(REPO, 'utils/dbGuard'));
+dbGuard.assertSafeDbUri(URI, { purpose: 'part11_reviews_e2e' });
 // JWT_SECRET is read from .env for the admin-moderation sub-test (the previous
 // version relied on process.env being preloadable, which only worked under
 // dotenv runners). Parsing it here makes the whole suite self-contained.

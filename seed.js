@@ -5,6 +5,8 @@
 require("dotenv").config();
 const mongoose = require("mongoose");
 const Product = require("./models/Product");
+// AUD-01: seed scripts must never open the production database by accident.
+const dbGuard = require("./utils/dbGuard");
 
 const products = [
 
@@ -73,7 +75,7 @@ const products = [
 
 async function seed() {
     try {
-        const URI = process.env.MONGODB_URI || "mongodb://localhost:27017/freshmart";
+        const URI = dbGuard.assertSafeDbUri(process.env.MONGODB_URI || "mongodb://localhost:27017/freshmart", { purpose: "seed_products" });
         await mongoose.connect(URI);
         console.log("✅ MongoDB connected");
 

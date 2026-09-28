@@ -17,6 +17,8 @@
 require("dotenv").config();
 const mongoose = require("mongoose");
 const User = require("./models/User");
+// AUD-01: account-seeding scripts must never open the production DB by accident.
+const dbGuard = require("./utils/dbGuard");
 
 async function seedAdmin() {
     try {
@@ -34,7 +36,7 @@ async function seedAdmin() {
             process.exit(1);
         }
 
-        const URI = process.env.MONGODB_URI || "mongodb://localhost:27017/freshmart";
+        const URI = dbGuard.assertSafeDbUri(process.env.MONGODB_URI || "mongodb://localhost:27017/freshmart", { purpose: "seed_admin" });
         await mongoose.connect(URI);
         console.log("✅ MongoDB connected");
 

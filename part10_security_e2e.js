@@ -18,6 +18,9 @@ const Product = require(path.join(REPO, 'models/Product'));
 const envFile = fs.readFileSync(path.join(REPO, '.env'), 'utf8');
 const URI = (envFile.match(/^MONGODB_URI=(.+)$/m) || [])[1];
 if (!URI) { console.error('MONGODB_URI not found'); process.exit(1); }
+// AUD-01: refuse to open the production database from a test suite.
+const dbGuard = require(path.join(REPO, 'utils/dbGuard'));
+dbGuard.assertSafeDbUri(URI, { purpose: 'part10_security_e2e' });
 
 const TEST_TAG = '@freshmart.test';
 const testEmail = 'part10' + Date.now() + TEST_TAG;

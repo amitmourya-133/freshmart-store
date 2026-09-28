@@ -4,6 +4,10 @@
 // ===============================
 
 require("dotenv").config();
+// AUD-01: this helper must never open the production DB directly. Refuses
+// unless pointed at a local mongod or a dedicated fm_*_e2e_* database.
+require("./utils/dbGuard").assertSafeDbUri(process.env.MONGODB_URI, { purpose: "test_admin" });
+
 var http = require("http");
 var jwt = require("jsonwebtoken");
 

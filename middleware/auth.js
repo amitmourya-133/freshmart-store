@@ -20,6 +20,17 @@ function readToken(req) {
     return null;
 }
 
+// AUD-19: pin the JWT to the user's credential version. A token minted before
+// the account's password was last changed is treated as invalid, so a leaked
+// or stolen old token dies the moment the password changes.
+function pinOk(decoded, user) {
+    if (!user || !user.pwdChangedAt || !decoded || typeof decoded.iat !== "number") {
+        return true;
+    }
+    const changedAtSec = Math.floor(new Date(user.pwdChangedAt).getTime() / 1000);
+    return decoded.iat >= changedAtSec;
+}
+
 exports.protect = async (req, res, next) => {
     const token = readToken(req);
 
@@ -39,6 +50,12 @@ exports.protect = async (req, res, next) => {
                 message: "User not found"
             });
         }
+        if (!pinOk(decoded, req.user)) {
+            return res.status(401).json({
+                success: false,
+                message: "Not authorized, session expired. Please sign in again."
+            });
+        }
         next();
     } catch (error) {
         return res.status(401).json({
@@ -49,7 +66,8 @@ exports.protect = async (req, res, next) => {
 };
 
 // Optional auth: attaches req.user when a valid token (header or cookie) is
-// present, but never blocks the request (guest checkout stays public).
+// present, but never blocks the request (guest checkout stays public). A token
+// whose pin is stale is treated the same as no token (AUD-19).
 exports.optionalProtect = async (req, res, next) => {
     const token = readToken(req);
     if (!token) {
@@ -57,7 +75,10 @@ exports.optionalProtect = async (req, res, next) => {
     }
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        req.user = await User.findById(decoded.id).select("-password -otpHash -otpExpiry -otpAttempts -otpResendAt -resetOtpHash -resetOtpExpiry -resetOtpAttempts -resetOtpResendAt -resetTokenHash -resetTokenExpiry");
+        const user = await User.findById(decoded.id).select("-password -otpHash -otpExpiry -otpAttempts -otpResendAt -resetOtpHash -resetOtpExpiry -resetOtpAttempts -resetOtpResendAt -resetTokenHash -resetTokenExpiry");
+        if (user && pinOk(decoded, user)) {
+            req.user = user;
+        }
     } catch (e) {
         // Tolerate invalid/expired tokens — the request stays anonymous
     }
