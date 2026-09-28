@@ -18,6 +18,11 @@ const emailService = require("../utils/emailService");
 const { generateOtp, hashOtp, otpSafeEqual } = require("../utils/otp");
 const deliveryOpsController = require("../controllers/deliveryOpsController");
 
+// Single shared order-completion primitive (also used by the admin manual
+// completion path in orderController), so delivery completion can never run
+// its business logic twice through two different code paths.
+const { completeOrderDelivery } = require("../utils/deliveryCompletion");
+
 // ===============================
 // HELPERS
 // ===============================
@@ -36,29 +41,6 @@ const DELIVERY_OTP_MAX_ATTEMPTS = 5;
 
 function generateDeliveryOtp() {
     return generateOtp(4);
-}
-
-// Sync the parent Order when a delivery reaches DELIVERED. Uses the document
-// load/save path so statusHistory is appended and per-order email flags work.
-// Payment is advanced ONLY for COD (cash collected at the door): online/manual
-// payments stay PENDING until an admin verifies the transfer.
-async function completeOrderDelivery(assignment, order, otpVerified) {
-    const updates = {
-        status: "Delivered"
-    };
-    if (!Array.isArray(order.statusHistory)) order.statusHistory = [];
-    order.statusHistory.push({
-        status: "Delivered",
-        by: "delivery:" + String(assignment.deliveryUser),
-        at: new Date()
-    });
-    if (order.paymentMethod === "cod") {
-        order.paid = true;
-        order.paymentStatus = "PAID";
-        order.paymentAt = new Date();
-    }
-    Object.assign(order, updates);
-    return order.save();
 }
 
 // Fire-and-forget delivery-complete email (exactly-once via notifyDeliveredSentAt).
@@ -380,22 +362,25 @@ router.put("/status", protect, delivery, async (req, res) => {
             });
         }
 
-        // Enforce valid state transitions
-        const statusRanks = {
-            ASSIGNED: 0,
-            ACCEPTED: 1,
-            PICKED_UP: 2,
-            EN_ROUTE: 3,
-            DELIVERED: 4,
+        // Enforce valid state transitions. The canonical delivery lifecycle is
+        // ASSIGNED -> ACCEPTED -> PICKED_UP -> EN_ROUTE -> DELIVERED.
+        // REJECTED, CANCELLED and DELIVERED are terminal: nothing may re-enter
+        // the pipeline from them and an OTP cannot be recycled into a new run.
+        const allowedTransitions = {
+            ASSIGNED: ["ACCEPTED", "REJECTED", "CANCELLED"],
+            ACCEPTED: ["PICKED_UP", "REJECTED", "CANCELLED"],
+            PICKED_UP: ["EN_ROUTE", "REJECTED", "CANCELLED"],
+            EN_ROUTE: ["DELIVERED"],
+            DELIVERED: [],
+            REJECTED: [],
+            CANCELLED: [],
         };
 
-        const currentRank = statusRanks[assignment.status];
-        const newRank = statusRanks[status];
-
-        if (currentRank !== undefined && newRank !== undefined && newRank <= currentRank) {
+        const allowed = allowedTransitions[assignment.status] || [];
+        if (allowed.indexOf(status) === -1) {
             return res.status(400).json({
                 success: false,
-                message: "Invalid status transition. Status can only move forward.",
+                message: "Invalid status transition. Status can only move through the delivery lifecycle.",
             });
         }
 
@@ -462,39 +447,46 @@ router.put("/status", protect, delivery, async (req, res) => {
             notifyCustomerAboutDelivery(assignment.order, "Order on the way", "Your order is out for delivery and on its way to you!", "Out for Delivery");
         }
 
-        // On delivered: sync the parent Order, credit the delivery fee to the
-        // partner's earnings, and send the delivery-complete email.
+        // On delivered: sync the parent Order via the shared completion
+        // primitive (idempotent), credit the delivery fee to the partner's
+        // earnings, and send the delivery-complete email.
         if (status === "DELIVERED") {
             const orderDoc = await Order.findById(assignment.order);
             if (orderDoc) {
-                await completeOrderDelivery(assignment, orderDoc, true);
-                // Earnings = the delivery fee the customer paid (real value,
-                // never fabricated). Free-delivery orders pay ₹0.
-                // The schema defaults `earnings` to 0, so a strict
-                // undefined/null check would never fire and the partner would
-                // never be credited: treat "still 0" as "not recorded yet".
-                if (!Number(assignment.earnings)) {
-                    assignment.earnings = Number(orderDoc.delivery) || 0;
-                    await assignment.save();
-                }
-                // Denormalised lifetime counter the partner profile and the
-                // admin roster read. Only ever incremented by a real, OTP
-                // verified delivery.
-                await User.updateOne({ _id: assignment.deliveryUser }, { $inc: { deliveryCount: 1 } });
-                emailDelivered(assignment, orderDoc);
-                try {
-                    const notificationController = require("../controllers/notificationController");
-                    if (orderDoc.user) {
-                        await notificationController.notifyBase(orderDoc.user, {
-                            type: "order_status",
-                            title: "Order delivered",
-                            message: "Order " + (orderDoc.orderNumber || "") + " has been delivered. Enjoy!",
-                            dedupeKey: "order_inbox:" + String(orderDoc._id) + ":status:Delivered",
-                            data: { link: "orders.html", orderId: String(orderDoc._id), orderNumber: orderDoc.orderNumber || "" },
-                        });
+                const done = await completeOrderDelivery(orderDoc, assignment, {
+                    by: "delivery:" + String(assignment.deliveryUser)
+                });
+                // Side effects are performed only when this call actually
+                // completed the order (a replayed/duplicate request is a no-op).
+                if (!done.alreadyDelivered) {
+                    // Earnings = the delivery fee the customer paid (real value,
+                    // never fabricated). Free-delivery orders pay ₹0.
+                    // The schema defaults `earnings` to 0, so a strict
+                    // undefined/null check would never fire and the partner would
+                    // never be credited: treat "still 0" as "not recorded yet".
+                    if (!Number(assignment.earnings)) {
+                        assignment.earnings = Number(orderDoc.delivery) || 0;
+                        await assignment.save();
                     }
-                } catch (e) {
-                    console.warn("[notification] delivered notify failed: " + ((e && e.message) || "unknown"));
+                    // Denormalised lifetime counter the partner profile and the
+                    // admin roster read. Only ever incremented by a real, OTP
+                    // verified delivery.
+                    await User.updateOne({ _id: assignment.deliveryUser }, { $inc: { deliveryCount: 1 } });
+                    emailDelivered(assignment, orderDoc);
+                    try {
+                        const notificationController = require("../controllers/notificationController");
+                        if (orderDoc.user) {
+                            await notificationController.notifyBase(orderDoc.user, {
+                                type: "order_status",
+                                title: "Order delivered",
+                                message: "Order " + (orderDoc.orderNumber || "") + " has been delivered. Enjoy!",
+                                dedupeKey: "order_inbox:" + String(orderDoc._id) + ":status:Delivered",
+                                data: { link: "orders.html", orderId: String(orderDoc._id), orderNumber: orderDoc.orderNumber || "" },
+                            });
+                        }
+                    } catch (e) {
+                        console.warn("[notification] delivered notify failed: " + ((e && e.message) || "unknown"));
+                    }
                 }
             }
         }

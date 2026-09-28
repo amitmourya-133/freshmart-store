@@ -10,6 +10,7 @@ const Settings = require("../models/Settings");
 const Coupon = require("../models/Coupon");
 const InventoryLog = require("../models/InventoryLog");
 const DeliveryAssignment = require("../models/DeliveryAssignment");
+const DeliveryOffer = require("../models/DeliveryOffer");
 const notificationController = require("./notificationController");
 const { getMultFromWeight, round2 } = require("../utils/pricing");
 const { findValidCoupon, computeCouponDiscount, normalizeCode, reserveCouponUsage, releaseCouponUsage } = require("../utils/coupons");
@@ -17,6 +18,11 @@ const { assertVariantAvailable } = require("../utils/variants");
 const emailService = require("../utils/emailService");
 const { assertDeliveryWithinRadius } = require("../utils/geo");
 const { deliveryEta } = require("../utils/eta");
+
+// The single shared delivery-completion primitive (identical to the one the
+// delivery-partner OTP path uses), so "Delivered" can reach the parent Order and
+// its assignment only through one code path.
+const { completeOrderDelivery } = require("../utils/deliveryCompletion");
 
 // Best-effort audit log: stock reservations/restores never break the order
 // flow when logging fails.
@@ -1033,6 +1039,56 @@ exports.updateOrderStatus = async (req, res) => {
         }
         if (STATUS_RANK[status] < STATUS_RANK[order.status]) {
             return res.status(400).json({ success: false, message: "Cannot move status backwards" });
+        }
+
+        // AUD-06: a manual "Delivered" is an override of the (OTP verified)
+        // partner-completion path, so it is held to the same bar:
+        //   1. it is only valid from "Out for Delivery" (no free jumps from
+        //      Placed/Confirmed/Preparing),
+        //   2. it always requires an audit reason (non-blank, <= 300 chars),
+        //   3. it runs through the same completion primitive as the partner
+        //      path and consumes the active delivery assignment.
+        if (status === "Delivered") {
+            if (order.status !== "Out for Delivery") {
+                return res.status(400).json({
+                    success: false,
+                    message: "Order can only be marked Delivered from Out for Delivery. Advance it first.",
+                });
+            }
+            const reason = String(req.body.reason || "").trim();
+            if (!reason) {
+                return res.status(400).json({
+                    success: false,
+                    message: "A reason is required to manually mark an order as Delivered.",
+                });
+            }
+            if (reason.length > 300) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Reason must be 300 characters or fewer.",
+                });
+            }
+
+            const previousStatus = order.status;
+            // Consume the active assignment, if one is still in flight, so a
+            // manual completion never leaves a contradictory active path open.
+            const activeAssignment = await DeliveryAssignment.findOne({
+                order: order._id,
+                status: { $in: ["ASSIGNED", "ACCEPTED", "PICKED_UP", "EN_ROUTE"] },
+            }).select("deliveryUser");
+            const done = await completeOrderDelivery(order, activeAssignment, {
+                by: "admin:" + String(req.user._id),
+                reason: reason,
+            });
+            // Retire any still-open claim offer for this order: the run is over.
+            await DeliveryOffer.updateMany(
+                { order: order._id, status: "OPEN" },
+                { $set: { status: "ASSIGNED" } }
+            );
+            emailOnStatusChange(done.order, previousStatus);
+            inboxNotify(done.order, "Order Delivered", "Order " + (done.order.orderNumber || "") + " was delivered.",
+                "Delivered");
+            return res.json({ success: true, data: done.order });
         }
 
         const previousStatus = order.status;

@@ -89,7 +89,9 @@ const orderSchema = new mongoose.Schema(
             {
                 status: { type: String },
                 by: { type: String, default: null }, // who performed the change
-                at: { type: Date, default: Date.now }
+                at: { type: Date, default: Date.now },
+                // Why a manual completion happened (audit trail).
+                reason: { type: String, default: null, trim: true, maxlength: 300 }
             }
         ],
         user: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },

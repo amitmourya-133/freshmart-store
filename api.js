@@ -639,12 +639,15 @@ function apiDeleteProduct(id) {
         });
 }
 
-// Update order status (admin)
-function apiUpdateOrderStatus(id, status) {
+// Update order status (admin). "Delivered" additionally carries the admin's
+// audit reason, which the status endpoint now requires.
+function apiUpdateOrderStatus(id, status, reason) {
+    const body = { status: status };
+    if (reason) body.reason = String(reason);
     return fetch(API.base + "/orders/" + id + "/status", {
         method: "PATCH",
         headers: getAuthHeaders(),
-        body: JSON.stringify({ status: status })
+        body: JSON.stringify(body)
     })
         .then(function(res) { return res.json(); })
         .then(function(res) {

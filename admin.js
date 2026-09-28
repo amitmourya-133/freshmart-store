@@ -403,6 +403,30 @@ function setOrderPayment(orderId, paymentStatus, reference) {
 }
 
 function changeOrderStatus(orderId, status) {
+    // Manual "Delivered" is an override of the OTP-verified partner path and
+    // requires an audit reason (mirrors the backend validation).
+    if (status === "Delivered") {
+        var reason = (window.prompt("Reason for marking this order as Delivered (required):", "") || "").trim();
+        if (!reason) {
+            showToast("A reason is required to mark an order as Delivered", "error");
+            return;
+        }
+        if (reason.length > 300) {
+            showToast("Reason must be 300 characters or fewer", "error");
+            return;
+        }
+        apiUpdateOrderStatus(orderId, status, reason)
+            .then(function() {
+                showToast("Order marked as " + status, "success");
+                loadAdminOrders();
+                if (document.getElementById("orderDetailModal").style.display === "flex") openOrderDetail(orderId, true);
+            })
+            .catch(function(err) {
+                showToast(err.message || "Failed to update status", "error");
+                loadAdminOrders();
+            });
+        return;
+    }
     apiUpdateOrderStatus(orderId, status)
         .then(function() {
             showToast("Order marked as " + status, "success");

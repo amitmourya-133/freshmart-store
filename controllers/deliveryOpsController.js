@@ -84,6 +84,12 @@ async function logWarn(tag, e) {
 async function createAssignment(opts) {
     const { order, partner, byUserId, mode, distanceKmValue } = opts;
 
+    // A closed order can never accept a new delivery run: an admin force-assign
+    // or auto-assign retry must fail instead of resurrecting a completed order.
+    if (!order || order.status === "Delivered" || order.status === "Cancelled") {
+        return null;
+    }
+
     const existing = await DeliveryAssignment.findOne({
         order: order._id,
         status: { $in: ["ASSIGNED", "ACCEPTED", "PICKED_UP", "EN_ROUTE"] },
@@ -167,6 +173,13 @@ async function createAssignment(opts) {
 async function broadcastNewOrder(order) {
     try {
         if (!order || !order._id) return { broadcast: false, reason: "no order" };
+
+        // A closed order must never be offered for delivery again: neither a
+        // fresh broadcast nor an admin rebroadcast may resurrect it.
+        if (order.status === "Delivered" || order.status === "Cancelled") {
+            return { broadcast: false, reason: "order closed" };
+        }
+
         const settings = await Settings.getSettings();
         if (!settings.deliveryBroadcastEnabled) {
             return { broadcast: false, reason: "broadcast disabled" };
@@ -186,6 +199,27 @@ async function broadcastNewOrder(order) {
         })
             .select("_id name phone lastLat lastLng zone isAvailable")
             .lean();
+
+        // A partner who already holds an active assignment for THIS order (e.g.
+        // a race between an admin assignment and this broadcast) must not be
+        // offered it a second time: two active paths to the same order are never
+        // created server-side.
+        if (candidates.length) {
+            const bound = await DeliveryAssignment.find({
+                order: order._id,
+                deliveryUser: { $in: candidates.map(function (c) { return c._id; }) },
+                status: { $in: ["ASSIGNED", "ACCEPTED", "PICKED_UP", "EN_ROUTE"] },
+            })
+                .select("deliveryUser")
+                .lean();
+            if (bound.length) {
+                const boundIds = new Set(bound.map(function (b) { return String(b.deliveryUser); }));
+                const free = candidates.filter(function (c) { return !boundIds.has(String(c._id)); });
+                if (!free.length) return { broadcast: false, reason: "already assigned" };
+                candidates.length = 0;
+                Array.prototype.push.apply(candidates, free);
+            }
+        }
 
         if (!candidates.length) {
             // Nobody online: the admin must assign by hand. Tell them loudly.
@@ -364,6 +398,24 @@ async function sweepExpiredOffers(limit) {
                         );
                         notifyOfferClosed(offer, partner, order).catch(function () { /* non-fatal */ });
                         out.autoAssigned += 1;
+                        continue;
+                    }
+                    // The dispatch lost the race: a partner's manual claim (or an
+                    // admin assignment) already owns this order. Close the offer
+                    // instead of re-opening it, so the order never keeps being
+                    // offered to partners it is already assigned to, and closed
+                    // orders never re-enter the pipeline.
+                    const won = await DeliveryAssignment.findOne({
+                        order: order._id,
+                        status: { $in: ["ASSIGNED", "ACCEPTED", "PICKED_UP", "EN_ROUTE"] },
+                    })
+                        .select("_id")
+                        .lean();
+                    if (won) {
+                        await DeliveryOffer.updateOne(
+                            { _id: offer._id },
+                            { $set: { status: "CANCELLED", claimSource: "raced" } }
+                        );
                         continue;
                     }
                 }
@@ -757,7 +809,7 @@ exports.reissueOtp = async (req, res) => {
         const max = Number(settings.deliveryMaxOtpReissue);
         const assignment = await DeliveryAssignment.findOne({ _id: req.params.id, deliveryUser: req.user._id });
         if (!assignment) return res.status(404).json({ success: false, message: "Assignment not found." });
-        if (assignment.status === "DELIVERED" || assignment.status === "CANCELLED") {
+        if (assignment.status === "DELIVERED" || assignment.status === "CANCELLED" || assignment.status === "REJECTED") {
             return res.status(400).json({ success: false, message: "This delivery is already closed." });
         }
         if (Number(assignment.otpReissueCount || 0) >= max) {
@@ -856,6 +908,19 @@ exports.confirmCash = async (req, res) => {
             return res.status(400).json({ success: false, message: "That is more than the order value plus ₹5,000 change. Check the amount." });
         }
 
+        // Idempotent: an already-recorded cash confirmation is returned as-is, so
+        // a double-tap or network retry can never silently rewrite the report.
+        if (assignment.cashConfirmedAt && Number.isFinite(Number(assignment.cashCollected))) {
+            const expectedNow = Number(order.total) || 0;
+            return res.json({
+                success: true,
+                cashCollected: assignment.cashCollected,
+                expected: expectedNow,
+                variance: Math.round((Number(assignment.cashCollected) - expectedNow) * 100) / 100,
+                message: "Cash already confirmed.",
+            });
+        }
+
         assignment.cashCollected = Math.round(amount * 100) / 100;
         assignment.cashConfirmedAt = new Date();
         await assignment.save();
@@ -894,6 +959,12 @@ exports.saveSignature = async (req, res) => {
         if (!assignment) return res.status(404).json({ success: false, message: "Assignment not found." });
         if (["CANCELLED", "REJECTED"].indexOf(assignment.status) !== -1) {
             return res.status(400).json({ success: false, message: "This delivery is closed - the signature can no longer be recorded." });
+        }
+
+        // Idempotent: an already-saved sign-off is returned as-is (a retry or
+        // double tap must never overwrite the original sign-off).
+        if (assignment.signature) {
+            return res.json({ success: true, message: "Signature already saved.", signedAt: assignment.signatureAt });
         }
 
         assignment.signature = signature;

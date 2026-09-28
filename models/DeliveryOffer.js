@@ -30,10 +30,11 @@ const deliveryOfferSchema = new mongoose.Schema(
         // grace period to claim voluntarily before a rider is forced onto the
         // order. Only set when auto-assign is switched on.
         autoAssignAt: { type: Date, index: true },
-        // Winner of the claim race.
+        // Winner of the claim race. "raced" records an offer that the expiry
+        // sweep closed after losing the race to an already-existing assignment.
         claimedBy: { type: ObjectId, ref: "User" },
         claimedAt: { type: Date },
-        claimSource: { type: String, enum: ["partner", "admin", "auto"], default: "partner" },
+        claimSource: { type: String, enum: ["partner", "admin", "auto", "raced"], default: "partner" },
         // The assignment created by the claim (or by the auto-assigner).
         assignment: { type: ObjectId, ref: "DeliveryAssignment" },
         // Delivery destination snapshot (used to rank partners by distance).
