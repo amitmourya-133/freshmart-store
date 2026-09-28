@@ -485,11 +485,46 @@ exports.createOrder = async (req, res) => {
         }
 
         // Idempotency: retrying the same clientRef returns the existing order
-        // instead of creating a duplicate (double click / browser retry / webhook retry).
+        // instead of creating a duplicate (double click / browser retry / webhook
+        // retry). The lookup is scoped to the caller so a guessed or re-used
+        // reference can never expose another customer's order, and only a minimal
+        // stub is returned if it is the caller's own order.
         if (clientRef && String(clientRef).trim()) {
-            const existing = await Order.findOne({ clientRef: String(clientRef).trim() });
+            const ref = String(clientRef).trim();
+            let existing = await Order.findOne(
+                req.user
+                    ? { clientRef: ref, user: req.user._id }
+                    : { clientRef: ref, user: null }
+            );
             if (existing) {
-                return res.status(200).json({ success: true, data: existing, already: true });
+                let allowed = true;
+                if (!req.user) {
+                    const cName = String((customer && customer.name) || "").trim().toLowerCase();
+                    const cPhone = String((customer && customer.phone) || "").trim();
+                    const cEmail = String((customer && customer.email && String(customer.email).trim()) || "").toLowerCase();
+                    const eName = existing.customer && existing.customer.name ? String(existing.customer.name).toLowerCase() : "";
+                    const ePhone = existing.customer && existing.customer.phone ? String(existing.customer.phone) : "";
+                    const eEmail = existing.customerEmail ? String(existing.customerEmail).toLowerCase() : "";
+                    allowed = Boolean(eName && ePhone && cName === eName && cPhone === ePhone) || Boolean(eEmail && cEmail && cEmail === eEmail);
+                }
+                if (allowed) {
+                    return res.status(200).json({
+                        success: true,
+                        already: true,
+                        data: {
+                            _id: existing._id,
+                            orderNumber: existing.orderNumber,
+                            trackingId: existing.trackingId,
+                            status: existing.status,
+                            paymentStatus: existing.paymentStatus,
+                            subtotal: existing.subtotal,
+                            delivery: existing.delivery,
+                            discount: existing.discount,
+                            total: existing.total
+                        }
+                    });
+                }
+                existing = null;
             }
         }
 
@@ -754,6 +789,9 @@ exports.createOrder = async (req, res) => {
         }
         if (error && error.name === "CastError") {
             return res.status(400).json({ success: false, message: "Invalid product in cart" });
+        }
+        if (error && error.code === 11000) {
+            return res.status(409).json({ success: false, message: "This order reference is already in use. Please try again." });
         }
         res.status(400).json({ success: false, message: error.message });
     }
@@ -1099,7 +1137,23 @@ exports.getOrderByNumber = async (req, res) => {
         if (!n) {
             return res.status(400).json({ success: false, message: "Order reference required" });
         }
-        const order = await Order.findOne({ $or: [{ orderNumber: n }, { trackingId: n }] });
+        // Tracking IDs (FM-YYYYMMDD-XXXXXX) are high-entropy per-order tokens and
+        // may be looked up anonymously, like a package-tracking link. Order numbers
+        // are sequential / low-entropy, so a lookup by order number is restricted to
+        // the owner (or an admin) to stop anonymous enumeration of order info.
+        let order = null;
+        if (/^FM-\d{8}-[0-9A-F]{6}$/i.test(n)) {
+            order = await Order.findOne({ trackingId: n });
+        } else if (req.user) {
+            order = req.user.role === "admin"
+                ? await Order.findOne({ orderNumber: n })
+                : await Order.findOne({ orderNumber: n, user: req.user._id });
+        } else {
+            return res.status(401).json({
+                success: false,
+                message: "Please log in to track an order by Order Number, or use your Track ID."
+            });
+        }
         if (!order) {
             return res.status(404).json({ success: false, message: "Order not found" });
         }

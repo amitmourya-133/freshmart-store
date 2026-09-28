@@ -58,7 +58,7 @@ router.get("/trending", getTrendingProducts);
 router.get("/suggestions", suggestionsLimiter, getSuggestions);
 router.post("/ai-search", aiSearchLimiter, aiSearch);
 router.get("/:id", getProduct);
-router.post("/:id/rating", publicWriteLimiter, addRating);
+router.post("/:id/rating", protect, publicWriteLimiter, addRating);
 router.get("/:id/reviews", getProductReviews);
 router.post("/:id/reviews", protect, publicWriteLimiter, addProductReview);
 

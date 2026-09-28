@@ -29,7 +29,7 @@ const publicOrderLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 30 });
 // (guest checkout still works) so customers can see their own orders later.
 router.post("/", publicOrderLimiter, optionalProtect, createOrder);
 router.post("/quote", publicOrderLimiter, quoteOrder);
-router.get("/track/:number", publicOrderLimiter, getOrderByNumber);
+router.get("/track/:number", publicOrderLimiter, optionalProtect, getOrderByNumber);
 
 // Customer (protected)
 router.get("/my", protect, getMyOrders);
