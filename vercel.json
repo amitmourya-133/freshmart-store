@@ -26,6 +26,14 @@
       "use": "@vercel/static"
     },
     {
+      "src": "delivery-ops.js",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "admin-partners.js",
+      "use": "@vercel/static"
+    },
+    {
       "src": "features.js",
       "use": "@vercel/static"
     },

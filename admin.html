@@ -329,7 +329,7 @@
     </div>
 
     <!-- Delivery Management Modal -->
-    <div id="deliveryManagementSection" class="admin-section" style="display:none;">
+    <div id="adminDeliverySection" class="admin-section" style="display:none;">
         <div class="admin-section-head">
             <h2>Delivery Management</h2>
         </div>
@@ -346,6 +346,104 @@
             <h3>Today's Assignments</h3>
             <div id="todayAssignmentsList" style="margin-top:16px;">
                 <p style="text-align:center;color:var(--text-secondary);padding:20px;">Loading today's assignments...</p>
+            </div>
+        </div>
+
+        <!-- Live delivery operations: applicants, approvals, offers, switches
+             and the day-end cash sheet. Rendered by admin-partners.js. -->
+        <div id="adminDeliveryOpsHost" style="margin-top:32px;">
+            <div class="admin-section-head">
+                <h3>Live delivery operations</h3>
+                <div class="ops-head-actions">
+                    <button type="button" class="ops-btn ops-btn-ghost" id="opsSweepBtn">Run expiry sweep</button>
+                    <button type="button" class="ops-btn ops-btn-ghost" id="opsPrunePushBtn">Prune dead alerts</button>
+                    <button type="button" class="ops-btn ops-btn-ghost" id="opsReloadBtn">Refresh</button>
+                </div>
+            </div>
+            <p id="opsSwitchSummary" class="ops-section-sub"></p>
+            <div id="opsSettingsForm" class="ops-settings"></div>
+        </div>
+
+        <div id="adminDeliveryOpsPartners" style="margin-top:24px;">
+            <h3>Partner applications</h3>
+            <div id="opsApplicantList" style="margin-top:12px;">
+                <p class="ops-empty">No pending applications.</p>
+            </div>
+            <h3 style="margin-top:24px;">Approved partners</h3>
+            <p class="ops-section-sub">Online partners are the ones who receive broadcast offers. Online means available with a fresh GPS ping.</p>
+            <div class="ops-table-wrap" style="margin-top:12px;">
+                <table class="ops-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Partner</th>
+                            <th scope="col">Phone</th>
+                            <th scope="col">State</th>
+                            <th scope="col">Active</th>
+                            <th scope="col">Delivered</th>
+                            <th scope="col">Today</th>
+                            <th scope="col">Earnings</th>
+                            <th scope="col">COD expected</th>
+                            <th scope="col">COD collected</th>
+                            <th scope="col">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="opsPartnerRows">
+                        <tr><td colspan="10" class="ops-empty">Loading partners...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="adminDeliveryOpsOffers" style="margin-top:24px;">
+            <h3>Recent broadcast offers (last 24h)</h3>
+            <div class="ops-table-wrap" style="margin-top:12px;">
+                <table class="ops-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Order</th>
+                            <th scope="col">Round</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Told</th>
+                            <th scope="col">Declined</th>
+                            <th scope="col">Claimed via</th>
+                            <th scope="col">Created</th>
+                            <th scope="col">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="opsOfferRows">
+                        <tr><td colspan="8" class="ops-empty">Loading offers...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="adminDeliveryOpsRecon" style="margin-top:24px;">
+            <div class="admin-section-head">
+                <h3>Day-end cash reconciliation</h3>
+                <div class="ops-head-actions">
+                    <input type="date" id="opsReconDate" class="ops-date" aria-label="Reconciliation date">
+                    <button type="button" class="ops-btn ops-btn-ghost" id="opsReconLoad">Load</button>
+                </div>
+            </div>
+            <div id="opsReconTotals" class="admin-stats"></div>
+            <div class="ops-table-wrap" style="margin-top:12px;">
+                <table class="ops-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Partner</th>
+                            <th scope="col">Phone</th>
+                            <th scope="col">Delivered</th>
+                            <th scope="col">COD orders</th>
+                            <th scope="col">Expected</th>
+                            <th scope="col">Collected</th>
+                            <th scope="col">Missing cash</th>
+                            <th scope="col">Difference</th>
+                        </tr>
+                    </thead>
+                    <tbody id="opsReconRows">
+                        <tr><td colspan="8" class="ops-empty">Pick a date and press Load.</td></tr>
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -366,6 +464,7 @@
     <script src="script.js"></script>
     <script src="admin.js"></script>
     <script src="notifications.js"></script>
+    <script src="admin-partners.js"></script>
 
 </body>
 </html>

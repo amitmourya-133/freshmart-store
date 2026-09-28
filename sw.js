@@ -32,15 +32,28 @@ function isCacheable(request) {
 self.addEventListener("push", function (event) {
     var data = {};
     try { data = event.data ? event.data.json() : {}; } catch (e) {}
-    var title = data.title || "FreshMart";
-    var options = {
-        body: data.body || "",
-        icon: data.icon || "/jacfruit.png",
-        badge: data.icon || "/jacfruit.png",
-        data: { url: data.url || "/index.html" }
-    };
+
     event.waitUntil(
-        self.registration.showNotification(title, options)
+        self.registration.showNotification(data.title || "FreshMart", {
+            body: data.body || "",
+            icon: data.icon || "/jacfruit.png",
+            badge: "/jacfruit.png",
+            // Same tag => a newer alert replaces the older one instead of
+            // stacking a wall of banners on the lock screen.
+            tag: data.tag || undefined,
+            renotify: Boolean(data.tag),
+            // Keeps a delivery offer on screen until it is acted on.
+            requireInteraction: Boolean(data.requireInteraction),
+            // [200,100,200,100,400] vibration pattern in ms (mobile only,
+            // ignored where unsupported).
+            vibrate: data.vibrate || undefined,
+            // silent:true would suppress the vibration above, so alerts stay
+            // audible/vibrating by default. Callers that want a quiet banner
+            // send silent:true in the payload.
+            silent: Boolean(data.silent),
+            timestamp: Date.now(),
+            data: { url: data.url || "/index.html" }
+        })
     );
 });
 

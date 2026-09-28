@@ -211,6 +211,45 @@
                     </div>
                 </form>
             </div>
+
+            <!-- Delivery partner application (Phase 1) -->
+            <div class="profile-section-block" id="partnerApplySection" style="margin-top:32px;">
+                <p class="fm-kicker">Earn</p>
+                <h2 class="fm-block-title">Become a delivery partner</h2>
+                <p class="fm-muted" id="partnerApplyIntro">
+                    Apply once and an admin will review your details. Approved partners get every new order
+                    near them, first come first served.
+                </p>
+
+                <div id="partnerApplyStatus" class="ops-status-bar" role="status" aria-live="polite"></div>
+
+                <form id="partnerApplyForm" style="display:none; margin-top:16px;">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="partnerVehicle">Vehicle</label>
+                            <select id="partnerVehicle" class="input-field">
+                                <option value="">Select your vehicle</option>
+                                <option value="Bicycle">Bicycle</option>
+                                <option value="Scooter">Scooter</option>
+                                <option value="Motorcycle">Motorcycle</option>
+                                <option value="Car">Car</option>
+                                <option value="Cargo auto">Cargo auto</option>
+                                <option value="On foot">On foot</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="partnerZone">Preferred area (optional)</label>
+                            <input type="text" id="partnerZone" class="input-field" placeholder="e.g. Andheri West" maxlength="60">
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="save-btn fm-btn fm-btn-primary" id="partnerApplyBtn">Submit application</button>
+                    </div>
+                    <p class="fm-muted" style="margin-top:8px;">
+                        You need a phone number on your profile — customers call you at the door.
+                    </p>
+                </form>
+            </div>
         </div>
     </main>
 
@@ -267,8 +306,88 @@
                 profileUser = user;
                 renderProfileHeader(user);
                 renderAddresses(user.addresses || []);
+                loadPartnerStatus();
             }).catch(function(err) {
                 if (typeof showToast === "function") showToast((err && err.message) || "Could not load profile.", "error");
+            });
+        }
+
+        // ===============================
+        // DELIVERY PARTNER APPLICATION (Phase 1)
+        // ===============================
+
+        function partnerStatusBar() {
+            return document.getElementById("partnerApplyStatus");
+        }
+
+        function loadPartnerStatus() {
+            var bar = partnerStatusBar();
+            var form = document.getElementById("partnerApplyForm");
+            var intro = document.getElementById("partnerApplyIntro");
+            if (!bar || !form) return;
+
+            fetch(API.base + "/delivery-ops/me", { headers: getAuthHeaders() })
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+                if (!data.success) throw new Error(data.message || "Could not load partner status");
+                var p = data.partner || {};
+                var isAdmin = p.role === "admin";
+                var section = document.getElementById("partnerApplySection");
+                if (section) section.hidden = isAdmin;
+
+                if (p.partnerStatus === "approved") {
+                    bar.className = "ops-status-bar ops-status-approved";
+                    bar.innerHTML = '<span class="ops-status-dot"></span><span>You are an approved delivery partner. ' +
+                        'Open the <a href="delivery.html">Delivery Partner Panel</a> and turn on your availability to receive orders.</span>';
+                    form.style.display = "none";
+                    if (intro) intro.textContent = "You are already approved — head to the panel to go online.";
+                } else if (p.partnerStatus === "pending") {
+                    bar.className = "ops-status-bar ops-status-pending";
+                    bar.innerHTML = '<span class="ops-status-dot"></span><span>Your application is under review. We will notify you as soon as an admin approves it.</span>';
+                    form.style.display = "none";
+                } else {
+                    bar.className = "ops-status-bar ops-status-none";
+                    bar.innerHTML = '<span class="ops-status-dot"></span><span>' +
+                        (p.partnerStatus === "rejected"
+                            ? 'Your last application was declined' + (p.rejectReason ? ": " + esc(p.rejectReason) : "") + ". You may apply again."
+                            : "Not applied yet.") + "</span>";
+                    form.style.display = "block";
+                    var vehicle = document.getElementById("partnerVehicle");
+                    var zone = document.getElementById("partnerZone");
+                    if (vehicle && p.vehicleType) vehicle.value = p.vehicleType;
+                    if (zone && p.zone) zone.value = p.zone;
+                    if (!p.phone) {
+                        if (intro) intro.textContent = "Add your phone number first — customers call you at the door, so an application without one cannot be approved.";
+                    }
+                }
+            })
+            .catch(function() { /* the block simply stays in its default state */ });
+        }
+
+        var partnerApplyForm = document.getElementById("partnerApplyForm");
+        if (partnerApplyForm) {
+            partnerApplyForm.addEventListener("submit", function(e) {
+                e.preventDefault();
+                var btn = document.getElementById("partnerApplyBtn");
+                if (btn) btn.disabled = true;
+                fetch(API.base + "/delivery-ops/apply", {
+                    method: "POST",
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({
+                        vehicleType: document.getElementById("partnerVehicle").value,
+                        zone: document.getElementById("partnerZone").value.trim()
+                    })
+                })
+                .then(function(res) { return res.json(); })
+                .then(function(data) {
+                    if (!data.success) throw new Error(data.message || "Could not submit the application");
+                    if (typeof showToast === "function") showToast(data.message || "Application submitted.", "success");
+                    loadPartnerStatus();
+                })
+                .catch(function(err) {
+                    if (typeof showToast === "function") showToast((err && err.message) || "Could not submit the application.", "error");
+                })
+                .then(function() { if (btn) btn.disabled = false; });
             });
         }
 

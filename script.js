@@ -4528,9 +4528,27 @@ function renderOrdersListHTML(orders, offline) {
             : "";
 
         var trackLine = order.trackingId ? '<p><strong>Track ID:</strong> ' + escHtml(order.trackingId) + '</p>' : "";
-        var partnerLine = (order.deliveryTrack && order.deliveryTrack.partner && order.deliveryTrack.partner.name)
-            ? '<p><strong>👤 Delivery Partner:</strong> ' + escHtml(order.deliveryTrack.partner.name) + '</p>'
-            : "";
+
+        // Delivery partner line. The owner of an order may call or WhatsApp the
+        // rider who is bringing it (deliveryPartner.phone is only ever returned
+        // to the order owner, never on the public tracking endpoint).
+        var partnerName = (order.deliveryTrack && order.deliveryTrack.partner && order.deliveryTrack.partner.name)
+            || (order.deliveryPartner && order.deliveryPartner.name)
+            || "";
+        var partnerPhone = (order.deliveryPartner && order.deliveryPartner.phone)
+            || (order.deliveryTrack && order.deliveryTrack.partner && order.deliveryTrack.partner.phone)
+            || "";
+        var partnerLine = "";
+        if (partnerName) {
+            partnerLine = '<div class="order-partner-line"><p><strong>👤 Delivery Partner:</strong> ' + escHtml(partnerName);
+            if (partnerPhone) {
+                var waText = encodeURIComponent("Hi " + partnerName + ", this is about FreshMart order " + (order.orderNumber || "") + ".");
+                var digits = String(partnerPhone).replace(/[^0-9]/g, "");
+                partnerLine += ' <a class="order-partner-btn" href="tel:' + escHtml(partnerPhone) + '">📞 Call</a>' +
+                    ' <a class="order-partner-btn" target="_blank" rel="noopener noreferrer" href="https://wa.me/' + digits + '?text=' + waText + '">💬 WhatsApp</a>';
+            }
+            partnerLine += "</p></div>";
+        }
 
         // Saved checkout coordinates, shown only for the customer's own order.
         var locLine = "";

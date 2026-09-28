@@ -10,9 +10,19 @@ const NotificationSchema = new mongoose.Schema(
         },
         type: {
             type: String,
+            // Every value the app actually sends. A missing entry here does not
+            // throw at the call site - the notification is silently dropped - so
+            // this list must stay in step with the controllers.
             enum: [
                 "order_status",
                 "delivery_assignment",
+                "delivery_offer",
+                "delivery_offer_closed",
+                "delivery_otp",
+                "delivery_unclaimed",
+                "delivery_unattended",
+                "partner_application",
+                "partner_status",
                 "low_stock",
                 "subscription",
                 "payment",

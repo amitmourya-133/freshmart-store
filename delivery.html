@@ -21,6 +21,8 @@
 
     <a class="skip-link" href="#assignments">Skip to assignments</a><main id="main-content">
 
+        <div id="opsStatusBar" class="ops-status-bar" role="status" aria-live="polite"></div>
+
         <div class="delivery-header">
             <h1>Delivery Partner Panel</h1>
             <div class="availability-toggle" id="availabilityWrapper">
@@ -45,6 +47,20 @@
             </div>
         </div>
 
+        <section class="ops-section" id="opsOfferSection" hidden aria-labelledby="opsOfferTitle">
+            <div class="ops-section-head">
+                <h2 id="opsOfferTitle">New orders near you</h2>
+                <button type="button" class="ops-btn ops-btn-ghost" id="opsPushBtn" hidden>Enable alerts</button>
+            </div>
+            <p class="ops-section-sub">First to accept gets the delivery. The window closes automatically.</p>
+            <div id="opsOfferList" class="ops-offer-list"></div>
+        </section>
+
+        <section class="ops-section" id="opsActiveSection" hidden aria-labelledby="opsActiveTitle">
+            <h2 id="opsActiveTitle">Delivery tools</h2>
+            <div id="opsActiveTools" class="ops-runs"></div>
+        </section>
+
         <section class="assignments" id="assignments" style="margin-top:24px;">
             <h2>Today's Deliveries</h2>
             <p class="empty-state" id="emptyState">No deliveries assigned yet. Check back later.</p>
@@ -53,15 +69,54 @@
             </div>
         </section>
 
+        <section class="ops-section" id="opsHistorySection" hidden aria-labelledby="opsHistoryTitle">
+            <div class="ops-section-head">
+                <h2 id="opsHistoryTitle">My deliveries &amp; cash sheet</h2>
+                <button type="button" class="ops-btn ops-btn-ghost" id="opsHistoryReload">Refresh</button>
+            </div>
+            <p class="ops-section-sub">Every delivery you completed, and exactly what you collected.</p>
+            <div class="earnings-summary" id="opsHistoryStats"></div>
+            <p class="ops-warn" id="opsHistoryWarn" hidden></p>
+            <div class="ops-table-wrap">
+                <table class="ops-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Order</th>
+                            <th scope="col">Delivered</th>
+                            <th scope="col">Via</th>
+                            <th scope="col">Earning</th>
+                            <th scope="col">Cash / payment</th>
+                            <th scope="col">Proof</th>
+                        </tr>
+                    </thead>
+                    <tbody id="opsHistoryBody"></tbody>
+                </table>
+            </div>
+        </section>
+
         <input type="file" id="proofFileInput" accept="image/png,image/jpeg,image/webp" style="display:none;" aria-hidden="true">
 
     </main>
+
+    <div class="ops-modal" id="opsSignatureModal" hidden role="dialog" aria-modal="true" aria-labelledby="opsSignatureTitle">
+        <div class="ops-modal-card">
+            <h2 id="opsSignatureTitle">Recipient signature</h2>
+            <p>Ask the customer to sign inside the box below.</p>
+            <canvas id="opsSignatureCanvas" width="640" height="220" class="ops-signature-canvas"></canvas>
+            <div class="ops-modal-actions">
+                <button type="button" class="ops-btn ops-btn-ghost" id="opsSignatureClear">Clear</button>
+                <button type="button" class="ops-btn ops-btn-ghost" id="opsSignatureCancel">Cancel</button>
+                <button type="button" class="ops-btn ops-btn-accept" id="opsSignatureSave">Save signature</button>
+            </div>
+        </div>
+    </div>
 
     <footer>
         <p>FreshMart Delivery Partner</p>
     </footer>
 
     <script src="api.js"></script>
+    <script src="notifications.js"></script>
     <script>
         'use strict';
 
@@ -601,5 +656,9 @@
             }, 3000);
         }
     </script>
+    <!-- Loaded last: the delivery-operations panel extends the dashboard above
+         (offer feed, OTP re-issue, cash + signature capture, history) and
+         overrides toggleAvailability so going offline records a break reason. -->
+    <script src="delivery-ops.js"></script>
 </body>
 </html>

@@ -1,6 +1,5 @@
 const express = require("express");
 const router = express.Router();
-const crypto = require("crypto");
 const mongoose = require("mongoose");
 const DeliveryAssignment = require("../models/DeliveryAssignment");
 const User = require("../models/User");
@@ -12,6 +11,12 @@ const { isCloudinaryConfigured, uploadImageBytes } = require("../utils/cloudinar
 
 // Email notifications (opt-in; never blocks the delivery flow)
 const emailService = require("../utils/emailService");
+
+// Shared OTP primitives (same generator/hash/comparison as every other OTP in
+// the app) and the delivery-operations controller that owns partner
+// availability/breaks.
+const { generateOtp, hashOtp, otpSafeEqual } = require("../utils/otp");
+const deliveryOpsController = require("../controllers/deliveryOpsController");
 
 // ===============================
 // HELPERS
@@ -30,18 +35,7 @@ const DELIVERY_OTP_TTL_MS = 15 * 60 * 1000;  // 15 minutes
 const DELIVERY_OTP_MAX_ATTEMPTS = 5;
 
 function generateDeliveryOtp() {
-    return String(crypto.randomInt(1000, 10000));
-}
-
-function hashOtp(otp) {
-    return crypto.createHash("sha256").update(String(otp)).digest("hex");
-}
-
-function otpSafeEqual(a, b) {
-    const ba = Buffer.from(String(a), "utf8");
-    const bb = Buffer.from(String(b), "utf8");
-    if (ba.length !== bb.length) return false;
-    return crypto.timingSafeEqual(ba, bb);
+    return generateOtp(4);
 }
 
 // Sync the parent Order when a delivery reaches DELIVERED. Uses the document
@@ -423,7 +417,15 @@ router.put("/status", protect, delivery, async (req, res) => {
                 });
             }
             const attempt = String(otp || "").trim();
-            if (!attempt || !otpSafeEqual(hashOtp(attempt), storedHash)) {
+            if (!attempt) {
+                // A request that never carried a code is not a guess: refuse it
+                // without spending one of the five allowed attempts.
+                return res.status(400).json({
+                    success: false,
+                    message: "Enter the OTP the customer read out.",
+                });
+            }
+            if (!otpSafeEqual(hashOtp(attempt), storedHash)) {
                 assignment.otpAttempts = Number(assignment.otpAttempts || 0) + 1;
                 await assignment.save();
                 return res.status(400).json({
@@ -468,10 +470,17 @@ router.put("/status", protect, delivery, async (req, res) => {
                 await completeOrderDelivery(assignment, orderDoc, true);
                 // Earnings = the delivery fee the customer paid (real value,
                 // never fabricated). Free-delivery orders pay ₹0.
-                if (assignment.earnings === undefined || assignment.earnings === null) {
+                // The schema defaults `earnings` to 0, so a strict
+                // undefined/null check would never fire and the partner would
+                // never be credited: treat "still 0" as "not recorded yet".
+                if (!Number(assignment.earnings)) {
                     assignment.earnings = Number(orderDoc.delivery) || 0;
                     await assignment.save();
                 }
+                // Denormalised lifetime counter the partner profile and the
+                // admin roster read. Only ever incremented by a real, OTP
+                // verified delivery.
+                await User.updateOne({ _id: assignment.deliveryUser }, { $inc: { deliveryCount: 1 } });
                 emailDelivered(assignment, orderDoc);
                 try {
                     const notificationController = require("../controllers/notificationController");
@@ -563,39 +572,11 @@ router.get("/earnings", protect, delivery, async (req, res) => {
     }
 });
 
-// PUT /api/delivery/availability — delivery partner online/offline toggle
-router.put("/availability", protect, delivery, async (req, res) => {
-    try {
-        if (typeof req.body.isAvailable !== "boolean") {
-            return res.status(400).json({
-                success: false,
-                message: "isAvailable must be a boolean",
-            });
-        }
-
-        const user = await User.findById(req.user.id);
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: "User not found",
-            });
-        }
-
-        user.isAvailable = req.body.isAvailable;
-        await user.save();
-
-        return res.json({
-            success: true,
-            isAvailable: user.isAvailable,
-            message: user.isAvailable ? "You are now online" : "You are now offline",
-        });
-    } catch (error) {
-        return res.status(500).json({
-            success: false,
-            message: error.message,
-        });
-    }
-});
+// PUT /api/delivery/availability — delivery partner online/offline toggle.
+// Delegates to the delivery-operations controller so the break reason, the
+// partnerStatus gate and the "share your location" hint behave identically
+// here and on /api/delivery-ops/availability.
+router.put("/availability", protect, delivery, deliveryOpsController.setAvailability);
 
 // PUT /api/delivery/location — delivery partner shares a real device location
 // (used for live tracking; never fabricated server-side).
@@ -618,13 +599,16 @@ router.put("/location", protect, delivery, async (req, res) => {
         user.lastLat = Math.round(nLat * 1e6) / 1e6;
         user.lastLng = Math.round(nLng * 1e6) / 1e6;
         user.lastLocationAt = new Date();
-        user.isAvailable = user.isAvailable !== false;
         await user.save();
 
+        // Sharing a position must NOT silently bring a partner back online:
+        // going back online is an explicit action (and a partner on a break has
+        // a reason recorded). The client is told whether it is currently live.
         return res.json({
             success: true,
             lastLat: user.lastLat,
             lastLng: user.lastLng,
+            isAvailable: user.isAvailable === true,
             message: "Location updated",
         });
     } catch (error) {
