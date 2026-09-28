@@ -712,6 +712,21 @@ exports.createOrder = async (req, res) => {
             data: order
         });
 
+        // Alert every online delivery partner that a real order is waiting to
+        // be claimed (Phase 2). Fire-and-forget: the customer already has their
+        // response, and a delivery-broadcast problem must never fail checkout.
+        // Running the sweep here also retires offers that expired while nobody
+        // had a dashboard open.
+        try {
+            const deliveryOps = require("../controllers/deliveryOpsController");
+            Promise.resolve()
+                .then(function () { return deliveryOps.sweepExpiredOffers(20); })
+                .then(function () { return deliveryOps.broadcastNewOrder(order); })
+                .catch(function (e) {
+                    console.warn("[delivery-ops] broadcast failed: " + ((e && e.message) || "unknown"));
+                });
+        } catch (e) { /* non-fatal */ }
+
         // In-app inbox notification for the buyer (fire-and-forget; never affects
         // the response).
         if (req.user) {
@@ -868,6 +883,10 @@ exports.getMyOrders = async (req, res) => {
             const doc = order.toObject ? order.toObject() : Object.assign({}, order);
             const track = await deliveryTrackFor(order._id);
             if (track) doc.deliveryTrack = track;
+            // The owner of an order may see (and call) the rider who is bringing
+            // it. This is never exposed on the public tracking endpoint.
+            const partner = await deliveryPartnerFor(order._id);
+            if (partner) doc.deliveryPartner = partner;
             doc.eta = await deliveryEta(order, track);
             docs.push(doc);
         }

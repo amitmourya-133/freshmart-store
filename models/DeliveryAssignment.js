@@ -66,6 +66,49 @@ const DeliveryAssignmentSchema = new mongoose.Schema(
             type: Boolean,
             default: false,
         },
+        otpIssuedAt: {
+            type: Date, // when the CURRENT otp was minted
+        },
+        otpReissueCount: {
+            type: Number,
+            default: 0, // capped by settings (deliveryMaxOtpReissue)
+        },
+        otpReissueLog: [
+            {
+                at: { type: Date, default: Date.now },
+                by: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+                reason: { type: String, trim: true, maxlength: 160 },
+            },
+        ],
+
+        // Recipient signature captured on the partner's device (data URL kept
+        // small) plus when it was taken.
+        signature: {
+            type: String,
+        },
+        signatureAt: {
+            type: Date,
+        },
+        // Cash actually collected for a COD drop (Phase 5). Confirmed by the
+        // partner at hand-over and reconciled against the order total later.
+        cashCollected: {
+            type: Number,
+            min: 0,
+        },
+        cashConfirmedAt: {
+            type: Date,
+        },
+        // How this assignment was created: admin click, partner claim or the
+        // auto-assigner. Kept for the delivery-operations audit trail.
+        assignMode: {
+            type: String,
+            enum: ["admin", "claim", "auto"],
+            default: "admin",
+        },
+        // Partner-to-drop distance at assignment time (km), when known.
+        distanceKm: {
+            type: Number,
+        },
 
         // Earnings
         earnings: {

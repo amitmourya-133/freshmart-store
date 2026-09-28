@@ -235,11 +235,11 @@ function renderDashboardDetails(d) {
     }).join("") || '<p class="dash-empty">No sales recorded.</p>';
 
     var low = (d.lowStock || []).map(function(p) {
-        return '<div class="dash-item"><span>⚠�? ' + dashEsc(p.name) + '</span><strong>' + p.stock + '</strong></div>';
+        return '<div class="dash-item"><span>⚠️ ' + dashEsc(p.name) + '</span><strong>' + p.stock + '</strong></div>';
     }).join("") || '<p class="dash-empty">No low-stock products.</p>';
 
     var out = (d.outOfStock || []).map(function(p) {
-        return '<div class="dash-item"><span>�?� ' + dashEsc(p.name) + '</span><strong>0</strong></div>';
+        return '<div class="dash-item"><span>❌ ' + dashEsc(p.name) + '</span><strong>0</strong></div>';
     }).join("") || '<p class="dash-empty">No out-of-stock products.</p>';
 
     var rows = (d.dateWise || []).map(function(r) {
@@ -258,7 +258,7 @@ function renderDashboardDetails(d) {
                 '</div>' +
             '</div>' +
             '<div class="dash-block">' +
-                '<h4>�?� Top Selling Products</h4>' +
+                '<h4>🏆 Top Selling Products</h4>' +
                 '<div class="dash-list">' + top + '</div>' +
             '</div>' +
             '<div class="dash-block">' +
@@ -739,10 +739,10 @@ function renderProducts() {
             '<div class="admin-product-info">' +
                 '<div class="admin-product-name">' + esc(p.name || "Product") + ' ' + stockTag + '</div>' +
                 '<div class="admin-product-meta">' + esc(p.category || "") + ' &bull; &#8377;' + (p.price || 0) + ' / ' + esc(p.unit || "") + '</div>' +
-                '<div class="admin-product-meta">�?� ' + (p.rating || 0).toFixed(1) + ' (' + (p.ratingCount || 0) + ' ratings)</div>' +
+                '<div class="admin-product-meta">⭐ ' + (p.rating || 0).toFixed(1) + ' (' + (p.ratingCount || 0) + ' ratings)</div>' +
                 '<div class="price-row">' +
                     '<span class="stock-label">Price: &#8377;<span id="priceVal_' + p._id + '">' + (p.price || 0) + '</span></span>' +
-                    '<button class="row-btn edit" onclick="beginPriceEdit(\'' + p._id + '\')" title="Quick edit price">�?�? Price</button>' +
+                    '<button class="row-btn edit" onclick="beginPriceEdit(\'' + p._id + '\')" title="Quick edit price">✏️ Price</button>' +
                 '</div>' +
                 '<div id="priceEdit_' + p._id + '" style="display:none;" class="price-edit-row">' +
                     '<input type="number" id="priceInput_' + p._id + '" class="stock-input" min="0" step="0.01" value="' + (p.price || 0) + '">' +
@@ -755,10 +755,10 @@ function renderProducts() {
                 '</div>' +
             '</div>' +
             '<div class="admin-product-actions">' +
-                '<button class="row-btn edit" onclick="openEditProduct(\'' + p._id + '\')" title="Edit">�?�?</button>' +
+                '<button class="row-btn edit" onclick="openEditProduct(\'' + p._id + '\')" title="Edit">✏️</button>' +
                 (inactive
-                    ? '<button class="row-btn restore" onclick="restoreProduct(\'' + p._id + '\')" title="Restore">↩�?</button>'
-                    : '<button class="row-btn remove" onclick="removeProduct(\'' + p._id + '\')" title="Remove">🗑�?</button>'
+                    ? '<button class="row-btn restore" onclick="restoreProduct(\'' + p._id + '\')" title="Restore">↩️</button>'
+                    : '<button class="row-btn remove" onclick="removeProduct(\'' + p._id + '\')" title="Remove">🗑️</button>'
                 ) +
             '</div>' +
         '</div>';
@@ -924,7 +924,7 @@ function onProductImageSelected(event) {
 
 function setPfUploading(busy) {
     var btn = document.getElementById("pfChooseImgBtn");
-    if (btn) btn.textContent = busy ? "�?� Uploading image…" : "📷 Upload Image / Take Photo";
+    if (btn) btn.textContent = busy ? "⏳ Uploading image…" : "📷 Upload Image / Take Photo";
 }
 
 // Variant editor helpers (pack-size variants: unit / price / stock / active).
@@ -1264,7 +1264,7 @@ function renderReviews() {
     if (!container) return;
 
     if (!adminReviews || adminReviews.length === 0) {
-        container.innerHTML = '<div class="cart-empty"><div class="cart-empty-icon">�?�</div><h3>No reviews yet</h3><p>Customer reviews will appear here.</p></div>';
+        container.innerHTML = '<div class="cart-empty"><div class="cart-empty-icon">⭐</div><h3>No reviews yet</h3><p>Customer reviews will appear here.</p></div>';
         return;
     }
 
@@ -1552,7 +1552,7 @@ function renderSettingsTab() {
         var badRange = (s.minimumOrderValue > 0 && s.freeDeliveryThreshold > 0 && s.freeDeliveryThreshold < s.minimumOrderValue);
         section.innerHTML =
             '<div class="settings-card">' +
-                '<div class="settings-head"><h3>⚙�? Delivery Charge</h3><p>Customise what customers pay for delivery. The server enforces these amounts on every order — they are never taken from client-side values.</p></div>' +
+                '<div class="settings-head"><h3>⚙️ Delivery Charge</h3><p>Customise what customers pay for delivery. The server enforces these amounts on every order — they are never taken from client-side values.</p></div>' +
                 '<div class="settings-row">' +
                     '<label for="setDeliveryCharge">Delivery Charge (₹)</label>' +
                     '<input type="number" id="setDeliveryCharge" class="stock-input" min="0" step="1" value="' + esc(s.deliveryCharge) + '">' +
@@ -1857,7 +1857,7 @@ function renderAdminCoupons(list) {
     var container = document.getElementById("adminCouponsBody");
     if (!container) return;
     if (!list || list.length === 0) {
-        container.innerHTML = '<div class="cart-empty"><div class="cart-empty-icon">🎟�?</div><h3>No coupons yet</h3><p>Create a coupon to start offering discounts.</p></div>';
+        container.innerHTML = '<div class="cart-empty"><div class="cart-empty-icon">🎟️</div><h3>No coupons yet</h3><p>Create a coupon to start offering discounts.</p></div>';
         return;
     }
     list.sort(function(a, b) { return new Date(b.createdAt) - new Date(a.createdAt); });
@@ -1879,8 +1879,8 @@ function renderAdminCoupons(list) {
                     : ('<span class="coupon-expired-badge">' + (expired ? "Expired" : "Inactive") + '</span>')) +
             '</div>' +
             '<div class="admin-coupon-actions">' +
-                '<button class="row-btn edit" onclick="toggleCoupon(\'' + c._id + '\', ' + (c.active ? 'false' : 'true') + ')" title="' + (c.active ? "Deactivate" : "Activate") + '">' + (c.active ? "�?�" : "▶") + '</button>' +
-                '<button class="row-btn edit" onclick="openCouponModal(' + "'" + c._id + "'" + ')" title="Edit">�?�?</button>' +
+                '<button class="row-btn edit" onclick="toggleCoupon(\'' + c._id + '\', ' + (c.active ? 'false' : 'true') + ')" title="' + (c.active ? "Deactivate" : "Activate") + '">' + (c.active ? "⏸" : "▶") + '</button>' +
+                '<button class="row-btn edit" onclick="openCouponModal(' + "'" + c._id + "'" + ')" title="Edit">✏️</button>' +
                 '<button class="row-btn reject" onclick="deleteCoupon(\'' + c._id + '\')" title="Delete">🗑</button>' +
             '</div>' +
         '</div>';

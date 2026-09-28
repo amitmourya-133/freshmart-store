@@ -2666,6 +2666,7 @@ body.dark-mode .review-form h4 { color: var(--text-primary); }
 
 .admin-tabs {
     display: flex;
+    flex-wrap: wrap;
     gap: 10px;
     border-bottom: 2px solid var(--border-color);
     margin-bottom: 24px;
@@ -2881,6 +2882,8 @@ body.dark-mode .review-form h4 { color: var(--text-primary); }
 }
 
 .admin-product-card.inactive {
+    opacity: 0.6;
+}
 
 .price-row {
     display: flex;
@@ -2927,8 +2930,6 @@ body.dark-mode .review-form h4 { color: var(--text-primary); }
 
 .admin-customer-row .row-btn {
     margin-top: 4px;
-}
-    opacity: 0.6;
 }
 
 .admin-product-emoji {

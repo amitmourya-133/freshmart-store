@@ -42,6 +42,28 @@ const userSchema = new mongoose.Schema(
         lastLat: { type: Number },
         lastLng: { type: Number },
         lastLocationAt: { type: Date },
+        // Partner onboarding (Phase 1). A customer applies, an admin approves,
+        // and ONLY an approved partner can receive broadcast offers. role stays
+        // "customer" until approval, so an unapproved applicant can never reach
+        // any delivery-only endpoint.
+        partnerStatus: {
+            type: String,
+            enum: ["none", "pending", "approved", "rejected"],
+            default: "none",
+        },
+        partnerAppliedAt: { type: Date },
+        partnerReviewedAt: { type: Date },
+        partnerReviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        partnerRejectReason: { type: String, trim: true, maxlength: 160 },
+        vehicleType: { type: String, trim: true, maxlength: 40 },
+        // Optional delivery zone the partner prefers (used to rank offers).
+        zone: { type: String, trim: true, maxlength: 60 },
+        // Set while the partner is on a break; cleared when they go back online.
+        breakReason: { type: String, trim: true, maxlength: 80 },
+        // Reputation counters kept server-side (never client-asserted).
+        rating: { type: Number, default: 0, min: 0, max: 5 },
+        ratingCount: { type: Number, default: 0, min: 0 },
+        deliveryCount: { type: Number, default: 0, min: 0 },
         // Saved addresses for checkout and profile
         addresses: [{
             name: { type: String, trim: true },

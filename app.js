@@ -23,6 +23,7 @@ const dashboardRoutes = require("./routes/dashboardRoutes");
 const subscriptionRoutes = require("./routes/subscriptionRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const deliveryRoutes = require("./routes/deliveryRoutes");
+const deliveryOpsRoutes = require("./routes/deliveryOpsRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const returnRoutes = require("./routes/returnRoutes");
 
@@ -118,7 +119,44 @@ app.use("/api/admin/dashboard", dashboardRoutes);
 app.use("/api/subscriptions", subscriptionRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/delivery", deliveryRoutes);
+app.use("/api/delivery-ops", deliveryOpsRoutes);
 app.use("/api/notifications", notificationRoutes);
+
+// Scheduled maintenance hook for delivery offers. Serverless has no in-process
+// timer, so an external scheduler (Vercel Cron on a paid plan, or any cron
+// service) can hit this endpoint to expire/auto-assign offers on time instead
+// of waiting for a partner or admin to open a dashboard.
+// Secured with a bearer token (CRON_SECRET). It is refused when the secret is
+// not configured, so it can never become an open endpoint by accident.
+app.get("/api/ops/cron/delivery-sweep", async (req, res) => {
+    const secret = process.env.CRON_SECRET;
+    if (!secret) {
+        return res.status(503).json({ success: false, message: "CRON_SECRET is not configured" });
+    }
+    const auth = String(req.headers.authorization || "");
+    const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+    const provided = String(req.query.token || "");
+    // Length-safe, timing-safe compare so the secret cannot be brute-forced by
+    // measuring response times.
+    const ok = (a, b) => {
+        if (!a) return false;
+        const ba = Buffer.from(a, "utf8");
+        const bb = Buffer.from(b, "utf8");
+        return ba.length === bb.length && require("crypto").timingSafeEqual(ba, bb);
+    };
+    // Either credential source is enough on its own: Vercel Cron sends only the
+    // Authorization header, most other schedulers can only send ?token=.
+    if (!ok(token, secret) && !ok(provided, secret)) {
+        return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+    try {
+        const deliveryOps = require("./controllers/deliveryOpsController");
+        const result = await deliveryOps.sweepExpiredOffers(Number(req.query.limit) || 50);
+        return res.json({ success: true, ...result });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
 
 // Health check
 app.get("/api/health", (req, res) => {

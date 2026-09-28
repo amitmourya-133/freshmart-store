@@ -21,6 +21,7 @@ router.put("/:id/read", protect, notificationController.markRead);
 
 // Push notification routes
 router.get("/vapid-key", pushController.getVapidKey);
+router.get("/push-status", protect, pushController.getMyPushStatus);
 router.post("/subscribe", protect, pushController.subscribe);
 router.post("/unsubscribe", protect, pushController.unsubscribe);
 

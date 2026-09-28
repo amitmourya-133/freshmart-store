@@ -28,7 +28,23 @@ const settingsSchema = new mongoose.Schema(
         // ETA guidance (server-side, derived from real assignment/pipeline data
         // where available; slot label is the last-resort fallback).
         etaBaseMinutes: { type: Number, default: 45, min: 0 },
-        etaMinutesPerKm: { type: Number, default: 3, min: 0 }
+        etaMinutesPerKm: { type: Number, default: 3, min: 0 },
+        // ---- Delivery operations (Phase 1-4) ----
+        // Broadcast a real order to every online partner the moment it is
+        // placed. Master switch: turning it off restores the old
+        // "admin assigns manually" behaviour without touching any code.
+        deliveryBroadcastEnabled: { type: Boolean, default: true },
+        // How long a broadcast offer stays claimable (seconds).
+        deliveryOfferTtlSeconds: { type: Number, default: 90, min: 15, max: 900 },
+        // Auto-assign the NEAREST online partner when an offer expires
+        // unclaimed. Off by default so a human stays in the loop.
+        deliveryAutoAssign: { type: Boolean, default: false },
+        // Delay before an unclaimed offer is auto-assigned / escalated.
+        deliveryAutoAssignDelaySeconds: { type: Number, default: 90, min: 10, max: 1800 },
+        // How many times a delivery OTP may be re-issued per assignment.
+        deliveryMaxOtpReissue: { type: Number, default: 2, min: 0, max: 5 },
+        // A partner with no location ping for this long is shown as stale.
+        deliveryStaleMinutes: { type: Number, default: 15, min: 1, max: 240 }
     },
     { timestamps: true }
 );
@@ -68,6 +84,30 @@ settingsSchema.statics.getSettings = async function () {
     }
     if (doc.etaMinutesPerKm === undefined || doc.etaMinutesPerKm === null) {
         doc.etaMinutesPerKm = 3;
+        changed = true;
+    }
+    if (doc.deliveryBroadcastEnabled === undefined || doc.deliveryBroadcastEnabled === null) {
+        doc.deliveryBroadcastEnabled = true;
+        changed = true;
+    }
+    if (doc.deliveryOfferTtlSeconds === undefined || doc.deliveryOfferTtlSeconds === null) {
+        doc.deliveryOfferTtlSeconds = 90;
+        changed = true;
+    }
+    if (doc.deliveryAutoAssign === undefined || doc.deliveryAutoAssign === null) {
+        doc.deliveryAutoAssign = false;
+        changed = true;
+    }
+    if (doc.deliveryAutoAssignDelaySeconds === undefined || doc.deliveryAutoAssignDelaySeconds === null) {
+        doc.deliveryAutoAssignDelaySeconds = 90;
+        changed = true;
+    }
+    if (doc.deliveryMaxOtpReissue === undefined || doc.deliveryMaxOtpReissue === null) {
+        doc.deliveryMaxOtpReissue = 2;
+        changed = true;
+    }
+    if (doc.deliveryStaleMinutes === undefined || doc.deliveryStaleMinutes === null) {
+        doc.deliveryStaleMinutes = 15;
         changed = true;
     }
     if (changed) await doc.save();
