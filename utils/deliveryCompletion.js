@@ -69,6 +69,15 @@ async function completeOrderDelivery(order, assignment, opts) {
         await assignment.save();
     }
 
+    // Fire the post-delivery side-effects exactly once (analytics, referral
+    // reward, repeat-order reminder). Lazy require breaks the module cycle and
+    // keeps this primitive dependency-light; failures are already swallowed.
+    try {
+        const hooks = require("./orderDeliveredHooks");
+        const fired = await hooks.fireOrderDelivered(order);
+        void fired;
+    } catch (e) { /* non-fatal */ }
+
     return { order: order, assignment: assignment || null, alreadyDelivered: false };
 }
 

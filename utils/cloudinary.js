@@ -43,8 +43,10 @@ function getCloudinary() {
 
 // Upload validated image bytes to Cloudinary and return an optimized delivery
 // URL. `buffer` must already be validated (magic bytes + size) by the caller;
-// `type` is one of  png | jpeg | webp  (sniffed server-side).
-async function uploadImageBytes(buffer, type) {
+// `type` is one of  png | jpeg | webp  (sniffed server-side). `folder` allows
+// callers (e.g. review photos) to keep their media in their own subfolder; it
+// defaults to the product assets folder.
+async function uploadImageBytes(buffer, type, folder) {
     const c = getCloudinary();
     const dataUri = "data:image/" + type + ";base64," + buffer.toString("base64");
 
@@ -55,7 +57,7 @@ async function uploadImageBytes(buffer, type) {
     let result;
     try {
         result = await c.uploader.upload(dataUri, {
-            folder: PRODUCTS_FOLDER,
+            folder: folder || PRODUCTS_FOLDER,
             public_id: publicId,
             resource_type: "image",
             overwrite: false
@@ -69,7 +71,7 @@ async function uploadImageBytes(buffer, type) {
 
     // Deterministic optimized delivery URL: automatic format + quality, and a
     // width cap (crop "limit" only shrinks, never upscales or crops visibly).
-    return c.url(PRODUCTS_FOLDER + "/" + publicId, {
+    return c.url((folder || PRODUCTS_FOLDER) + "/" + publicId, {
         resource_type: "image",
         secure: true,
         version: result.version,

@@ -22,6 +22,7 @@
         <div class="admin-tabs">
             <button class="admin-tab" id="tabDashboardBtn" onclick="switchTab('dashboard')">Dashboard</button>
             <button class="admin-tab" id="tabOrdersBtn" onclick="switchTab('orders')">📦 Orders</button>
+            <button class="admin-tab" id="tabAnalyticsBtn" onclick="switchTab('analytics')">📊 Analytics</button>
             <button class="admin-tab" id="tabProductsBtn" onclick="switchTab('products')">🥬 Products</button>
             <button class="admin-tab" id="tabCustomersBtn" onclick="switchTab('customers')">👥 Customers</button>
             <button class="admin-tab" id="tabReviewsBtn" onclick="switchTab('reviews')">⭐ Reviews</button>
@@ -134,6 +135,65 @@
             <div id="adminCustomersList" class="admin-list">
                 <p style="text-align:center;color:var(--text-secondary);padding:40px;">Loading customers...</p>
             </div>
+
+        </div>
+
+        <div id="adminAnalyticsSection" class="admin-section" style="display:none;">
+
+            <div class="admin-section-head">
+                <h2>Growth & Analytics</h2>
+                <div class="admin-filters" style="justify-content:flex-end;">
+                    <select id="analyticsRange" class="status-select" onchange="loadAdminAnalytics()">
+                        <option value="today">Today</option>
+                        <option value="7d" selected>Last 7 days</option>
+                        <option value="30d">Last 30 days</option>
+                        <option value="90d">Last 90 days</option>
+                    </select>
+                    <button type="button" class="secondary-btn" onclick="loadAdminAnalytics()">Refresh</button>
+                </div>
+            </div>
+
+            <div class="admin-stats" id="analyticsKpis">
+                <p style="text-align:center;color:var(--text-secondary);padding:20px;">Loading analytics...</p>
+            </div>
+
+            <div class="admin-section-head" style="margin-top:28px;">
+                <h3 style="margin:0;">Customer actions</h3>
+            </div>
+            <div class="ops-table-wrap" style="margin-top:12px;">
+                <table class="ops-table">
+                    <thead><tr><th>Event</th><th>Count</th></tr></thead>
+                    <tbody id="analyticsEventRows">
+                        <tr><td colspan="2" style="text-align:center;color:var(--text-secondary);">No data yet.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="admin-section-head" style="margin-top:28px;">
+                <h3 style="margin:0;">Top products by units ordered</h3>
+            </div>
+            <div class="ops-table-wrap" style="margin-top:12px;">
+                <table class="ops-table">
+                    <thead><tr><th>#</th><th>Product</th><th>Units</th><th>Revenue</th></tr></thead>
+                    <tbody id="analyticsTopProducts">
+                        <tr><td colspan="4" style="text-align:center;color:var(--text-secondary);">No delivered orders in this range.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="admin-section-head" style="margin-top:28px;">
+                <h3 style="margin:0;">Most viewed products</h3>
+            </div>
+            <div class="ops-table-wrap" style="margin-top:12px;">
+                <table class="ops-table">
+                    <thead><tr><th>#</th><th>Product</th><th>Views</th></tr></thead>
+                    <tbody id="analyticsTopViews">
+                        <tr><td colspan="3" style="text-align:center;color:var(--text-secondary);">No product views in this range.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="admin-stats" id="analyticsExtra" style="margin-top:28px;"></div>
 
         </div>
 

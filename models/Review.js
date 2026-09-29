@@ -12,6 +12,12 @@ const reviewSchema = new mongoose.Schema(
         userName: { type: String, default: "Anonymous" },
         rating: { type: Number, required: true, min: 1, max: 5 },
         comment: { type: String, required: true, trim: true, maxlength: 800 },
+        // Review photos: Cloudinary HTTPS URLs captured at submission time via
+        // POST /api/products/:productId/reviews/photos (validated server-side).
+        photos: [{ type: String, validate: [/^https:\/\//, "Photo must be a secure URL"] }],
+        // Server-derived truth: set only when the reviewer owns a Delivered
+        // order that actually contained this product. Never client-asserted.
+        verifiedPurchase: { type: Boolean, default: false },
         // Moderation lifecycle. New customer reviews are created PENDING and
         // only become public after a moderator approves them. Legacy reviews
         // created before moderation existed carry no value; the public listing

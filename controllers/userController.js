@@ -202,7 +202,10 @@ function publicUser(user) {
         phone: user.phone,
         role: user.role,
         isAdmin: user.isAdmin,
-        emailVerified: user.emailVerified !== false
+        emailVerified: user.emailVerified !== false,
+        language: user.language || "en",
+        referralCode: user.referralCode || null,
+        reminderOptOut: !!user.reminderOptOut
     };
 }
 
@@ -214,7 +217,7 @@ function publicUser(user) {
 // it is only issued after /signup/verify-otp succeeds.
 exports.signup = async (req, res) => {
     try {
-        const { name, email, phone, password } = req.body;
+        const { name, email, phone, password, referralCode } = req.body;
         const normalized = normalizeEmail(email);
 
         if (!validEmail(normalized)) {
@@ -223,6 +226,21 @@ exports.signup = async (req, res) => {
         if (!validatePassword(password)) {
             const reason = passwordWeakReason(password);
             return res.status(400).json({ success: false, message: reason || "Password must be at least 8 characters long." });
+        }
+
+        // Optional referral code: validate NOW so an invalid/self code is rejected
+        // before any OTP work happens. Self-referral is blocked on the contact
+        // details: the code must not belong to this email or phone number.
+        let referrer = null;
+        if (referralCode && String(referralCode).trim()) {
+            referrer = await require("../utils/referral").findUserByCode(String(referralCode).trim());
+            if (!referrer) {
+                return res.status(400).json({ success: false, message: "That referral code does not exist." });
+            }
+            if (String(referrer.email).toLowerCase() === normalized ||
+                (referrer.phone && phone && String(referrer.phone).replace(/\D+/g, "") === String(phone).replace(/\D+/g, ""))) {
+                return res.status(400).json({ success: false, message: "You cannot use your own referral code." });
+            }
         }
 
         let user = await User.findOne({ email: normalized });
@@ -245,13 +263,20 @@ exports.signup = async (req, res) => {
                 email: normalized,
                 phone: phone || "",
                 password: password,
-                emailVerified: false
+                emailVerified: false,
+                referredBy: referrer ? referrer._id : undefined,
+                referredAt: referrer ? new Date() : undefined
             });
         } else {
             // Same person retrying signup -> refresh the pending details.
             user.name = name || user.name;
             user.phone = phone !== undefined ? phone : user.phone;
             if (password) user.password = password;
+            // Attach a validated referral only if the account is not already linked.
+            if (referrer && !user.referredBy) {
+                user.referredBy = referrer._id;
+                user.referredAt = user.referredAt || new Date();
+            }
             await user.save();
         }
 
@@ -295,6 +320,18 @@ exports.signupVerifyOtp = async (req, res) => {
             user.emailVerified = true;
             await user.save();
 setAuthCookie(req, res, user._id);
+        // Growth analytics: account created (fire-and-forget).
+        try {
+            const analyticsSvc = require("../utils/analytics");
+            analyticsSvc.track({ eventName: "signup", userId: user._id });
+            if (user.referredBy) {
+                analyticsSvc.track({
+                    eventName: "referral_signup",
+                    userId: user._id,
+                    metadata: { referrerId: String(user.referredBy) },
+                });
+            }
+        } catch (e) { /* non-fatal */ }
         if (user.role === "admin") {
             logger.info({ ev: "admin_login", user: String(user._id) });
         }
@@ -385,6 +422,10 @@ exports.login = async (req, res) => {
         }
 
         setAuthCookie(req, res, user._id);
+        // Growth analytics: successful login (fire-and-forget).
+        try {
+            require("../utils/analytics").track({ eventName: "login", userId: user._id });
+        } catch (e) { /* non-fatal */ }
         const body = {
             success: true,
             message: "Login successful.",
@@ -523,7 +564,20 @@ exports.forgotPasswordReset = async (req, res) => {
 
 // GET CURRENT USER
 exports.getMe = async (req, res) => {
-    res.json({ success: true, data: req.user });
+    try {
+        // Enrich the profile with growth data the client needs: the user's
+        // shareable referral code (created lazily) and their wallet balance.
+        const [code, wallet] = await Promise.all([
+            require("../utils/referral").ensureReferralCode(req.user._id).catch(function () { return null; }),
+            require("../utils/wallet").getOrCreateWallet(req.user._id).catch(function () { return null; }),
+        ]);
+        const data = req.user.toObject ? req.user.toObject() : req.user;
+        data.referralCode = code || data.referralCode || null;
+        data.walletBalance = wallet ? Math.round(wallet.balance * 100) / 100 : 0;
+        return res.json({ success: true, data });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
 };
 
 // Update profile (name, phone, addresses, password)
@@ -531,7 +585,7 @@ exports.getMe = async (req, res) => {
 exports.updateMe = async (req, res) => {
     try {
         let updates = Object.keys(req.body);
-        const allowedUpdates = ["name", "phone", "addresses", "password", "deleteAddressIndex", "setDefaultIndex", "language"];
+        const allowedUpdates = ["name", "phone", "addresses", "password", "deleteAddressIndex", "setDefaultIndex", "language", "reminderOptOut"];
         const isValidUpdate = updates.every((update) => allowedUpdates.includes(update.trim()));
 
         if (!isValidUpdate) {
@@ -568,6 +622,13 @@ exports.updateMe = async (req, res) => {
         applyKeys.forEach((k) => {
             if (req.body[k] !== undefined) req.user[k] = req.body[k];
         });
+        // Repeat-order-reminder opt-out is a strictly boolean preference.
+        if (req.body.reminderOptOut !== undefined) {
+            if (typeof req.body.reminderOptOut !== "boolean") {
+                return res.status(400).json({ success: false, message: "reminderOptOut must be a boolean" });
+            }
+            req.user.reminderOptOut = req.body.reminderOptOut;
+        }
         if (req.body.password !== undefined) {
             const reason = passwordWeakReason(String(req.body.password || ""));
             if (reason) {
@@ -722,6 +783,10 @@ exports.googleLogin = async (req, res) => {
         }
 
         setAuthCookie(req, res, user._id);
+        // Growth analytics: Google sign-in (fire-and-forget).
+        try {
+            require("../utils/analytics").track({ eventName: "google_login", userId: user._id });
+        } catch (e) { /* non-fatal */ }
         const body = {
             success: true,
             data: publicUser(user)

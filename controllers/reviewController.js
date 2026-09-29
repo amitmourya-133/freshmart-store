@@ -9,10 +9,34 @@
 
 const Review = require("../models/Review");
 const Product = require("../models/Product");
+const Order = require("../models/Order");
 const mongoose = require("mongoose");
+
+// Review photos live in their own Cloudinary folder so they never collide with
+// product assets.
+const REVIEWS_FOLDER = "freshmart/reviews";
 
 function isBadObjectId(id) {
     return !mongoose.Types.ObjectId.isValid(String(id || ""));
+}
+
+// Verified purchase is derived from the delivered orders ledger, not asserted
+// by the client: the reviewer must own a Delivered order containing this product.
+async function hasVerifiedPurchase(userId, productId) {
+    if (!userId) return false;
+    const order = await Order.findOne({
+        user: userId,
+        status: "Delivered",
+        "items.productId": productId,
+    }).select("_id");
+    return !!order;
+}
+
+// Server-validate a submitted photo array: secure HTTPS URLs only, at most 3.
+function normalizePhotos(value) {
+    const arr = Array.isArray(value) ? value : [];
+    const urls = arr.map((u) => String(u || "").trim()).filter((u) => /^https:\/\//i.test(u) && u.length <= 2048);
+    return urls.slice(0, 3);
 }
 
 // Match "currently public" reviews: approved, plus legacy reviews that predate
@@ -69,7 +93,7 @@ exports.addProductReview = async (req, res) => {
         if (isBadObjectId(req.params.id)) {
             return res.status(404).json({ success: false, message: "Product not found" });
         }
-        const { rating, comment, userName } = req.body;
+        const { rating, comment, userName, photos } = req.body;
         const r = Number(rating);
         if (!Number.isFinite(r) || r < 1 || r > 5) {
             return res.status(400).json({ success: false, message: "Rating must be 1-5" });
@@ -96,6 +120,9 @@ exports.addProductReview = async (req, res) => {
             }
         }
 
+        const cleanPhotos = normalizePhotos(photos);
+        const verified = authorId ? await hasVerifiedPurchase(authorId, product._id) : false;
+
         const review = await Review.create({
             product: product._id,
             productName: product.name,
@@ -103,6 +130,8 @@ exports.addProductReview = async (req, res) => {
             userName: (req.user && req.user.name) || String(userName || "").trim().slice(0, 30) || "Anonymous",
             rating: r,
             comment: String(comment).trim(),
+            photos: cleanPhotos,
+            verifiedPurchase: verified,
             moderationStatus: "PENDING"
         });
 
@@ -112,6 +141,29 @@ exports.addProductReview = async (req, res) => {
             return res.status(400).json({ success: false, message: error.message });
         }
         res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// POST /api/products/:id/reviews/photos — upload a review photo (authenticated).
+// The client sends a base64 data URI (already size-capped by the browser); the
+// server re-validates magic bytes and uploads to Cloudinary into the review
+// folder. Returns the secure delivery URL to attach to a review submission.
+exports.uploadReviewPhoto = async (req, res) => {
+    try {
+        const { image } = req.body || {};
+        if (!image) {
+            return res.status(400).json({ success: false, message: "No image data provided" });
+        }
+        const parsed = require("../utils/productImage").parseImageDataUri(String(image));
+        const cloudinary = require("../utils/cloudinary");
+        if (!cloudinary.isCloudinaryConfigured()) {
+            return res.status(503).json({ success: false, message: "Image uploads are unavailable right now." });
+        }
+        const url = await cloudinary.uploadImageBytes(parsed.buffer, parsed.type, REVIEWS_FOLDER);
+        return res.json({ success: true, data: { url } });
+    } catch (error) {
+        const status = (error && error.status) || 500;
+        return res.status(status).json({ success: false, message: (error && error.message) || "Upload failed" });
     }
 };
 

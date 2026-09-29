@@ -507,6 +507,89 @@ function updateNotifBadge() {
 }
 
 // ===============================
+// NOTIFICATIONS INBOX (notifications.html)
+// ===============================
+
+function notifTypeIcon(type) {
+    var map = { reminder: "🔁", stock_alert: "🔥", referral: "🎁", wallet: "💳", order: "📦", system: "🔔" };
+    return map[type] || "🔔";
+}
+
+function notifPageUrl(n) {
+    if (n && n.data && n.data.link) return String(n.data.link);
+    return "notifications.html";
+}
+
+function loadNotifications() {
+    var box = document.getElementById("notificationsContainer");
+    var summary = document.getElementById("notifSummary");
+    if (!box) return;
+    box.innerHTML = '<p style="text-align:center;">Loading notifications...</p>';
+    fetch(API.base + "/notifications?limit=50", { headers: getAuthHeaders() })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) {
+                if (summary) summary.textContent = "Could not load your inbox.";
+                box.innerHTML = '<p style="text-align:center;">Not signed in or inbox unavailable.</p>';
+                return;
+            }
+            if (summary) summary.textContent = (data.unreadCount || 0) + " unread · " + data.count + " shown";
+            var items = data.data || [];
+            if (!items.length) {
+                box.innerHTML = '<p style="text-align:center;">No notifications yet. 🎉</p>';
+                return;
+            }
+            box.innerHTML = items.map(function(n) {
+                var time = "";
+                try { if (n.createdAt) time = new Date(n.createdAt).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); } catch (e) {}
+                var url = notifPageUrl(n);
+                var idJson = JSON.stringify(String(n._id));
+                var urlJson = JSON.stringify(url);
+                var openBtn = n.read
+                    ? '<button type="button" class="notification-open" onclick="window.location.href=' + urlJson + '">Open</button>'
+                    : '<button type="button" class="notification-open" onclick="openNotification(' + idJson + ', ' + urlJson + ')">Open</button>';
+                return '<div class="notification-item' + (n.read ? " is-read" : "") + '">' +
+                    '<span class="notification-icon">' + notifTypeIcon(n.type) + '</span>' +
+                    '<div class="notification-item-body">' +
+                        '<div class="notification-title">' + escHtml(n.title || "Update") + '</div>' +
+                        (n.message ? '<div class="notification-message">' + escHtml(n.message) + '</div>' : '') +
+                        '<div class="notification-time">' + escHtml(time) + '</div>' +
+                    '</div>' + openBtn +
+                '</div>';
+            }).join("");
+        })
+        .catch(function() {
+            box.innerHTML = '<p style="text-align:center;">Could not load notifications.</p>';
+        });
+}
+
+// Open a notification: mark it read, track the click (reminder_clicked for
+// re-order nudges), then follow the item's deep link.
+function openNotification(id, link) {
+    fetch(API.base + "/notifications/" + encodeURIComponent(String(id || "")) + "/read", {
+        method: "PUT",
+        headers: getAuthHeaders()
+    }).then(function(res) { return res.json(); }).catch(function() {});
+    trackEvent("reminder_clicked", {
+        metadata: { notificationId: String(id || ""), link: String(link || "").slice(0, 80) }
+    });
+    updateNotifBadge();
+    window.location.href = link || "notifications.html";
+}
+
+function markAllReadFromPage() {
+    fetch(API.base + "/notifications/read-all", {
+        method: "PUT",
+        headers: getAuthHeaders()
+    }).then(function(res) { return res.json(); }).then(function() {
+        updateNotifBadge();
+        loadNotifications();
+    }).catch(function() {
+        loadNotifications();
+    });
+}
+
+// ===============================
 // STORAGE HELPERS
 // ===============================
 
@@ -689,6 +772,7 @@ function addToCart(name, price, unit) {
     saveCart();
     updateCart();
     updateAllCartControls();
+    trackEvent("add_to_cart", { productId: productId, metadata: { name: name, price: scaled, unit: u } });
     showToast(name + " (" + opt.label + ") added to cart!", "success");
 }
 
@@ -793,6 +877,7 @@ function removeItem(index) {
     cart.splice(index, 1);
     saveCart();
     updateCart();
+    trackEvent("remove_from_cart", { metadata: { name: name } });
     showToast(name + " removed from cart", "warning");
 }
 
@@ -1032,6 +1117,7 @@ function filterCategory(category) {
     updateCategoryButtons();
     applyCatalogFilter();
     scrollToProducts();
+    trackEvent("category_view", { metadata: { category: category } });
 }
 
 function showAllProducts() {
@@ -1050,6 +1136,11 @@ function searchProducts() {
         searchAiOverride = null;
         catalogFilters.search = search;
         applyCatalogFilter();
+        if (search) {
+            var qid = products && products.length;
+            trackEvent("product_search", { metadata: { query: search.slice(0, 80) } });
+            void qid;
+        }
     }, 200);
 }
 
@@ -1407,6 +1498,8 @@ function toggleWishlist(name) {
         showToast(name + " removed from wishlist", "warning");
     } else {
         wishlist.push(name);
+        var p = products.find(function(prod) { return prod && prod.name === name; });
+        trackEvent("wishlist_add", { productId: p ? p._id : null, metadata: { name: name } });
         showToast(name + " added to wishlist ❤️", "success");
     }
     saveWishlist();
@@ -2096,6 +2189,8 @@ function loadProductDetail() {
 
     injectDetailSeo(p, id);
 
+    trackEvent("product_view", { productId: p._id || null, metadata: { name: p.name, category: p.category } });
+
     var reviewsHTML = reviewsHTMLFor(p.name, reviews);
 
     var relatedHTML = "";
@@ -2144,6 +2239,12 @@ function loadProductDetail() {
             '<h2>You May Also Like</h2>' +
             '<div class="product-container">' + relatedHTML + '</div>' +
         '</div>';
+
+    if (p._id && typeof apiGetProductReviews === "function") {
+        apiGetProductReviews(p._id).then(function(list) {
+            renderReviewsSection(p, list || []);
+        }).catch(function() {});
+    }
 }
 
 // ===============================
@@ -2184,22 +2285,36 @@ function submitReview() {
     var rating = ratingSel ? parseInt(ratingSel.value) : 5;
     var comment = document.getElementById("reviewComment").value.trim();
     var userName = document.getElementById("reviewName").value.trim();
+    var urlsEl = document.getElementById("reviewPhotoUrls");
+    var photoUrls = [];
 
     if (!comment) {
         showToast("Please write a review comment.", "error");
         return;
     }
 
+    if (urlsEl && urlsEl.value) {
+        try { photoUrls = JSON.parse(urlsEl.value); } catch (e) { photoUrls = []; }
+    }
+
     saveReview(name, rating, comment, userName);
     showToast("Thanks for your review! ⭐", "success");
     document.getElementById("reviewComment").value = "";
     document.getElementById("reviewName").value = "";
+    if (urlsEl) urlsEl.value = "";
+    var previewsEl = document.getElementById("reviewPhotoPreviews");
+    if (previewsEl) previewsEl.innerHTML = "";
+    var photoInput = document.getElementById("reviewPhotoInput");
+    if (photoInput) photoInput.value = "";
 
     // Also persist to MongoDB when the backend is up (fire-and-forget so the
     // store keeps working offline). These DB reviews are manageable from admin.
     var prod = products[id];
     if (prod && prod._id && typeof apiAddReview === "function") {
-        apiAddReview(prod._id, { rating: rating, comment: comment, userName: userName || "Anonymous" })
+        apiAddReview(prod._id, { rating: rating, comment: comment, userName: userName || "Anonymous", photos: photoUrls })
+            .then(function() {
+                trackEvent("review_created", { productId: prod._id, metadata: { name: name, rating: rating } });
+            })
             .catch(function() {});
     }
 
@@ -2209,17 +2324,17 @@ function submitReview() {
 function reviewsHTMLFor(name, reviews) {
     var html = '<div class="detail-section reviews-section">';
     html += '<h3>⭐ Customer Reviews</h3>';
+    html += '<div class="reviews-list">';
 
     if (!reviews || reviews.length === 0) {
         html += '<p class="reviews-none">No reviews yet. Be the first to review this product!</p>';
     } else {
         reviews.slice(-4).reverse().forEach(function(rev) {
-            html += '<div class="review-item">' +
-                '<div class="review-header"><span class="review-user">👤 ' + escHtml(rev.user) + '</span>' + starHTML(rev.rating) + '<span class="review-date">' + escHtml(rev.date) + '</span></div>' +
-                '<p class="review-comment">' + escHtml(rev.comment) + '</p>' +
-            '</div>';
+            html += reviewItemHTML(rev);
         });
     }
+
+    html += '</div>';
 
     html += '<div class="review-form">' +
         '<h4>Write a Review</h4>' +
@@ -2232,11 +2347,161 @@ function reviewsHTMLFor(name, reviews) {
         '</div>' +
         '<input type="text" id="reviewName" class="review-input" placeholder="Your name" maxlength="30">' +
         '<textarea id="reviewComment" class="review-textarea" placeholder="Share your experience..."></textarea>' +
+        '<div class="review-photo-picker">' +
+            '<label for="reviewPhotoInput" class="review-photo-label">📷 Add photos (max 3)</label>' +
+            '<input type="file" id="reviewPhotoInput" accept="image/*" multiple hidden onchange="handleReviewPhotoSelect()">' +
+            '<div id="reviewPhotoPreviews" class="review-photo-previews"></div>' +
+            '<input type="hidden" id="reviewPhotoUrls" value="">' +
+        '</div>' +
         '<button type="button" class="review-submit" onclick="submitReview()">Submit Review</button>' +
     '</div>';
 
     html += '</div>';
     return html;
+}
+
+// One review item used by both the local and server-side review lists.
+function reviewItemHTML(rev) {
+    if (!rev) return "";
+    var user = rev.userName || rev.user || "Anonymous";
+    var comment = rev.comment || "";
+    var date = rev.date || formatReviewDate(rev.createdAt);
+    var photos = (rev.photos && rev.photos.length) ? rev.photos.slice(0, 3) : [];
+    var verified = rev.verifiedPurchase ? '<span class="review-verified">✓ Verified Purchase</span>' : "";
+    var photosHTML = photos.length
+        ? '<div class="review-photos">' + photos.map(function(ph) {
+              return '<img src="' + escHtml(ph) + '" alt="Review photo" loading="lazy" onclick="openReviewPhoto(this.src)">';
+          }).join("") + '</div>'
+        : "";
+    return '<div class="review-item">' +
+        '<div class="review-header"><span class="review-user">👤 ' + escHtml(user) + '</span>' + starHTML(rev.rating) + '<span class="review-date">' + escHtml(date) + '</span>' + verified + '</div>' +
+        '<p class="review-comment">' + escHtml(comment) + '</p>' + photosHTML +
+    '</div>';
+}
+
+function formatReviewDate(d) {
+    try {
+        if (!d) return "";
+        return new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+    } catch (e) { return ""; }
+}
+
+function openReviewPhoto(src) {
+    var modal = document.createElement("div");
+    modal.className = "qr-modal";
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    modal.onclick = function() { modal.remove(); };
+    modal.innerHTML = '<div class="qr-modal-box" style="max-width:520px;">' +
+        '<button type="button" class="qr-close" onclick="event.stopPropagation(); this.closest(\'.qr-modal\').remove()" aria-label="Close">✕</button>' +
+        '<img src="' + escHtml(src) + '" style="width:100%;border-radius:12px;" alt="Review photo">' +
+    '</div>';
+    document.body.appendChild(modal);
+}
+
+// Merge server (Mongo) reviews with local ones and re-render the review list.
+function renderReviewsSection(p, serverReviews) {
+    var listEl = document.querySelector(".reviews-section .reviews-list");
+    if (!listEl) return;
+    var combined = [];
+    if (serverReviews && serverReviews.length) combined = combined.concat(serverReviews);
+    var local = getReviews(p.name);
+    if (local && local.length) combined = combined.concat(local);
+    if (!combined.length) {
+        listEl.innerHTML = '<p class="reviews-none">No reviews yet. Be the first to review this product!</p>';
+        return;
+    }
+    var html = combined.slice(-6).reverse().map(reviewItemHTML).join("");
+    listEl.innerHTML = html;
+}
+
+// Upload selected review photos: downscale client-side, then POST the data URI
+// to the backend (auth required). Successful uploads land in #reviewPhotoUrls.
+function handleReviewPhotoSelect() {
+    var input = document.getElementById("reviewPhotoInput");
+    if (!input || !input.files) return;
+    var params = new URLSearchParams(window.location.search);
+    var pid = parseInt(params.get("id"));
+    var prodId = (products[pid] && products[pid]._id) || null;
+    if (!prodId || typeof apiUploadReviewPhoto !== "function") {
+        showToast("Photo uploads need a logged-in account.", "info");
+        input.value = "";
+        return;
+    }
+    var files = Array.prototype.slice.call(input.files);
+    var urlsEl = document.getElementById("reviewPhotoUrls");
+    var current = [];
+    if (urlsEl && urlsEl.value) { try { current = JSON.parse(urlsEl.value); } catch (e) { current = []; } }
+    var room = Math.max(0, 3 - current.length);
+    files.slice(0, room).forEach(function(file) {
+        resizeImageFile(file, 1200, 0.8, function(dataUri) {
+            if (!dataUri) return;
+            apiUploadReviewPhoto(prodId, dataUri).then(function(res) {
+                var url = res && res.data && (res.data.photoUrl || res.data.url);
+                if (!url) return;
+                var u2 = document.getElementById("reviewPhotoUrls");
+                var cur = [];
+                if (u2 && u2.value) { try { cur = JSON.parse(u2.value); } catch (e) { cur = []; } }
+                cur.push(url);
+                if (u2) u2.value = JSON.stringify(cur);
+                renderReviewPhotoPreviews();
+                trackEvent("review_photo_added", { metadata: { index: cur.length } });
+            }).catch(function() {});
+        });
+    });
+    input.value = "";
+}
+
+function renderReviewPhotoPreviews() {
+    var urlsEl = document.getElementById("reviewPhotoUrls");
+    var previewsEl = document.getElementById("reviewPhotoPreviews");
+    if (!previewsEl) return;
+    var urls = [];
+    if (urlsEl && urlsEl.value) { try { urls = JSON.parse(urlsEl.value); } catch (e) { urls = []; } }
+    previewsEl.innerHTML = urls.map(function(u) {
+        return '<div class="review-photo-thumb"><img src="' + escHtml(u) + '" alt="Review photo"><button type="button" onclick="removeReviewPhoto(this)" aria-label="Remove photo">✕</button></div>';
+    }).join("");
+}
+
+function removeReviewPhoto(btn) {
+    var urlsEl = document.getElementById("reviewPhotoUrls");
+    if (!urlsEl) return;
+    var urls = [];
+    try { urls = JSON.parse(urlsEl.value || "[]"); } catch (e) { urls = []; }
+    var img = btn && btn.parentElement ? btn.parentElement.querySelector("img") : null;
+    var src = img ? img.getAttribute("src") : "";
+    urls = urls.filter(function(u) { return u !== src; });
+    urlsEl.value = JSON.stringify(urls);
+    renderReviewPhotoPreviews();
+}
+
+// Client-side image downscaling so review uploads stay small (matches the
+// album-photo flow). Falls back to the raw file when resizing is impossible.
+function resizeImageFile(file, maxDim, quality, cb) {
+    if (!file || !/^image\//.test(file.type)) { cb(null); return; }
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+        var img = new Image();
+        img.onload = function() {
+            var w = img.width, h = img.height;
+            if (w > maxDim || h > maxDim) {
+                var scale = maxDim / Math.max(w, h);
+                w = Math.round(w * scale);
+                h = Math.round(h * scale);
+            }
+            var canvas = document.createElement("canvas");
+            canvas.width = w;
+            canvas.height = h;
+            var ctx = canvas.getContext("2d");
+            if (ctx) ctx.drawImage(img, 0, 0, w, h);
+            try { cb(canvas.toDataURL("image/jpeg", quality)); }
+            catch (e) { cb(null); }
+        };
+        img.onerror = function() { cb(null); };
+        img.src = ev.target.result;
+    };
+    reader.onerror = function() { cb(null); };
+    reader.readAsDataURL(file);
 }
 
 var detailQtyValue = 1;
@@ -2249,11 +2514,11 @@ function detailControlsHTML(p) {
     detailQtyValue = 1;
 
     if (out) {
+        var pidJs = (p && p._id) ? jsStr(p._id) : "null";
         return '<div class="detail-stock-unavailable">' +
             '<span class="stock-badge out">Out of Stock</span>' +
             '<p>This product is temporarily unavailable. Please check back soon.</p>' +
-            '<button type="button" class="detail-add-btn" disabled>' + tCartAdd() + '</button>' +
-            '<button type="button" class="buy-now-btn" disabled>⚡ Buy Now</button>' +
+            '<button type="button" class="detail-add-btn" onclick="notifyMeProduct(' + pidJs + ')">🔔 Notify Me when Back in Stock</button>' +
             '</div>';
     }
 
@@ -2406,6 +2671,7 @@ function restartBannerAuto() {
 
 function proceedToCheckout() {
     if (typeof requireAuthForCheckout === "function" && !requireAuthForCheckout()) return;
+    trackEvent("checkout_started", { metadata: { itemCount: cart.length } });
 
     if (!cart || cart.length === 0) {
         var savedCart = localStorage.getItem("freshMartCart");
@@ -2511,6 +2777,7 @@ function applyCoupon() {
         if (removeBtn) removeBtn.style.display = "inline";
         showCouponStatus("Coupon " + data.code + " applied — " + (data.discountType === "percentage" ? data.discountValue + "% off" : "₹" + data.discountValue + " off"), true);
         renderCheckoutDiscount(subtotal);
+        trackEvent("coupon_applied", { metadata: { code: data.code, discountType: data.discountType, discountValue: data.discountValue } });
     }).catch(function(err) {
         appliedCoupon = null;
         appliedCouponData = null;
@@ -3554,6 +3821,10 @@ function saveOrderLocallyExtra(payload) {
 }
 
 function finishOrderUI(order, isOnline, paymentStatus) {
+    trackEvent("checkout_completed", {
+        orderId: order._id || null,
+        metadata: { orderNumber: order.orderNumber || "", total: order.total || 0, paymentMethod: order.paymentMethod || "cod" }
+    });
     var orderNumberElement = document.getElementById("orderNumber");
     if (orderNumberElement) {
         orderNumberElement.innerText = "Order ID: #" + order.orderNumber +
@@ -3809,6 +4080,11 @@ function bindSignupForm() {
         }
 
         var user = { name: name, phone: phone, email: email, password: password };
+
+        var refEl = document.getElementById("signupReferral");
+        if (refEl && String(refEl.value || "").trim()) {
+            user.referralCode = String(refEl.value).trim().toUpperCase().slice(0, 8);
+        }
 
         // Step 1 of signup: backend validates + emails an OTP and creates the
         // account as UNVERIFIED (no JWT yet). The user must then confirm the
@@ -4838,4 +5114,114 @@ function toggleMyReturns() {
 
 function escJs(s) {
     return jsStr(s);
+}
+
+// ===============================
+// NOTIFY ME (BACK-IN-STOCK ALERTS)
+// ===============================
+
+function notifyMeProduct(productId) {
+    if (!productId || typeof apiSubscribeStockAlert !== "function") {
+        showToast("Back-in-stock alerts are not available yet. Please check back soon.", "info");
+        return;
+    }
+    apiSubscribeStockAlert(productId).then(function(res) {
+        var data = (res && res.data) || {};
+        if (data.subscribed) {
+            showToast("You're subscribed! We'll notify you when it's back in stock. 🔔", "success");
+        } else {
+            showToast(data.message || "You'll be notified when this product is back in stock!", "success");
+        }
+    }).catch(function(err) {
+        showToast((err && err.message) ? err.message : "Could not subscribe right now. Please try again.", "error");
+    });
+}
+
+// ===============================
+// PWA INSTALL PROMPT (Phase 1)
+// ===============================
+
+var deferredInstallPrompt = null;
+
+function storePwaDismissed() {
+    writeStorageValue("freshMartPwaDismissed", String(Date.now()));
+}
+
+function showInstallGuide() {
+    var banner = document.getElementById("pwaInstallBanner");
+    if (banner) banner.style.display = "none";
+    showToast("Tap the browser menu ➕ (or Share) and choose \u201cAdd to Home Screen\u201d.", "info");
+}
+
+function initPwaInstallBanner() {
+    if (!document.body) return;
+    if (document.getElementById("pwaInstallBanner")) return;
+    if (window.matchMedia("(display-mode: standalone)").matches) return;
+
+    var dim = readStorageValue("freshMartPwaDismissed", "0");
+    try { dim = parseInt(dim, 10) || 0; } catch (e) { dim = 0; }
+    if (Date.now() - dim < 30 * 24 * 60 * 60 * 1000) return;
+
+    var banner = document.createElement("div");
+    banner.id = "pwaInstallBanner";
+    banner.className = "pwa-install-banner";
+    banner.innerHTML =
+        '<div class="pwa-install-icon">🛒</div>' +
+        '<div class="pwa-install-text"><strong>Install FreshMart</strong><span>Add to home screen for one-tap ordering.</span></div>' +
+        '<button type="button" id="pwaInstallAccept" class="pwa-install-accept">Install</button>' +
+        '<button type="button" id="pwaInstallDismiss" class="pwa-install-close" aria-label="Dismiss">✕</button>';
+    document.body.appendChild(banner);
+
+    var acceptBtn = document.getElementById("pwaInstallAccept");
+    var dismissBtn = document.getElementById("pwaInstallDismiss");
+
+    if (acceptBtn) acceptBtn.addEventListener("click", function() {
+        trackEvent("pwa_install", {});
+        if (deferredInstallPrompt) {
+            deferredInstallPrompt.prompt();
+            deferredInstallPrompt.userChoice.then(function(choice) {
+                if (choice && choice.outcome === "accepted") {
+                    storePwaDismissed();
+                } else {
+                    storePwaDismissed();
+                }
+                var b = document.getElementById("pwaInstallBanner");
+                if (b) b.remove();
+                deferredInstallPrompt = null;
+            }).catch(function() { deferredInstallPrompt = null; });
+        } else {
+            showInstallGuide();
+        }
+    });
+
+    if (dismissBtn) dismissBtn.addEventListener("click", function() {
+        storePwaDismissed();
+        var b = document.getElementById("pwaInstallBanner");
+        if (b) b.remove();
+    });
+}
+
+function schedulePwaBanner() {
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", initPwaInstallBanner);
+    } else {
+        initPwaInstallBanner();
+    }
+}
+
+window.addEventListener("beforeinstallprompt", function(e) {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    schedulePwaBanner();
+});
+
+window.addEventListener("appinstalled", function() {
+    storePwaDismissed();
+    var b = document.getElementById("pwaInstallBanner");
+    if (b) b.remove();
+});
+
+// iPhones / iPads never fire beforeinstallprompt — guide manually instead.
+if (!window.matchMedia("(display-mode: standalone)").matches && /iPad|iPhone|iPod/.test(navigator.userAgent || "")) {
+    schedulePwaBanner();
 }

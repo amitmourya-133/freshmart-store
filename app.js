@@ -26,6 +26,10 @@ const deliveryRoutes = require("./routes/deliveryRoutes");
 const deliveryOpsRoutes = require("./routes/deliveryOpsRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const returnRoutes = require("./routes/returnRoutes");
+const analyticsRoutes = require("./routes/analyticsRoutes");
+const walletRoutes = require("./routes/walletRoutes");
+const referralRoutes = require("./routes/referralRoutes");
+const stockAlertRoutes = require("./routes/stockAlertRoutes");
 
 const app = express();
 
@@ -121,6 +125,19 @@ app.use("/api/payments", paymentRoutes);
 app.use("/api/delivery", deliveryRoutes);
 app.use("/api/delivery-ops", deliveryOpsRoutes);
 app.use("/api/notifications", notificationRoutes);
+// Analytics router is mounted twice: /api/analytics for the public tracking
+// endpoint and /api/admin for the admin KPI aggregation (GET /admin/analytics).
+app.use("/api/analytics", analyticsRoutes);
+app.use("/api/admin", analyticsRoutes);
+// Wallet & referral: customer subpaths live under /api/wallet and /api/referral,
+// admin operations under /api/admin/wallet.
+app.use("/api/wallet", walletRoutes);
+app.use("/api/admin/wallet", walletRoutes);
+app.use("/api/referral", referralRoutes);
+// Back-in-stock alerts: customer subscribe under /api/stock-alerts, the admin
+// waiting-count view under /api/admin/stock-alerts.
+app.use("/api/stock-alerts", stockAlertRoutes);
+app.use("/api/admin/stock-alerts", stockAlertRoutes);
 
 // Scheduled maintenance hook for delivery offers. Serverless has no in-process
 // timer, so an external scheduler (Vercel Cron on a paid plan, or any cron

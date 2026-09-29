@@ -22,7 +22,8 @@ const {
 } = require("../controllers/productController");
 const {
     getProductReviews,
-    addProductReview
+    addProductReview,
+    uploadReviewPhoto
 } = require("../controllers/reviewController");
 const { protect, admin, optionalProtect } = require("../middleware/auth");
 const { rateLimit } = require("../utils/rateLimit");
@@ -61,5 +62,8 @@ router.get("/:id", getProduct);
 router.post("/:id/rating", protect, publicWriteLimiter, addRating);
 router.get("/:id/reviews", getProductReviews);
 router.post("/:id/reviews", protect, publicWriteLimiter, addProductReview);
+// Review photo upload (uploaded to Cloudinary; the returned URL is attached to
+// the review submission). Heavily limited because it is a network + storage op.
+router.post("/:id/reviews/photos", protect, uploadLimiter, uploadReviewPhoto);
 
 module.exports = router;

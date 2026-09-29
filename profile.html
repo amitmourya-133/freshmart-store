@@ -48,6 +48,26 @@
         .add-address-btn { margin-top: 16px; }
         .fm-block-title { font-size: 20px; font-weight: 700; color: #1f2937; margin: 0 0 14px; }
         .edit-form .save-btn, .edit-form .cancel-btn { margin-top: 16px; margin-right: 10px; }
+        .fm-referral-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+        .fm-ref-code { font-size: 26px; font-weight: 800; letter-spacing: 3px; color: #159447; background: #eefaf2; border: 1px dashed #159447; border-radius: 10px; padding: 10px 12px; text-align: center; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+        .fm-ref-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+        .fm-wallet-balance { font-size: 30px; font-weight: 800; color: #111827; margin: 6px 0 10px; }
+        .fm-claim-row { display: flex; gap: 8px; }
+        .fm-claim-row .input-field { flex: 1; text-transform: uppercase; }
+        .fm-txn { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid #f0f2f5; }
+        .fm-txn:first-of-type { border-top: none; }
+        .fm-txn strong { font-size: 14px; color: #1f2937; text-transform: capitalize; }
+        .fm-txn-note { display: block; color: #6b7280; font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
+        .fm-txn-credit { color: #159447; font-weight: 700; white-space: nowrap; }
+        .fm-txn-debit { color: #b42318; font-weight: 700; white-space: nowrap; }
+        .fm-txn-date { color: #9ca3af; font-weight: 400; font-size: 12px; }
+        .fm-switch { position: relative; display: inline-block; width: 46px; height: 26px; flex: 0 0 46px; }
+        .fm-switch input { opacity: 0; width: 0; height: 0; }
+        .fm-switch-slider { position: absolute; inset: 0; background: #d1d5db; border-radius: 999px; transition: background .15s ease; cursor: pointer; }
+        .fm-switch-slider::before { content: ""; position: absolute; width: 20px; height: 20px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: transform .15s ease; }
+        .fm-switch input:checked + .fm-switch-slider { background: #159447; }
+        .fm-switch input:checked + .fm-switch-slider::before { transform: translateX(20px); }
+        @media (max-width: 560px) { .fm-referral-grid { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body data-page="profile">
@@ -250,6 +270,55 @@
                     </p>
                 </form>
             </div>
+
+            <!-- Referral & wallet (Phase 1) -->
+            <div class="profile-section-block" style="margin-top:32px;">
+                <p class="fm-kicker">Grow &amp; Earn</p>
+                <h2 class="fm-block-title">Refer &amp; Earn · Wallet</h2>
+                <div class="fm-referral-grid">
+                    <div class="profile-card" style="padding:20px;">
+                        <h3 style="margin:0 0 6px;font-size:16px;">🎁 Your referral code</h3>
+                        <p class="fm-muted" style="margin:0 0 12px;font-size:13px;">
+                            Share it with friends — you both get ₹50 off when their first order is delivered.
+                        </p>
+                        <div class="fm-ref-code" id="referralCodeDisplay" title="Your referral code">—</div>
+                        <div class="fm-ref-actions">
+                            <button type="button" class="fm-btn fm-btn-primary" onclick="copyReferralLink()">Copy code</button>
+                            <button type="button" class="fm-btn" onclick="shareReferral()">Share link</button>
+                        </div>
+                    </div>
+                    <div class="profile-card" style="padding:20px;">
+                        <h3 style="margin:0 0 6px;font-size:16px;">💳 Wallet balance</h3>
+                        <div class="fm-wallet-balance" id="walletBalanceDisplay">₹0</div>
+                        <div class="fm-claim-row">
+                            <input type="text" id="referralClaimInput" class="input-field" placeholder="Enter a friend's code" maxlength="8" autocomplete="off">
+                            <button type="button" class="fm-btn fm-btn-primary" onclick="claimReferral()">Claim</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="profile-card" style="padding:20px;margin-top:14px;">
+                    <h3 style="margin:0 0 12px;font-size:16px;">Recent wallet activity</h3>
+                    <div id="walletActivityList"><p class="fm-empty">No activity yet.</p></div>
+                </div>
+            </div>
+
+            <!-- Order reminders opt-out (Phase 1) -->
+            <div class="profile-section-block" style="margin-top:32px;">
+                <p class="fm-kicker">Notifications</p>
+                <h2 class="fm-block-title">Order reminders</h2>
+                <div class="profile-card" style="padding:20px;display:flex;align-items:center;gap:14px;justify-content:space-between;flex-wrap:wrap;">
+                    <div>
+                        <strong style="font-size:15px;">Repeat-order reminders</strong>
+                        <p class="fm-muted" style="margin:4px 0 0;font-size:13px;">
+                            We'll suggest re-ordering your regular items. You can switch this off anytime.
+                        </p>
+                    </div>
+                    <label class="fm-switch" title="Toggle repeat-order reminders">
+                        <input type="checkbox" id="reminderOptOutToggle" onchange="toggleReminderOptOut(this)">
+                        <span class="fm-switch-slider"></span>
+                    </label>
+                </div>
+            </div>
         </div>
     </main>
 
@@ -305,6 +374,10 @@
             apiGetMe().then(function(user) {
                 profileUser = user;
                 renderProfileHeader(user);
+                renderReferralWallet(user);
+                var remToggle = document.getElementById("reminderOptOutToggle");
+                if (remToggle) remToggle.checked = !!user.reminderOptOut;
+                loadWalletActivity();
                 renderAddresses(user.addresses || []);
                 loadPartnerStatus();
             }).catch(function(err) {
@@ -579,6 +652,138 @@
             })
             .catch(function(err) {
                 if (typeof showToast === "function") showToast((err && err.message) || "Could not update address.", "error");
+            });
+        }
+
+        // ===============================
+        // REFERRAL & WALLET (Phase 1)
+        // ===============================
+
+        function referralShareLink(code) {
+            var base = window.location.origin + window.location.pathname.replace(/profile\.html$/, "index.html");
+            return base + (base.indexOf("?") === -1 ? "?" : "&") + "ref=" + encodeURIComponent(code);
+        }
+
+        function renderReferralWallet(user) {
+            var codeEl = document.getElementById("referralCodeDisplay");
+            var balEl = document.getElementById("walletBalanceDisplay");
+            if (codeEl) codeEl.textContent = user.referralCode || "—";
+            if (balEl) balEl.textContent = "₹" + (Number(user.walletBalance) || 0).toLocaleString("en-IN");
+        }
+
+        function copyPixiesText(txt) {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(txt).then(function() {
+                    if (typeof showToast === "function") showToast("Copied to clipboard!", "success");
+                }).catch(function() { fallbackCopy(txt); });
+            } else { fallbackCopy(txt); }
+        }
+
+        function fallbackCopy(txt) {
+            var ta = document.createElement("textarea");
+            ta.value = txt;
+            ta.style.position = "fixed";
+            ta.style.opacity = "0";
+            document.body.appendChild(ta);
+            ta.select();
+            try {
+                document.execCommand("copy");
+                if (typeof showToast === "function") showToast("Copied to clipboard!", "success");
+            } catch (e) {
+                if (typeof showToast === "function") showToast(txt, "info");
+            }
+            ta.remove();
+        }
+
+        function copyReferralLink() {
+            var code = profileUser && profileUser.referralCode;
+            if (!code) {
+                if (typeof showToast === "function") showToast("Your referral code is being prepared. Try again in a moment.", "info");
+                return;
+            }
+            copyPixiesText(code + " — " + referralShareLink(code) + " — Get ₹50 off your first FreshMart order!");
+        }
+
+        function shareReferral() {
+            var code = profileUser && profileUser.referralCode;
+            if (!code) {
+                if (typeof showToast === "function") showToast("Your referral code is being prepared. Try again in a moment.", "info");
+                return;
+            }
+            var link = referralShareLink(code);
+            if (navigator.share) {
+                navigator.share({
+                    title: "FreshMart referral",
+                    text: "Get ₹50 off your first FreshMart order with my code " + code + " — " + link,
+                    url: link
+                }).catch(function() {});
+            } else if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(link).then(function() {
+                    if (typeof showToast === "function") showToast("Referral link copied!", "success");
+                }).catch(function() {});
+            } else {
+                fallbackCopy(link);
+            }
+        }
+
+        function claimReferral() {
+            var input = document.getElementById("referralClaimInput");
+            var code = (input && input.value || "").trim();
+            if (!code) {
+                if (typeof showToast === "function") showToast("Enter a friend's referral code first.", "warning");
+                return;
+            }
+            if (typeof apiClaimReferral !== "function") {
+                if (typeof showToast === "function") showToast("Claiming is not available right now.", "warning");
+                return;
+            }
+            apiClaimReferral(code).then(function() {
+                if (typeof showToast === "function") showToast("Referral linked — you'll both get ₹50 off once their first order is delivered!", "success");
+                if (input) input.value = "";
+            }).catch(function(err) {
+                if (typeof showToast === "function") showToast((err && err.message) || "Could not claim this referral code.", "error");
+            });
+        }
+
+        function loadWalletActivity() {
+            var list = document.getElementById("walletActivityList");
+            if (!list) return;
+            if (typeof apiGetMyWalletTransactions !== "function") return;
+            apiGetMyWalletTransactions(8).then(function(txns) {
+                if (!txns || !txns.length) {
+                    list.innerHTML = '<p class="fm-empty">No activity yet. Earn rewards via referrals or admin credits.</p>';
+                    return;
+                }
+                list.innerHTML = txns.slice(0, 8).map(function(t) {
+                    var kind = (t.type || "credit").split("_").map(function(w) { return w.charAt(0) + w.slice(1).toLowerCase(); }).join(" ");
+                    var amount = Math.abs(Number(t.amount) || 0);
+                    var cls = (Number(t.amount) >= 0) ? "fm-txn-credit" : "fm-txn-debit";
+                    var date = "";
+                    try { if (t.createdAt) date = new Date(t.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }); } catch (e) {}
+                    var note = t.description || t.referenceId || "";
+                    return '<div class="fm-txn">' +
+                        '<div><strong>' + esc(kind) + '</strong>' +
+                        (note ? '<span class="fm-txn-note">' + esc(note) + '</span>' : '') + '</div>' +
+                        '<div class="' + cls + '">' + (Number(t.amount) >= 0 ? "+" : "−") + "₹" + amount +
+                        (date ? '<span class="fm-txn-date"> · ' + esc(date) + '</span>' : '') + '</div></div>';
+                }).join("");
+            }).catch(function() {});
+        }
+
+        function toggleReminderOptOut(cbx) {
+            fetch(API.base + "/users/me", {
+                method: "PUT",
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ reminderOptOut: !!cbx.checked })
+            })
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+                if (!data.success) throw new Error(data.message || "Update failed");
+                if (typeof showToast === "function") showToast(cbx.checked ? "Order reminders turned off." : "Order reminders turned on.", "success");
+            })
+            .catch(function(err) {
+                cbx.checked = !cbx.checked;
+                if (typeof showToast === "function") showToast((err && err.message) || "Could not save the reminder preference.", "error");
             });
         }
     </script>

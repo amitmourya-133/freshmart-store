@@ -748,6 +748,24 @@ exports.createOrder = async (req, res) => {
             }
         } catch (e) { console.warn("[notification] low-stock failed: " + ((e && e.message) || "unknown")); }
 
+        // Growth analytics + reminder-conversion tracking (fire-and-forget).
+        try {
+            const analyticsSvc = require("../utils/analytics");
+            analyticsSvc.track({
+                eventName: "order_created",
+                user: req.user,
+                orderId: String(order._id),
+                metadata: {
+                    orderNumber: orderNumber,
+                    total: order.total,
+                    itemCount: Array.isArray(order.items) ? order.items.length : 0,
+                    paymentMethod: order.paymentMethod || "cod",
+                },
+            });
+            const reminderSvc = require("../utils/reminders");
+            reminderSvc.maybeMarkReminderConverted(order);
+        } catch (e) { console.warn("[analytics] order_created failed: " + ((e && e.message) || "unknown")); }
+
         res.status(201).json({
             success: true,
             data: order
@@ -1031,6 +1049,9 @@ exports.updateOrderStatus = async (req, res) => {
             }
             emailOnStatusChange(result.order, previousStatus);
             inboxNotify(result.order, "Order cancelled", "Order " + (result.order.orderNumber || "") + " was cancelled.", "Cancelled");
+            try {
+                require("../utils/analytics").track({ eventName: "order_cancelled", userId: order.user, orderId: String(order._id), metadata: { orderNumber: order.orderNumber } });
+            } catch (e) { /* non-fatal */ }
             return res.json({ success: true, data: result.order });
         }
 
@@ -1098,6 +1119,13 @@ exports.updateOrderStatus = async (req, res) => {
 
         emailOnStatusChange(order, previousStatus);
         inboxNotify(order, "Order " + status, "Order " + order.orderNumber + " is now " + status + ".", status);
+
+        // Growth analytics for the confirmation milestone (fire-and-forget).
+        if (status === "Confirmed") {
+            try {
+                require("../utils/analytics").track({ eventName: "order_confirmed", userId: order.user, orderId: String(order._id), metadata: { orderNumber: order.orderNumber } });
+            } catch (e) { /* non-fatal */ }
+        }
 
         res.json({ success: true, data: order });
     } catch (error) {

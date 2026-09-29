@@ -50,6 +50,7 @@ function switchTab(tab) {
     var sections = {
         dashboard: "adminDashboardSection",
         orders: "adminOrdersSection",
+        analytics: "adminAnalyticsSection",
         products: "adminProductsSection",
         customers: "adminCustomersSection",
         reviews: "adminReviewsSection",
@@ -61,6 +62,7 @@ function switchTab(tab) {
     var buttons = {
         dashboard: "tabDashboardBtn",
         orders: "tabOrdersBtn",
+        analytics: "tabAnalyticsBtn",
         products: "tabProductsBtn",
         customers: "tabCustomersBtn",
         reviews: "tabReviewsBtn",
@@ -79,6 +81,7 @@ function switchTab(tab) {
 
     if (tab === "dashboard") loadAdminDashboard();
     else if (tab === "orders") loadAdminOrders();
+    else if (tab === "analytics") loadAdminAnalytics();
     else if (tab === "products") loadAdminProducts();
     else if (tab === "customers") loadAdminCustomers();
     else if (tab === "reviews") loadAdminReviews();
@@ -1996,6 +1999,117 @@ function deleteCoupon(id) {
         if (typeof fetchAdminCoupons === "function") fetchAdminCoupons().then(function(list) { adminCoupons = list; renderAdminCoupons(list); });
     }).catch(function(err) {
         showToast((err && err.message) ? err.message : "Could not delete coupon.", "error");
+    });
+}
+
+// ===============================
+// ANALYTICS TAB (Phase 1): real event + order KPIs via /api/admin/analytics
+// ===============================
+
+var ANALYTICS_EVENT_LABELS = {
+    signup: "Signups", login: "Logins", google_login: "Google logins",
+    product_view: "Product views", product_search: "Product searches",
+    category_view: "Category visits", add_to_cart: "Add to cart",
+    remove_from_cart: "Remove from cart", wishlist_add: "Wishlist adds",
+    checkout_started: "Checkout started", coupon_applied: "Coupons applied",
+    checkout_completed: "Checkouts completed", order_created: "Orders created",
+    order_confirmed: "Orders confirmed", order_cancelled: "Order cancellations",
+    order_delivered: "Orders delivered", repeat_order: "Repeat orders",
+    referral_signup: "Referral signups", referral_reward: "Referral rewards",
+    review_created: "Reviews written", review_photo_added: "Review photos",
+    stock_alert_subscribed: "Back-in-stock alerts", stock_alert_triggered: "Alerts triggered",
+    pwa_install: "PWA installs", reminder_sent: "Order reminders sent",
+    reminder_clicked: "Reminder clicks", reminder_converted: "Reminder conversions"
+};
+
+function loadAdminAnalytics() {
+    var kpisBox = document.getElementById("analyticsKpis");
+    var rangeSel = document.getElementById("analyticsRange");
+    var range = (rangeSel && rangeSel.value) || "7d";
+    if (kpisBox) kpisBox.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:20px;">Loading analytics...</p>';
+
+    var analyticsP = (typeof apiAdminAnalytics === "function")
+        ? apiAdminAnalytics(range).catch(function() { return null; })
+        : Promise.resolve(null);
+    var waitingP = (typeof apiAdminStockAlertsWaiting === "function")
+        ? apiAdminStockAlertsWaiting().catch(function() { return null; })
+        : Promise.resolve(null);
+
+    Promise.all([analyticsP, waitingP]).then(function(results) {
+        var a = results[0];
+        var waiting = results[1] || {};
+        if (!a) {
+            if (kpisBox) kpisBox.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:20px;">Could not load analytics.</p>';
+            return;
+        }
+
+        var k = a.kpis || {};
+        var cards = [
+            { label: "Revenue (delivered)", value: "₹" + Number(k.revenue || 0).toLocaleString("en-IN") },
+            { label: "Delivered orders", value: k.deliveredOrders || 0 },
+            { label: "Avg order value", value: "₹" + Number(k.aov || 0).toLocaleString("en-IN") },
+            { label: "Orders placed", value: k.placedOrders || 0 },
+            { label: "Cancelled", value: k.cancelledOrders || 0, warn: (k.cancelledOrders || 0) > 0 },
+            { label: "New customers", value: k.newCustomers || 0 },
+            { label: "Repeat customers", value: k.repeatCustomers || 0 },
+            { label: "Conversion rate", value: (k.conversionRate || 0) + "%" },
+            { label: "Total customers", value: k.totalCustomers || 0 },
+            { label: "Referral rewards", value: "₹" + Number((a.referral && a.referral.amountCredited) || 0).toLocaleString("en-IN") + " (" + ((a.referral && a.referral.rewardsCredited) || 0) + ")" },
+            { label: "PWA installs", value: a.pwaInstalls || 0 },
+            { label: "Waiting for stock", value: (waiting && waiting.waitingTotal) || 0, warn: (waiting && waiting.waitingTotal) > 0 }
+        ];
+        if (kpisBox) kpisBox.innerHTML = cards.map(function(c) {
+            return '<div class="admin-stat' + (c.warn ? " stat-warn" : "") + '"><strong>' + esc(c.value) + '</strong><span>' + esc(c.label) + '</span></div>';
+        }).join("");
+
+        var evRows = document.getElementById("analyticsEventRows");
+        if (evRows) {
+            var labels = Object.keys(a.events || {});
+            var mapped = labels.slice().sort(function(x, y) { return (a.events[y] || 0) - (a.events[x] || 0); });
+            if (!mapped.length) {
+                evRows.innerHTML = '<tr><td colspan="2" style="text-align:center;color:var(--text-secondary);">No events recorded in this range.</td></tr>';
+            } else {
+                evRows.innerHTML = mapped.map(function(ev) {
+                    var label = ANALYTICS_EVENT_LABELS[ev] || ev;
+                    return '<tr><td>' + esc(label) + '</td><td><strong>' + (a.events[ev] || 0) + '</strong></td></tr>';
+                }).join("");
+            }
+        }
+
+        var tpRows = document.getElementById("analyticsTopProducts");
+        if (tpRows) {
+            var tp = a.topProducts || [];
+            if (!tp.length) {
+                tpRows.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-secondary);">No delivered orders in this range.</td></tr>';
+            } else {
+                tpRows.innerHTML = tp.map(function(p, i) {
+                    return '<tr><td>' + (i + 1) + '</td><td>' + esc(p.name) + '</td><td><strong>' + p.quantity + '</strong></td><td>₹' + Number(p.revenue || 0).toLocaleString("en-IN") + '</td></tr>';
+                }).join("");
+            }
+        }
+
+        var tvRows = document.getElementById("analyticsTopViews");
+        if (tvRows) {
+            var tv = a.topViewedProducts || [];
+            if (!tv.length) {
+                tvRows.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-secondary);">No product views in this range.</td></tr>';
+            } else {
+                tvRows.innerHTML = tv.map(function(p, i) {
+                    return '<tr><td>' + (i + 1) + '</td><td>' + esc(p.productId || "Product") + '</td><td><strong>' + p.views + '</strong></td></tr>';
+                }).join("");
+            }
+        }
+
+        var extraBox = document.getElementById("analyticsExtra");
+        if (extraBox) {
+            var lines = [];
+            lines.push("Checkout started: " + (k.checkoutStarted || 0) + " · Checkout completed: " + (k.checkoutCompleted || 0));
+            var wl = (waiting && waiting.perProduct) || [];
+            if (wl.length) lines.push("Waiting for stock: " + wl.map(function(w) { return esc(w.productName || (w.productId || "")) + " (" + w.waitingCount + ")"; }).join(", "));
+            extraBox.innerHTML = lines.map(function(l) {
+                return '<div class="admin-stat" style="flex:1 1 240px;"><span>' + l + '</span></div>';
+            }).join("");
+        }
     });
 }
 

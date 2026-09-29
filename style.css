@@ -5406,3 +5406,161 @@ body.dark-mode .order-partner-btn { color: #6ee49b; }
     .ops-applicant { flex-direction: column; }
     .ops-section-head { align-items: flex-start; }
 }
+
+/* ===== Phase 1 growth features: reviews w/ photos, verified badge, Notify Me, PWA ===== */
+.review-verified {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 2px 8px;
+    border-radius: 20px;
+    background: #e8f7ee;
+    color: #159447;
+    font-size: 11px;
+    font-weight: 600;
+    vertical-align: middle;
+}
+.review-photos {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+.review-photos img {
+    width: 72px;
+    height: 72px;
+    object-fit: cover;
+    border-radius: 10px;
+    cursor: zoom-in;
+    border: 1px solid var(--border-color, #eee);
+}
+.review-photo-picker {
+    margin: 8px 0 4px;
+}
+.review-photo-label {
+    display: inline-block;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--green-primary, #159447);
+    background: #f0faf3;
+    border: 1px dashed #159447;
+    border-radius: var(--radius-sm, 8px);
+    padding: 8px 12px;
+}
+.review-photo-previews {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+.review-photo-thumb {
+    position: relative;
+}
+.review-photo-thumb img {
+    width: 64px;
+    height: 64px;
+    object-fit: cover;
+    border-radius: 8px;
+    border: 1px solid var(--border-color, #eee);
+}
+.review-photo-thumb button {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 18px;
+    height: 18px;
+    border: none;
+    border-radius: 50%;
+    background: #e74c3c;
+    color: #fff;
+    font-size: 10px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+}
+.pwa-install-banner {
+    position: fixed;
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    z-index: 1200;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #fff;
+    border: 1px solid var(--border-color, #eee);
+    border-radius: 14px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+    padding: 10px 12px;
+    animation: fmSlideUp 0.3s ease;
+    max-width: 420px;
+    margin: 0 auto;
+}
+@keyframes fmSlideUp {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+.pwa-install-icon {
+    font-size: 24px;
+}
+.pwa-install-text {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    line-height: 1.3;
+}
+.pwa-install-text strong {
+    font-size: 14px;
+}
+.pwa-install-text span {
+    font-size: 12px;
+    color: #666;
+}
+.pwa-install-accept {
+    background: var(--green-primary, #159447);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-sm, 8px);
+    padding: 8px 14px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 13px;
+}
+.pwa-install-close {
+    border: none;
+    background: transparent;
+    color: #999;
+    font-size: 15px;
+    cursor: pointer;
+    padding: 4px;
+}
+
+/* ===== Notifications inbox (notifications.html) ===== */
+.notification-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    background: #fff;
+    border: 1px solid var(--border-color, #eee);
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, .04);
+}
+.notification-item.is-read { opacity: .72; }
+.notification-icon { font-size: 22px; line-height: 1; }
+.notification-item-body { flex: 1; min-width: 0; }
+.notification-title { font-size: 14px; font-weight: 700; color: #111827; }
+.notification-message { font-size: 13px; color: #4b5563; margin-top: 3px; line-height: 1.5; }
+.notification-time { font-size: 11px; color: #9ca3af; margin-top: 6px; }
+.notification-open {
+    flex: 0 0 auto;
+    border: none;
+    background: #159447;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 14px;
+    border-radius: 9px;
+    cursor: pointer;
+}
+.notification-open:hover { background: #117a38; }

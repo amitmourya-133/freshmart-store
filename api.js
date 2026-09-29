@@ -1803,8 +1803,153 @@ function openMapPicker(opts) {
     });
 }
 
+// ===============================
+// GROWTH FEATURES (analytics, wallet, referral, back-in-stock, reviews+photos)
+// ===============================
+
+// Lightweight client-side analytics. Fire-and-forget: never waits, never throws
+// into UI code, and works offline (the request simply fails silently). Guess-y
+// PII is never sent — only an opaque visitor id + the event itself.
+function trackEvent(eventName, data) {
+    try {
+        var anon = readStorageValue("freshmart_anon_id", "");
+        if (!anon) {
+            anon = "v" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+            writeStorageValue("freshmart_anon_id", anon);
+        }
+        var sess = readStorageValue("freshmart_session_id", "");
+        if (!sess) {
+            sess = "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+            writeStorageValue("freshmart_session_id", sess);
+        }
+        var payload = {
+            eventName: eventName,
+            anonymousId: anon,
+            sessionId: sess,
+            page: (window.location && window.location.pathname || "").split("/").pop()
+        };
+        data = data || {};
+        if (data.productId) payload.productId = String(data.productId);
+        if (data.metadata) payload.metadata = data.metadata;
+        fetch(API.base + "/analytics/track", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            keepalive: true
+        }).catch(function () { /* silent */ });
+    } catch (e) { /* silent */ }
+}
+
+// Server review list for a product (approved, with photos + verified flag).
+function apiGetProductReviews(productId) {
+    return fetch(API.base + "/products/" + encodeURIComponent(productId) + "/reviews")
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            if (!data.success) throw new Error(data.message || "Failed to load reviews");
+            return data.data || [];
+        });
+}
+
+// Upload one review photo (base64 data URI) -> secure Cloudinary URL.
+function apiUploadReviewPhoto(productId, imageDataUri) {
+    return fetch(API.base + "/products/" + encodeURIComponent(productId) + "/reviews/photos", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ image: imageDataUri })
+    })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            if (!data.success) throw new Error(data.message || "Photo upload failed");
+            return data.data && data.data.url;
+        });
+}
+
+// Wallet: my balance + recent ledger.
+function apiGetMyWallet() {
+    return fetch(API.base + "/wallet", { headers: getAuthHeaders() })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            if (!data.success) throw new Error(data.message || "Failed to load wallet");
+            return data.data;
+        });
+}
+
+// Wallet: full paginated ledger.
+function apiGetMyWalletTransactions(limit, skip) {
+    var url = API.base + "/wallet/transactions";
+    var q = [];
+    if (limit) q.push("limit=" + encodeURIComponent(limit));
+    if (skip) q.push("skip=" + encodeURIComponent(skip));
+    if (q.length) url += "?" + q.join("&");
+    return fetch(url, { headers: getAuthHeaders() })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            if (!data.success) throw new Error(data.message || "Failed to load transactions");
+            return data;
+        });
+}
+
+// Referral: my shareable code + who referred me.
+function apiGetMyReferral() {
+    return fetch(API.base + "/referral/me", { headers: getAuthHeaders() })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            if (!data.success) throw new Error(data.message || "Failed to load referral");
+            return data.data;
+        });
+}
+
+// Referral: claim a friend's code.
+function apiClaimReferral(code) {
+    return fetch(API.base + "/referral/claim", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ code: code })
+    })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            if (!data.success) throw new Error(data.message || "Could not apply referral code");
+            return data;
+        });
+}
+
+// Back-in-stock: ask to be notified when an out-of-stock product is back.
+function apiSubscribeStockAlert(productId) {
+    return fetch(API.base + "/stock-alerts", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ productId: productId })
+    })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            if (!data.success) throw new Error(data.message || "Could not subscribe");
+            return data;
+        });
+}
+
+// Admin: growth analytics for a range (today|7d|30d|90d).
+function apiAdminAnalytics(range) {
+    var url = API.base + "/admin/analytics?range=" + encodeURIComponent(range || "30d");
+    return fetch(url, { headers: getAuthHeaders() })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            if (!data.success) throw new Error(data.message || "Failed to load analytics");
+            return data;
+        });
+}
+
+// Admin: waiting back-in-stock alerts.
+function apiAdminStockAlertsWaiting() {
+    return fetch(API.base + "/admin/stock-alerts/waiting", { headers: getAuthHeaders() })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            if (!data.success) throw new Error(data.message || "Failed to load stock alerts");
+            return data.data;
+        });
+}
+
 // Node-visible surface used ONLY by automated regression suites — harmless in
 // the browser (typeof module is undefined there).
 if (typeof module !== "undefined" && module.exports) {
-    module.exports = { toValidLatLng: toValidLatLng, parseCoord: parseCoord, canonicalLocation: canonicalLocation, deliveryLocationPayload: deliveryLocationPayload, locationSubmitGuard: locationSubmitGuard, geocodeToAddress: geocodeToAddress, captureCurrentLocation: captureCurrentLocation, geolocationErrorFor: geolocationErrorFor, openInMapsHref: openInMapsHref, openMapView: openMapView, API: API, apiDeliveryCoverage: apiDeliveryCoverage, apiGetSearchSuggestions: apiGetSearchSuggestions, apiAiSearch: apiAiSearch };
+    module.exports = { toValidLatLng: toValidLatLng, parseCoord: parseCoord, canonicalLocation: canonicalLocation, deliveryLocationPayload: deliveryLocationPayload, locationSubmitGuard: locationSubmitGuard, geocodeToAddress: geocodeToAddress, captureCurrentLocation: captureCurrentLocation, geolocationErrorFor: geolocationErrorFor, openInMapsHref: openInMapsHref, openMapView: openMapView, API: API, apiDeliveryCoverage: apiDeliveryCoverage, apiGetSearchSuggestions: apiGetSearchSuggestions, apiAiSearch: apiAiSearch, trackEvent: trackEvent, apiGetProductReviews: apiGetProductReviews, apiUploadReviewPhoto: apiUploadReviewPhoto, apiGetMyWallet: apiGetMyWallet, apiGetMyWalletTransactions: apiGetMyWalletTransactions, apiGetMyReferral: apiGetMyReferral, apiClaimReferral: apiClaimReferral, apiSubscribeStockAlert: apiSubscribeStockAlert, apiAdminAnalytics: apiAdminAnalytics, apiAdminStockAlertsWaiting: apiAdminStockAlertsWaiting };
 }

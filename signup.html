@@ -98,6 +98,20 @@
                     />
 
 
+                    <label for="signupReferral">
+                        Referral Code <span style="font-weight:400;color:#6b7280;">(optional)</span>
+                    </label>
+
+                    <input
+                        type="text"
+                        id="signupReferral"
+                        placeholder="Enter a friend's code (optional)"
+                        maxlength="8"
+                        autocomplete="off"
+                        style="text-transform:uppercase;"
+                    />
+
+
                     <button
                         type="submit"
                         class="auth-btn"
@@ -188,6 +202,17 @@
 
     <script src="api.js"></script>
     <script src="script.js"></script>
+    <script>
+        // Prefill the referral code from a shared ?ref=CODE link.
+        document.addEventListener("DOMContentLoaded", function() {
+            try {
+                var params = new URLSearchParams(window.location.search);
+                var code = String(params.get("ref") || "").trim().toUpperCase();
+                var input = document.getElementById("signupReferral");
+                if (code && input) input.value = code.slice(0, 8);
+            } catch (e) { /* non-fatal */ }
+        });
+    </script>
 
 </body>
 

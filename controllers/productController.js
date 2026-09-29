@@ -27,6 +27,24 @@ function isBadObjectId(id) {
     return !mongoose.Types.ObjectId.isValid(String(id || ""));
 }
 
+// A product is "available" when its root stock > 0 OR any of its pack variants
+// has stock > 0. Back-in-stock watchers are notified only on the true
+// OUT_OF_STOCK -> IN_STOCK transition.
+function productAvailable(p) {
+    if (p && typeof p.stock === "number" && p.stock > 0) return true;
+    if (p && Array.isArray(p.variants) && p.variants.some(function (v) { return Number(v && v.stock) > 0; })) return true;
+    return false;
+}
+
+// Fire-and-forget restock notifications at the stock write sites.
+function maybeNotifyRestock(product, wasAvailable) {
+    if (wasAvailable) return;
+    if (!productAvailable(product)) return;
+    try {
+        require("../utils/stockAlert").notifyBackInStock(product);
+    } catch (e) { /* non-fatal */ }
+}
+
 // ===============================
 // SEARCH SUGGESTIONS (public, rate-limited)
 // Real autocomplete data straight from the product catalog: partial product
@@ -362,13 +380,13 @@ exports.updateProduct = async (req, res) => {
             }
             updates.stock = Math.floor(s);
         }
-        let previousProduct = null;
+        let previousProduct = await Product.findById(req.params.id);
+        if (!previousProduct) {
+            return res.status(404).json({ success: false, message: "Product not found" });
+        }
+        const wasAvailable = productAvailable(previousProduct);
         if (updates.variants !== undefined) {
             const { variants } = normalizeVariants(updates.variants);
-            previousProduct = await Product.findById(req.params.id);
-            if (!previousProduct) {
-                return res.status(404).json({ success: false, message: "Product not found" });
-            }
             updates.variants = variants;
         }
         const product = await Product.findByIdAndUpdate(req.params.id, updates, {
@@ -378,6 +396,7 @@ exports.updateProduct = async (req, res) => {
         if (!product) {
             return res.status(404).json({ success: false, message: "Product not found" });
         }
+        maybeNotifyRestock(product, wasAvailable);
         // Audit variant stock deltas caused by this admin edit. New variants log
         // their full starting stock; changed ones log previous -> new.
         if (updates.variants && product.variants) {
@@ -441,6 +460,7 @@ exports.updateStock = async (req, res) => {
         if (!product) {
             return res.status(404).json({ success: false, message: "Product not found" });
         }
+        const wasAvailable = productAvailable(product);
         const previousStock = product.stock;
         product.stock = Math.floor(s);
         await product.save();
@@ -450,6 +470,7 @@ exports.updateStock = async (req, res) => {
                 previousStock: previousStock, newStock: product.stock, reason: "admin_update", changedByType: "admin", changedBy: req.user ? req.user._id : null, note: product.name
             });
         }
+        maybeNotifyRestock(product, wasAvailable);
         res.json({ success: true, data: product });
     } catch (error) {
         res.status(400).json({ success: false, message: error.message });

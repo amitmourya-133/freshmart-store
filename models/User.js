@@ -69,6 +69,22 @@ const userSchema = new mongoose.Schema(
         rating: { type: Number, default: 0, min: 0, max: 5 },
         ratingCount: { type: Number, default: 0, min: 0 },
         deliveryCount: { type: Number, default: 0, min: 0 },
+        // Referral program: the account's own shareable code (FM-plus-characters,
+        // generated on demand) and the referrer who brought this account in.
+        // referredBy is immutable once set (see referralController validation).
+        // The unique index is partial: only documents that actually carry a code
+        // are constrained, so the many nulls on accounts without a code coexist.
+        referralCode: {
+            type: String,
+            trim: true,
+            uppercase: true,
+            default: null,
+            index: { unique: true, partialFilterExpression: { referralCode: { $type: "string" } } }
+        },
+        referredBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+        referredAt: { type: Date, default: null },
+        // Customer preference: never send repeat-order reminder notifications.
+        reminderOptOut: { type: Boolean, default: false },
         // Saved addresses for checkout and profile
         addresses: [{
             name: { type: String, trim: true },
