@@ -6,6 +6,7 @@
 
 const Coupon = require("../models/Coupon");
 const CouponUsage = require("../models/CouponUsage");
+const segments = require("./segments");
 
 function round2(n) {
     return Math.round(n * 100) / 100;
@@ -42,6 +43,23 @@ async function findValidCoupon(rawCode, options) {
         const used = await couponUsedCount(coupon._id, userId);
         if (used >= coupon.perUserLimit) {
             throw { status: 400, message: "Coupon usage limit reached for this customer" };
+        }
+    }
+    // Segment targeting (Phase 2): a segment-scoped coupon is checked against
+    // the user's CURRENT segment. Re-computed per validation, so a customer can
+    // never use a targeted code they are not eligible for at that moment, and
+    // a "NEW_CUSTOMER" code stops working once they graduate.
+    if (coupon.segment && userId) {
+        let current = null;
+        try {
+            const seg = await segments.segmentOf(userId);
+            current = seg && seg.segments ? seg.segments : null;
+        } catch (e) {
+            current = null;
+        }
+        const hasSegment = Array.isArray(current) && current.includes(coupon.segment);
+        if (!hasSegment) {
+            throw { status: 400, message: "This coupon is not available for your account" };
         }
     }
     return { coupon: coupon };
@@ -142,6 +160,11 @@ function computeCouponDiscount(coupon, subtotal) {
     }
     // Never allow the discount to be negative or exceed the goods value.
     discount = round2(Math.max(0, discount));
+    // Segment promotions may carry an absolute cap (maxDiscountAmount) so a
+    // percentage code on a large cart cannot exceed the approved margin.
+    if (coupon.maxDiscountAmount != null && coupon.maxDiscountAmount > 0) {
+        discount = Math.min(discount, Number(coupon.maxDiscountAmount));
+    }
     return discount;
 }
 

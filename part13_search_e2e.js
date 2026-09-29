@@ -11,14 +11,40 @@
 // production DB data is modified.
 // ===============================
 
+'use strict';
 require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 const http = require("http");
-const mongoose = require("mongoose");
-const env = fs.readFileSync(path.join(__dirname, ".env"), "utf8");
-const URI = (env.match(/^MONGODB_URI=(.+)$/m) || [])[1];
-if (!URI) { console.error("MONGODB_URI not found"); process.exit(1); }
+// Isolated DB: this suite must never read or write the live `freshmart`
+// database. It seeds a small deterministic catalog and drops it at exit.
+const BASE_URI = (fs.readFileSync(path.join(__dirname, ".env"), "utf8").match(/^MONGODB_URI=(.+)$/m) || [])[1];
+if (!BASE_URI) { console.error("MONGODB_URI not found"); process.exit(1); }
+const TEST_DB = "fm_part13_search_e2e_" + process.pid;
+const URI = BASE_URI.replace(/\/([^/?]+)(\?|$)/, "/" + TEST_DB + "$2");
+process.env.MONGODB_URI = URI;
+process.env.NODE_ENV = "test";
+const mongoose = require(path.join(__dirname, "node_modules/mongoose"));
+const Product = require(path.join(__dirname, "models/Product"));
+
+// Deterministic catalog so every suggestion / intent / regression assertion is
+// data-independent. Values mirror the entities the tests search for.
+const CATALOG = [
+    { name: "Fresh Tomato", price: 45, unit: "kg", category: "Vegetables", emoji: "🍅", gradient: "linear-gradient(135deg,#e74c3c,#ff7e5f)", stock: 50 },
+    { name: "Desi Tomato", price: 40, unit: "kg", category: "Vegetables", emoji: "🍅", gradient: "linear-gradient(135deg,#e74c3c,#ff7e5f)", stock: 40 },
+    { name: "Potato", price: 30, unit: "kg", category: "Vegetables", emoji: "🥔", gradient: "linear-gradient(135deg,#c9a86a,#f2e0c9)", stock: 100 },
+    { name: "Onion", price: 25, unit: "kg", category: "Vegetables", emoji: "🧅", gradient: "linear-gradient(135deg,#ab47bc,#ff8a80)", stock: 80 },
+    { name: "Carrot", price: 60, unit: "kg", category: "Vegetables", emoji: "🥕", gradient: "linear-gradient(135deg,#ff8f00,#ffca28)", stock: 45 },
+    { name: "Spinach", price: 20, unit: "bunch", category: "Vegetables", emoji: "🥬", gradient: "linear-gradient(135deg,#43a047,#81c784)", stock: 30 },
+    { name: "Apple", price: 150, unit: "kg", category: "Fruits", emoji: "🍎", gradient: "linear-gradient(135deg,#e53935,#ff8a80)", stock: 60 },
+    { name: "Banana", price: 40, unit: "dozen", category: "Fruits", emoji: "🍌", gradient: "linear-gradient(135deg,#fdd835,#fff176)", stock: 70 },
+    { name: "Orange", price: 90, unit: "kg", category: "Fruits", emoji: "🍊", gradient: "linear-gradient(135deg,#fb8c00,#ffcc80)", stock: 55 }
+];
+
+async function seedCatalog() {
+    await Product.deleteMany({});
+    await Product.insertMany(CATALOG, { ordered: false });
+}
 
 const AI_MODE = process.argv[2] === "ai";
 let passed = 0;
@@ -117,6 +143,7 @@ async function main() {
 
     const app = require("./app");
     await mongoose.connect(URI);
+    await seedCatalog();
 
     const server = app.listen(0, "127.0.0.1", async () => {
         const port = server.address().port;
@@ -132,6 +159,7 @@ async function main() {
             check(false, "test harness error: " + e.message);
             console.error(e.stack);
         } finally {
+            try { await mongoose.connection.dropDatabase(); } catch (e) { /* ignore */ }
             await mongoose.disconnect();
             server.close();
             if (mock) mock.server.close();

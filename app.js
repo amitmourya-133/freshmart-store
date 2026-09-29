@@ -30,6 +30,11 @@ const analyticsRoutes = require("./routes/analyticsRoutes");
 const walletRoutes = require("./routes/walletRoutes");
 const referralRoutes = require("./routes/referralRoutes");
 const stockAlertRoutes = require("./routes/stockAlertRoutes");
+const recommendationRoutes = require("./routes/recommendationRoutes");
+const groupOrderRoutes = require("./routes/groupOrderRoutes");
+const b2bRoutes = require("./routes/b2bRoutes");
+const forecastRoutes = require("./routes/forecastRoutes");
+const autopayRoutes = require("./routes/autopayRoutes");
 
 const app = express();
 
@@ -90,7 +95,9 @@ app.use((req, res, next) => {
 // Parses the httpOnly session cookie (freshmart_token) on every request.
 app.use(cookieParser());
 
-app.use(express.json({ limit: "5mb" }));
+// Captures the raw request body for HMAC-verified webhooks (autopay) while
+// still parsing JSON normally — the same bytes the provider signed.
+app.use(express.json({ limit: "5mb", verify: (req, res, buf) => { req.rawBody = buf.toString("utf8"); } }));
 
 // Structured one-line-JSON request logging (see utils/logger.js).
 app.use(require("./utils/logger").requestLogger);
@@ -103,7 +110,7 @@ app.use((req, res, next) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(self)");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(self), geolocation=(self)");
     next();
 });
 
@@ -138,6 +145,13 @@ app.use("/api/referral", referralRoutes);
 // waiting-count view under /api/admin/stock-alerts.
 app.use("/api/stock-alerts", stockAlertRoutes);
 app.use("/api/admin/stock-alerts", stockAlertRoutes);
+app.use("/api/recommendations", recommendationRoutes);
+app.use("/api/groups", groupOrderRoutes);
+app.use("/api/b2b", b2bRoutes.router);
+app.use("/api/admin", b2bRoutes.adminRouter);
+app.use("/api/admin", forecastRoutes);
+app.use("/api/autopay", autopayRoutes.router);
+app.use("/api/admin", autopayRoutes.adminRouter);
 
 // Scheduled maintenance hook for delivery offers. Serverless has no in-process
 // timer, so an external scheduler (Vercel Cron on a paid plan, or any cron

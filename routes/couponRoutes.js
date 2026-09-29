@@ -1,7 +1,9 @@
 // ===============================
 // COUPON ROUTES
-// Customer: POST /api/coupons/validate
-// Admin:    GET|POST|PUT|DELETE /api/coupons  (admin middleware)
+// Customer: POST /api/coupons/validate, GET /api/coupons/available
+// Admin:    GET|POST|PUT|DELETE /api/coupons,
+//           GET /api/coupons/segments/summary, POST /api/coupons/segments/issue
+//           (admin middleware)
 // ===============================
 
 const express = require("express");
@@ -14,6 +16,9 @@ const couponController = require("../controllers/couponController");
 const couponValidateLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 30 });
 
 router.post("/validate", protect, couponValidateLimiter, couponController.validateCoupon);
+router.get("/available", protect, couponController.listAvailableCoupons);
+router.get("/segments/summary", protect, admin, couponController.segmentSummary);
+router.post("/segments/issue", protect, admin, couponController.issueSegmentCoupon);
 router.get("/", protect, admin, couponController.listCoupons);
 router.post("/", protect, admin, couponController.createCoupon);
 router.put("/:id", protect, admin, couponController.updateCoupon);

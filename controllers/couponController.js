@@ -8,6 +8,8 @@
 const Coupon = require("../models/Coupon");
 const CouponUsage = require("../models/CouponUsage");
 const User = require("../models/User");
+const segments = require("../utils/segments");
+const analytics = require("../utils/analytics");
 const { normalizeCode, findValidCoupon, computeCouponDiscount } = require("../utils/coupons");
 
 const MAX_VALUE = 1000000;
@@ -51,7 +53,23 @@ function validCouponPayload(body) {
         else perUserLimit = p || null;
     }
     const active = body.active === undefined || body.active === null || String(body.active) === "true";
-    return { errors, payload: { code, discountType, discountValue: round2(discountValue), minimumOrderValue: round2(minimumOrderValue), expiryDate, usageLimit, perUserLimit, active } };
+    // Segment targeting (Phase 2): validated against the enum; null = general.
+    let segment = null;
+    if (body.segment && String(body.segment).trim()) {
+        const SEGMENTS = ["NEW_CUSTOMER", "INACTIVE_30_DAYS", "FREQUENT_BUYER", "HIGH_VALUE", "AT_RISK"];
+        if (!SEGMENTS.includes(String(body.segment).trim())) errors.push("Unknown customer segment");
+        else segment = String(body.segment).trim();
+    }
+    let maxDiscountAmount = null;
+    if (body.maxDiscountAmount !== undefined && body.maxDiscountAmount !== null && body.maxDiscountAmount !== "") {
+        const cap = Number(body.maxDiscountAmount);
+        if (!Number.isFinite(cap) || cap < 0 || cap > MAX_VALUE) errors.push("Max discount amount must be a positive amount or empty");
+        else maxDiscountAmount = cap || null;
+    }
+    const segmentOnly = body.segmentOnly === undefined || body.segmentOnly === null
+        ? (segment ? true : false)
+        : String(body.segmentOnly) === "true";
+    return { errors, payload: { code, discountType, discountValue: round2(discountValue), minimumOrderValue: round2(minimumOrderValue), expiryDate, usageLimit, perUserLimit, active, segment, maxDiscountAmount, segmentOnly } };
 }
 
 function round2(n) {
@@ -87,6 +105,100 @@ exports.validateCoupon = async (req, res) => {
             return res.status(error.status).json({ success: false, message: error.message, data: { valid: false } });
         }
         res.status(400).json({ success: false, message: error.message, data: { valid: false } });
+    }
+};
+
+// Customer: list coupons currently available to THIS user. Segment-scoped
+// coupons are hidden unless the user currently belongs to that segment, so a
+// targeted promo never leaks to non-targeted customers. Fires coupon_viewed so
+// campaign performance is measurable.
+exports.listAvailableCoupons = async (req, res) => {
+    try {
+        const userId = req.user ? req.user._id : null;
+        let mySegments = null;
+        if (userId) {
+            try {
+                const seg = await segments.segmentOf(userId);
+                mySegments = seg && seg.segments ? seg.segments : [];
+            } catch (e) {
+                mySegments = [];
+            }
+        }
+
+        const now = new Date();
+        const coupons = await Coupon.find({
+            active: true,
+            $or: [{ expiryDate: { $gt: now } }, { expiryDate: null }],
+            $and: [
+                {
+                    $or: [
+                        { segment: null },
+                        ...(mySegments && mySegments.length ? mySegments.map(function (s) { return { segment: s }; }) : [{ segment: { $exists: false } }])
+                    ]
+                }
+            ]
+        }).sort({ createdAt: -1 }).limit(50);
+
+        const data = coupons.map(function (c) {
+            return c.publicView && typeof c.publicView === "function" ? c.publicView() : {
+                code: c.code, discountType: c.discountType, discountValue: c.discountValue,
+                minimumOrderValue: c.minimumOrderValue, expiresAt: c.expiryDate, segment: c.segment || null
+            };
+        });
+
+        // Fire-and-forget engagement signal.
+        if (data && data.length) {
+            analytics.track({
+                eventName: "coupon_viewed",
+                user: req.user,
+                metadata: { count: data.length, visibleBySegment: mySegments || null },
+            });
+        }
+
+        res.json({ success: true, count: data.length, data: data });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// Admin: segment population summary for targeting decisions.
+exports.segmentSummary = async (req, res) => {
+    try {
+        const summary = await segments.segmentCounts();
+        res.json({ success: true, data: summary });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// Admin: publish a coupon to a specific customer segment. The coupon carries
+// segment fields; eligibility itself is always enforced server-side at
+// validation/redemption time (utils/coupons + utils/segments), never by the
+// campaign UI.
+exports.issueSegmentCoupon = async (req, res) => {
+    try {
+        const { errors, payload } = validCouponPayload(req.body);
+        if (errors.length) return res.status(400).json({ success: false, message: errors[0] });
+        if (!payload.segment) return res.status(400).json({ success: false, message: "segment is required for a segment coupon" });
+        const existing = await Coupon.findOne({ code: payload.code });
+        if (existing) return res.status(400).json({ success: false, message: "A coupon with this code already exists" });
+        const coupon = await Coupon.create(payload);
+        analytics.track({
+            eventName: "coupon_issued",
+            user: req.user,
+            metadata: {
+                code: coupon.code,
+                segment: coupon.segment,
+                discountType: coupon.discountType,
+                discountValue: coupon.discountValue,
+                maxDiscountAmount: coupon.maxDiscountAmount || null,
+                expiresAt: coupon.expiryDate,
+            },
+        });
+        res.status(201).json({ success: true, data: coupon, targetedSegment: coupon.segment });
+    } catch (error) {
+        if (error && error.code === 11000) return res.status(400).json({ success: false, message: "A coupon with this code already exists" });
+        res.status(400).json({ success: false, message: error.message });
     }
 };
 
@@ -127,6 +239,9 @@ exports.listCoupons = async (req, res) => {
                 usageLimit: c.usageLimit,
                 usageCount: c.usageCount,
                 perUserLimit: c.perUserLimit,
+                segment: c.segment || null,
+                maxDiscountAmount: c.maxDiscountAmount || null,
+                segmentOnly: c.segmentOnly || false,
                 remainingUses: c.usageLimit != null ? Math.max(0, c.usageLimit - c.usageCount) : null,
                 perUserRemaining: c.perUserLimit != null ? Math.max(0, c.perUserLimit - perUserUsed) : null,
                 totalUserClaims: perUserUsed,

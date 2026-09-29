@@ -2120,6 +2120,34 @@ function injectDetailSeo(p, id) {
         if (ogTitle) ogTitle.content = p.name + " | FreshMart";
         var ogDesc = document.querySelector('meta[property="og:description"]');
         if (ogDesc) ogDesc.content = desc;
+        var ogUrl = document.querySelector('meta[property="og:url"]');
+        if (!ogUrl) {
+            ogUrl = document.createElement("meta");
+            ogUrl.setAttribute("property", "og:url");
+            document.head.appendChild(ogUrl);
+        }
+        ogUrl.content = base;
+        var twCard = document.querySelector('meta[name="twitter:card"]');
+        if (!twCard) {
+            twCard = document.createElement("meta");
+            twCard.name = "twitter:card";
+            twCard.content = "summary";
+            document.head.appendChild(twCard);
+        }
+        var twTitle = document.querySelector('meta[name="twitter:title"]');
+        if (!twTitle) {
+            twTitle = document.createElement("meta");
+            twTitle.name = "twitter:title";
+            document.head.appendChild(twTitle);
+        }
+        twTitle.content = p.name + " | FreshMart";
+        var twDesc = document.querySelector('meta[name="twitter:description"]');
+        if (!twDesc) {
+            twDesc = document.createElement("meta");
+            twDesc.name = "twitter:description";
+            document.head.appendChild(twDesc);
+        }
+        twDesc.content = desc;
 
         var schema = {
             "@context": "https://schema.org",
@@ -2131,7 +2159,7 @@ function injectDetailSeo(p, id) {
                 "@type": "Offer",
                 "price": p.price,
                 "priceCurrency": "INR",
-                "availability": "https://schema.org/InStock"
+                "availability": (p.stock !== undefined && p.stock > 0) ? "https://schema.org/InStock" : "https://schema.org/OutOfStock"
             }
         };
         if (p.rating !== undefined && p.rating > 0 && (p.ratingCount || 0) > 0) {

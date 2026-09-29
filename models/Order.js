@@ -102,7 +102,24 @@ const orderSchema = new mongoose.Schema(
         notifyConfirmSentAt: { type: Date, default: null },
         notifyStatusSentAt: { type: Date, default: null },
         notifyStatusFor: { type: String, default: null },
-        notifyDeliveredSentAt: { type: Date, default: null }
+        notifyDeliveredSentAt: { type: Date, default: null },
+        // WhatsApp update milestones (Phase 2.5): set when a real WhatsApp brief
+        // was delivered for that event, so retries never double-send.
+        whatsappOrderConfirmedAt: { type: Date, default: null },
+        whatsappOrderOutAt: { type: Date, default: null },
+        whatsappOrderDeliveredAt: { type: Date, default: null },
+        // Group / B2B / subscription lineage (Phase 2/3)
+        group: { type: mongoose.Schema.Types.ObjectId, ref: "GroupOrder", default: null },
+        orderType: { type: String, enum: ["retail", "b2b"], default: "retail" },
+        invoiceNumber: { type: String, default: null },
+        poNumber: { type: String, default: null, trim: true, maxlength: 40 },
+        // Recurring B2B schedule
+        recurring: {
+            active: { type: Boolean, default: false },
+            frequencyDays: { type: Number, default: 0, min: 0, max: 365 },
+            nextRunAt: { type: Date, default: null },
+            baseOrder: { type: mongoose.Schema.Types.ObjectId, ref: "Order", default: null },
+        },
     },
     { timestamps: true }
 );

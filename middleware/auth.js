@@ -109,3 +109,28 @@ exports.delivery = (req, res, next) => {
         });
     }
 };
+
+// B2B supply (Phase 3.7): a customer promoted to role "b2b_customer" by an
+// admin, and only then with an approved B2B profile, may use the supply API.
+exports.b2b = (req, res, next) => {
+    if (req.user && req.user.role === "b2b_customer" && req.user.b2bApproved === true && req.user.b2bProfile && req.user.b2bProfile.bool === true) {
+        next();
+    } else {
+        res.status(403).json({
+            success: false,
+            message: "B2B supply access only"
+        });
+    }
+};
+
+// B2B status endpoint: distinguish "not approved" from "no account" so the UI
+// can explain the exact blocker.
+exports.b2bStatus = (req, res, next) => {
+    if (!req.user || req.user.role === "customer") {
+        return res.status(403).json({ success: false, message: "B2B supply is invite-only" });
+    }
+    if (!req.user.b2bApproved) {
+        return res.status(403).json({ success: false, message: "Your B2B account is pending approval" });
+    }
+    next();
+};

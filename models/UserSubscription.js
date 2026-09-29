@@ -59,6 +59,51 @@ const UserSubscriptionSchema = new mongoose.Schema({
         type: Boolean,
         default: false,
     },
+    // ============ Veggie Box runtime (Subscription 2.0) ============
+    // Snapshot of the box contents taken at subscribe time (leaf-line details
+    // are preserved even if the plan is later edited, so a cycle is always
+    // fulfilled from what the customer agreed to).
+    boxSnapshot: [{
+        productId: {
+            type: ObjectId,
+            ref: "Product",
+        },
+        name: { type: String, trim: true },
+        unit: { type: String, trim: true, default: "kg" },
+        quantity: {
+            type: Number,
+            min: 0.01,
+            default: 1,
+        },
+        price: {
+            type: Number,
+            min: 0,
+            default: 0,
+        },
+    }],
+    autoRenew: {
+        type: Boolean,
+        default: true,
+    },
+    fulfilledCount: {
+        type: Number,
+        default: 0,
+    },
+    lastFulfilledAt: {
+        type: Date,
+    },
+    // outcome of the most recent due-cycle run
+    lastAttemptStatus: {
+        type: String,
+        enum: ["ok", "stock_shortfall", "provider_unconfigured", "failed"],
+    },
+    lastAttemptAt: {
+        type: Date,
+    },
+    lastAttemptMessage: {
+        type: String,
+        trim: true,
+    },
 }, { timestamps: true });
 
 // Index for quick user lookup

@@ -205,7 +205,9 @@ function publicUser(user) {
         emailVerified: user.emailVerified !== false,
         language: user.language || "en",
         referralCode: user.referralCode || null,
-        reminderOptOut: !!user.reminderOptOut
+        reminderOptOut: !!user.reminderOptOut,
+        whatsappOptIn: !!user.whatsappOptIn,
+        whatsappPhone: user.whatsappPhone || null
     };
 }
 
@@ -585,7 +587,7 @@ exports.getMe = async (req, res) => {
 exports.updateMe = async (req, res) => {
     try {
         let updates = Object.keys(req.body);
-        const allowedUpdates = ["name", "phone", "addresses", "password", "deleteAddressIndex", "setDefaultIndex", "language", "reminderOptOut"];
+        const allowedUpdates = ["name", "phone", "addresses", "password", "deleteAddressIndex", "setDefaultIndex", "language", "reminderOptOut", "whatsappOptIn", "whatsappPhone"];
         const isValidUpdate = updates.every((update) => allowedUpdates.includes(update.trim()));
 
         if (!isValidUpdate) {
@@ -628,6 +630,24 @@ exports.updateMe = async (req, res) => {
                 return res.status(400).json({ success: false, message: "reminderOptOut must be a boolean" });
             }
             req.user.reminderOptOut = req.body.reminderOptOut;
+        }
+        // WhatsApp order-update opt-in (Phase 2.5). Strictly boolean and
+        // revocable; the opt-in is explicit user consent, never implied.
+        if (req.body.whatsappOptIn !== undefined) {
+            if (typeof req.body.whatsappOptIn !== "boolean") {
+                return res.status(400).json({ success: false, message: "whatsappOptIn must be a boolean" });
+            }
+            req.user.whatsappOptIn = req.body.whatsappOptIn;
+            req.user.whatsappOptInAt = req.body.whatsappOptIn ? new Date() : null;
+        }
+        if (req.body.whatsappPhone !== undefined && req.body.whatsappPhone !== null && req.body.whatsappPhone !== "") {
+            const wa = String(req.body.whatsappPhone).trim();
+            if (!/^[6-9]\d{9}$/.test(wa)) {
+                return res.status(400).json({ success: false, message: "whatsappPhone must be a valid 10-digit mobile number" });
+            }
+            req.user.whatsappPhone = wa;
+        } else if (req.body.whatsappPhone === "") {
+            req.user.whatsappPhone = null;
         }
         if (req.body.password !== undefined) {
             const reason = passwordWeakReason(String(req.body.password || ""));

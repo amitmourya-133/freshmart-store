@@ -35,7 +35,13 @@ const productSchema = new mongoose.Schema(
         ratingCount: { type: Number, default: 1 },
         image: { type: String, default: "" },
         // Pack-size variants (empty = classic weight-multiplier product).
-        variants: { type: [variantSchema], default: [] }
+        variants: { type: [variantSchema], default: [] },
+        // B2B supply tier (Phase 3.7). Every product may carry a bulk price and
+        // a minimum order quantity for registered importers/restaurants. All
+        // b2b prices are server-authoritative — the retail client never sees
+        // them unless the caller is an approved b2b_customer.
+        b2bPrice: { type: Number, default: null, min: 0 },
+        b2bMinQty: { type: Number, default: 1, min: 1 }
     },
     { timestamps: true }
 );

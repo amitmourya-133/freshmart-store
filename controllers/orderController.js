@@ -311,7 +311,7 @@ async function computeServerTotals(items, options) {
     if (rawCode && String(rawCode).trim()) {
         const { coupon } = await findValidCoupon(rawCode, { userId: options && options.userId ? options.userId : null });
         discount = computeCouponDiscount(coupon, subtotal);
-        couponInfo = { _id: coupon._id, code: coupon.code, discountType: coupon.discountType, discountValue: coupon.discountValue, minimumOrderValue: coupon.minimumOrderValue, perUserLimit: coupon.perUserLimit };
+        couponInfo = { _id: coupon._id, code: coupon.code, discountType: coupon.discountType, discountValue: coupon.discountValue, minimumOrderValue: coupon.minimumOrderValue, perUserLimit: coupon.perUserLimit, segment: coupon.segment || null, maxDiscountAmount: coupon.maxDiscountAmount || null };
     }
     const total = round2(subtotal + delivery - discount);
     return {
@@ -482,12 +482,28 @@ async function applyCancellation(order, by) {
 // ===============================
 exports.createOrder = async (req, res) => {
     try {
-        const { customer, items, payment, paymentMethod, paid, deliverySlot, subscription, subscriptionPlan, clientRef, paymentReference, couponCode, deliveryLocation } = req.body;
+        const { customer, items, payment, paymentMethod, paid, deliverySlot, subscription, subscriptionPlan, clientRef, paymentReference, couponCode, deliveryLocation, groupId } = req.body;
 
         // Server-side address validation
         const customerError = validateCustomer(customer);
         if (customerError) {
             return res.status(400).json({ success: false, message: customerError });
+        }
+
+        // Group / colony order context (Phase 2.6): if present the order links
+        // to an OPEN group so the shared reward can apply after its threshold is
+        // reached. Requires a logged-in customer (rewards go to an account).
+        let groupDoc = null;
+        if (groupId && String(groupId).trim()) {
+            if (!req.user) {
+                return res.status(400).json({ success: false, message: "A login is required to place a group order" });
+            }
+            const GroupOrder = require("../models/GroupOrder");
+            groupDoc = await GroupOrder.findById(String(groupId).trim());
+            if (!groupDoc) return res.status(404).json({ success: false, message: "Group not found" });
+            if (groupDoc.status !== "OPEN") return res.status(400).json({ success: false, message: "This group is no longer accepting orders" });
+            if (new Date(groupDoc.expiresAt).getTime() < Date.now()) return res.status(400).json({ success: false, message: "This group has expired" });
+            if ((groupDoc.orders || []).length >= groupDoc.maxParticipants) return res.status(400).json({ success: false, message: "This group has reached its order capacity" });
         }
 
         // Idempotency: retrying the same clientRef returns the existing order
@@ -575,6 +591,10 @@ exports.createOrder = async (req, res) => {
             user: req.user ? req.user._id : null,
             customerEmail: customerEmail
         };
+
+        if (groupDoc) {
+            orderData.group = groupDoc._id;
+        }
 
         if (finalPaymentMethod === "cod") {
             // COD starts UNPAID/PENDING. The payment is collected at the door,
@@ -764,7 +784,49 @@ exports.createOrder = async (req, res) => {
             });
             const reminderSvc = require("../utils/reminders");
             reminderSvc.maybeMarkReminderConverted(order);
+            // Coupon redemption attribution (Phase 2): one event per real,
+            // persisted order so promotion performance can be measured without
+            // trusting any client-side value.
+            if (totals.coupon) {
+                analyticsSvc.track({
+                    eventName: "coupon_redeemed",
+                    user: req.user,
+                    orderId: String(order._id),
+                    productId: null,
+                    metadata: {
+                        code: totals.coupon.code,
+                        segment: totals.coupon.segment || null,
+                        discount: totals.discount,
+                        orderTotal: order.total,
+                    },
+                });
+            }
         } catch (e) { console.warn("[analytics] order_created failed: " + ((e && e.message) || "unknown")); }
+
+        // Group/colony reward check (Phase 2.6): after the order is persisted,
+        // register it in the group and apply the shared reward when that
+        // registration crosses the participants threshold. Fire-and-forget.
+        if (groupDoc) {
+            try {
+                const groupRewards = require("../utils/groupRewards");
+                Promise.resolve()
+                    .then(function () { return groupRewards.recordOrderInGroup(groupDoc._id, order._id); })
+                    .then(function (group) {
+                        if (group) {
+                            notificationController.notifyBase(group.host, {
+                                type: "group_order",
+                                title: "Sale on!  Order threshold reached",
+                                message: "Order #" + order.orderNumber + " took your group over " + group.minParticipants + " orders. Rewards are being issued.",
+                                dedupeKey: "group_threshold:" + String(group._id),
+                                data: { link: "groups.html" },
+                            });
+                            return groupRewards.applyRewards(group._id);
+                        }
+                        return null;
+                    })
+                    .catch(function (e) { console.warn("[groups] reward failed: " + ((e && e.message) || "unknown")); });
+            } catch (e) { /* non-fatal */ }
+        }
 
         res.status(201).json({
             success: true,
@@ -1119,6 +1181,19 @@ exports.updateOrderStatus = async (req, res) => {
 
         emailOnStatusChange(order, previousStatus);
         inboxNotify(order, "Order " + status, "Order " + order.orderNumber + " is now " + status + ".", status);
+
+        // WhatsApp order update (Phase 2.5): hard opt-in + provider-gated,
+        // fire-and-forget so a WhatsApp outage can never fail a status change.
+        if (status === "Confirmed" || status === "Out for Delivery") {
+            try {
+                const whatsapp = require("../utils/whatsapp");
+                const UserModel = require("../models/User");
+                const event = status === "Confirmed" ? "order_confirmed" : "order_out_for_delivery";
+                UserModel.findById(order.user)
+                    .then(function (user) { return whatsapp.notifyOrderUpdate(order, event, user); })
+                    .catch(function () { /* non-fatal */ });
+            } catch (e) { /* non-fatal */ }
+        }
 
         // Growth analytics for the confirmation milestone (fire-and-forget).
         if (status === "Confirmed") {

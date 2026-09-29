@@ -31,7 +31,22 @@ const couponSchema = new mongoose.Schema(
         usageCount: { type: Number, default: 0, min: 0 },
         // Per-customer redemption cap (null = each customer may use it unlimited
         // times). Enforced server-side against the CouponUsage collection.
-        perUserLimit: { type: Number, default: null, min: 0 }
+        perUserLimit: { type: Number, default: null, min: 0 },
+        // Segment targeting (Phase 2): when set, the coupon is only eligible for
+        // users whose current segment (utils/segments.js) contains this value.
+        // null = available to every logged-in customer.
+        segment: {
+            type: String,
+            enum: ["NEW_CUSTOMER", "INACTIVE_30_DAYS", "FREQUENT_BUYER", "HIGH_VALUE", "AT_RISK"],
+            default: null
+        },
+        // Optional absolute rupee cap on any discount this coupon can grant.
+        // Without it a percentage code on a huge cart is unbounded; the cap keeps
+        // segment promotions within the approved margin. null = unlimited.
+        maxDiscountAmount: { type: Number, default: null, min: 0 },
+        // When the coupon is only visible to the targeted segment (and not
+        // listed in the public coupon list).
+        segmentOnly: { type: Boolean, default: false }
     },
     { timestamps: true }
 );
@@ -44,7 +59,9 @@ couponSchema.methods.publicView = function () {
         discountType: this.discountType,
         discountValue: this.discountValue,
         minimumOrderValue: this.minimumOrderValue,
-        expiresAt: this.expiryDate
+        expiresAt: this.expiryDate,
+        segment: this.segment || null,
+        maxDiscountAmount: this.maxDiscountAmount || null
     };
 };
 

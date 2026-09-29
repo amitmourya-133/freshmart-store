@@ -12,6 +12,7 @@
 const analytics = require("./analytics");
 const referral = require("./referral");
 const reminders = require("./reminders");
+const coPurchase = require("./coPurchase");
 
 async function fireOrderDelivered(order) {
     if (!order || !order._id) return;
@@ -45,6 +46,20 @@ async function fireOrderDelivered(order) {
     // Repeat-order reminder (deduped weekly, opt-out aware).
     try {
         await reminders.maybeRemindRepeatOrder(order);
+    } catch (e) { /* non-fatal */ }
+
+    // Co-purchase signal: feed the "Frequently Bought Together" model from
+    // real delivered orders. Non-fatal; skips orders without product refs.
+    try {
+        await coPurchase.recordPairsFromOrder(order);
+    } catch (e) { /* non-fatal */ }
+
+    // WhatsApp delivered update (Phase 2.5): opt-in + provider-gated.
+    try {
+        const whatsapp = require("./whatsapp");
+        const User = require("../models/User");
+        const user = order.user ? await User.findById(order.user).lean() : null;
+        await whatsapp.notifyOrderUpdate(order, "order_delivered", user);
     } catch (e) { /* non-fatal */ }
 }
 

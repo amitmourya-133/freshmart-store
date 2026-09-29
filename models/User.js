@@ -11,7 +11,7 @@ const userSchema = new mongoose.Schema(
         email: { type: String, required: true, unique: true, lowercase: true, trim: true },
         phone: { type: String, trim: true },
         password: { type: String },
-        role: { type: String, enum: ["customer", "admin", "delivery"], default: "customer" },
+        role: { type: String, enum: ["customer", "admin", "delivery", "b2b_customer"], default: "customer" },
         // Preferred interface language (customer-facing UI). Stored server-side
         // so the preference is real and persists across devices, with a
         // localStorage mirror for guests. Never includes private data.
@@ -85,6 +85,24 @@ const userSchema = new mongoose.Schema(
         referredAt: { type: Date, default: null },
         // Customer preference: never send repeat-order reminder notifications.
         reminderOptOut: { type: Boolean, default: false },
+        // WhatsApp order-update opt-in (Phase 2.5). Opt-in is explicit and
+        // revocable; updates are only sent when this is true AND a provider is
+        // configured (utils/whatsapp.js). Never implied by signup.
+        whatsappOptIn: { type: Boolean, default: false },
+        whatsappPhone: { type: String, trim: true, match: [/^[6-9]\d{9}$/, "WhatsApp number must be a valid 10-digit Indian mobile"] },
+        whatsappOptInAt: { type: Date, default: null },
+        // B2B supply account (Phase 3.7). Only present for role "b2b_customer".
+        // Credit is a deliberate, admin-controlled facility - it is never
+        // auto-granted and its limit/terms are set via the admin tools only.
+        b2bProfile: {
+            bool: { type: Boolean, default: false },
+            businessName: { type: String, trim: true, maxlength: 120 },
+            gstin: { type: String, trim: true, uppercase: true, match: [/^[0-9A-Z]{15}$/, "GSTIN must be 15 characters"] },
+            purchaseOfficer: { type: String, trim: true, maxlength: 120 },
+        },
+        creditLimit: { type: Number, default: 0, min: 0 },
+        creditTermsDays: { type: Number, default: 0, min: 0, max: 180 },
+        b2bApproved: { type: Boolean, default: false },
         // Saved addresses for checkout and profile
         addresses: [{
             name: { type: String, trim: true },

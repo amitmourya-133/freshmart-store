@@ -84,6 +84,55 @@ const IGNORED_TOKENS = new Set([
     "fruit", "fruits", "phal", "phaal", "fal", "juice", "smoothie"
 ]);
 
+// ---------------------------------------------------------------
+// Hindi / Devanagari voice + text support (Phase 3.10).
+// Web Speech (hi-IN) returns Devanagari. We map common produce + intent words
+// to their English tokens so "टमाटर की क़ीमत" behaves like "tomato", and
+// "सब्ज़ी" behaves like "sabzi". Unknown Devanagari words are dropped (never
+// treated as a mangled English product name).
+// ---------------------------------------------------------------
+
+const HINDI_MAP = {
+    "फूलगोभी": "cauliflower", "फूल गोभी": "cauliflower", "पत्तागोभी": "cabbage", "पत्ता गोभी": "cabbage", "बंदगोभी": "cabbage", "बन्दगोभी": "cabbage",
+    "शिमला मिर्च": "capsicum", "शिमलामिर्च": "capsicum", "हरी मिर्च": "green chilli", "हरीमिर्च": "green chilli", "लाल मिर्च": "red chilli",
+    "टमाटर": "tomato", "टमाटा": "tomato", "आलू": "potato", "आलु": "potato", "प्याज़": "onion", "प्याज": "onion", "प्याज़": "onion",
+    "गाजर": "carrot", "गाज़र": "carrot", "पालक": "spinach", "सेब": "apple", "केला": "banana", "संतरा": "orange", "संत्रा": "orange", "नारंगी": "orange",
+    "बैंगन": "brinjal", "बैगन": "brinjal", "बैगन": "brinjal", "खीरा": "cucumber", "ककड़ी": "cucumber", "नींबू": "lemon", "निम्बू": "lemon", "लहसुन": "garlic",
+    "अदरक": "ginger", "भिंडी": "bhindi", "भिन्डी": "bhindi", "धनिया": "coriander", "हल्दी": "turmeric", "पुदीना": "mint", "मशरूम": "mushroom",
+    "मूली": "radish", "शलजम": "turnip", "अरबी": "arbi", "शकरकंद": "sweet potato", "मटर": "peas", "छोले": "chickpeas", "चुकंदर": "beetroot", "कद्दू": "pumpkin",
+    "तोरी": "bottle gourd", "लौकी": "bottle gourd", "करेला": "bitter gourd", "भुट्टा": "corn", "फ्रेंच बीन्स": "beans", "बीन्स": "beans",
+    "चावल": "rice", "दाल": "dal", "आटा": "flour", "दूध": "milk", "छाछ": "buttermilk", "अंडा": "egg", "अंडे": "egg", "मक्खन": "butter", "मक्ख़न": "butter",
+    "पनीर": "paneer", "दही": "curd", "घी": "ghee", "चीनी": "sugar", "नमक": "salt", "तेल": "oil", "सरसों का तेल": "mustard oil", "अचार": "pickle",
+    "मूंगफली": "peanuts", "काजू": "cashew", "बादाम": "almond", "किशमिश": "raisins", "खजूर": "dates", "नारियल": "coconut", "पपीता": "papaya",
+    "अनार": "pomegranate", "अंगूर": "grapes", "आम": "mango", "तरबूज": "watermelon", "खरबूजा": "melon", "स्ट्रॉबेरी": "strawberry", "कीवी": "kiwi",
+    "सब्ज़ी": "sabzi", "सब्जी": "sabzi", "सब्ज़ियां": "sabzi", "सब्जियां": "sabzi", "तरकारी": "tarkari", "भाजी": "bhaji",
+    "फल": "fruit", "फलों": "fruit", "फले": "fruit", "मेवा": "fruit", "किराना": "kirana", "राशन": "ration", "ब्रेड": "bread", "बिस्किट": "biscuits",
+    "सस्ता": "sasta", "सस्ती": "sasta", "सस्ते": "sasta", "कम": "kam", "रुपये": "rupees", "रु": "rupees", "कीमत": "", "मूल्य": "",
+    "खरीदना": "", "लाना": "", "चाहिए": "", "चाहिये": "", "चाहता": "", "चाहती": "", "दिखाओ": "", "दिखाएं": "", "ढूंढो": "", "मुझे": "", "मिल": "",
+    "की": "", "का": "", "के": "", "को": "", "में": "", "मैं": "", "है": "", "हैं": "", "हो": "", "और": "", "से": "", "पर": "", "तो": "", "भी": "", "या": ""
+};
+
+function hasDevanagari(raw) {
+    return /[\u0900-\u097F]/.test(String(raw || ""));
+}
+
+// Tokenize a Devanagari string (longest keys first, whitespace-delimited) into
+// English tokens. Order of found tokens matches the original; empty maps are
+// dropped (stop words / actions). Returns [] when nothing maps.
+function hindiToTokens(raw) {
+    if (!hasDevanagari(raw)) return [];
+    const words = String(raw).split(/\s+/).filter(Boolean);
+    const result = [];
+    for (const w of words) {
+        const hit = HINDI_MAP[w];
+        if (hit === undefined) continue; // unknown word: skip, never mangled
+        if (hit) result.push(hit);
+    }
+    return result;
+}
+
+// ------------------------------------------------------------------
+
 function resolveIntent(query) {
     const lower = query.toLowerCase();
     const intent = { categories: null, maxPrice: null, sortCheap: false, tokens: [] };
@@ -134,7 +183,15 @@ function resolveIntent(query) {
 }
 
 async function findProductsByIntent(query, limit) {
-    const intent = resolveIntent(query);
+    // Phase 3.10: merge Devanagari/Hindi voice tokens into the intent so
+    // "टमाटर की क़ीमत" resolves like "tomato".
+    const hindiTokens = hindiToTokens(query);
+    const intent = resolveIntent(hindiTokens.length ? query + " " + hindiTokens.join(" ") : query);
+    if (hindiTokens.length) {
+        intent.tokens = intent.tokens.concat(hindiTokens);
+        if (hindiTokens.join(" ") === "sabzi") intent.categories = intent.categories || ["Vegetables", "vegetables"];
+        if (hindiTokens.join(" ") === "fruit") intent.categories = intent.categories || ["Fruits"];
+    }
     const filter = { active: true, stock: { $gt: 0 } };
 
     if (intent.categories && intent.categories.length) {
@@ -206,5 +263,7 @@ module.exports = {
     nameRegexFor: nameRegexFor,
     resolveIntent: resolveIntent,
     findProductsByIntent: findProductsByIntent,
-    getCategories: getCategories
+    getCategories: getCategories,
+    hasDevanagari: hasDevanagari,
+    hindiToTokens: hindiToTokens
 };
