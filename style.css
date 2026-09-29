@@ -5564,3 +5564,47 @@ body.dark-mode .order-partner-btn { color: #6ee49b; }
     cursor: pointer;
 }
 .notification-open:hover { background: #117a38; }
+
+/* ---------- TRUST / LEGAL PAGE HELPERS ---------- */
+footer a {
+    color: #58a6ff;
+    text-decoration: underline;
+}
+footer .trust-line,
+.auth-trust {
+    margin: 8px 0;
+    font-size: 13px;
+    opacity: 0.85;
+}
+.auth-trust {
+    margin-top: 16px;
+    padding: 10px 12px;
+    border: 1px solid rgba(21, 148, 71, 0.35);
+    background: rgba(21, 148, 71, 0.08);
+    border-radius: 10px;
+}
+.auth-bottom-sm {
+    margin-top: 14px;
+    font-size: 13px;
+    text-align: center;
+}
+.auth-bottom-sm a {
+    margin: 0 4px;
+}
+.legal-box h1 {
+    margin-top: 6px;
+    font-size: 26px;
+}
+.legal-box h2 {
+    margin-top: 22px;
+    font-size: 16px;
+}
+.legal-box p {
+    margin: 8px 0;
+    font-size: 14px;
+    line-height: 1.6;
+}
+.legal-updated {
+    font-size: 13px;
+    opacity: 0.7;
+}

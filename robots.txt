@@ -1,5 +1,16 @@
 User-agent: *
 Allow: /
+Disallow: /api/
+Disallow: /admin.html
+Disallow: /delivery.html
+Disallow: /checkout.html
+Disallow: /login.html
+Disallow: /signup.html
+Disallow: /orders.html
+Disallow: /profile.html
+Disallow: /notifications.html
+Disallow: /help.html
+Disallow: /admin-partners.html
 
 # Private/authenticated pages are marked noindex in their own <head>; the
 # sitemap below lists only public, indexable pages.

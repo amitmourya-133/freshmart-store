@@ -38,6 +38,9 @@ const autopayRoutes = require("./routes/autopayRoutes");
 
 const app = express();
 
+// Do not advertise the Express version to scanners.
+app.disable("x-powered-by");
+
 // Register .jfif as a JPEG MIME type so product images served statically render in the browser
 const mime = require("mime");
 mime.define({ "image/jpeg": ["jfif"] }, true);
@@ -57,6 +60,7 @@ app.set("trust proxy", 1);
 // to call these APIs) gets no CORS headers.
 const ALLOWED_ORIGINS = [
     "https://freshmart-store-jet.vercel.app",
+    "https://freshmart-store-git-main-alexa-65b1.vercel.app",
     "http://localhost:5000",
     "http://127.0.0.1:5000",
     /^https:\/\/freshmart-store(-\w+)?\.vercel\.app$/
@@ -105,12 +109,21 @@ app.use(require("./utils/logger").requestLogger);
 // Security headers on every API (and locally-served static) response. On Vercel
 // the edge router also adds these for static files; here they guarantee the
 // API responses always carry them (and give local dev identical behaviour).
+// The CSP mirrors vercel.json so browser + API responses are consistent.
+const CSP = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.postalpincode.in https://nominatim.openstreetmap.org; font-src 'self'; frame-src 'self' https://www.openstreetmap.org; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; worker-src 'self'; manifest-src 'self'; upgrade-insecure-requests";
 app.use((req, res, next) => {
-    res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.postalpincode.in https://nominatim.openstreetmap.org; frame-src 'self' https://www.openstreetmap.org; font-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'");
+    res.setHeader("Content-Security-Policy", CSP);
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-    res.setHeader("Permissions-Policy", "camera=(), microphone=(self), geolocation=(self)");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(self), geolocation=(self), browsing-topics=(), interest-cohort=(), fullscreen=(self)");
+    res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
+    res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+    res.setHeader("X-Permitted-Cross-Domain-Policies", "none");
+    // Sensitive JSON API responses must never be cached by shared caches.
+    if (req.path.startsWith("/api/")) {
+        res.setHeader("Cache-Control", "no-store");
+    }
     next();
 });
 
