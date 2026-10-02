@@ -27,6 +27,14 @@ const { completeOrderDelivery } = require("../utils/deliveryCompletion");
 // HELPERS
 // ===============================
 
+// POST /delivery/offers/:id/accept - FIRST ACCEPT WINS, on its canonical path.
+// Delegates to the same controller the /delivery-ops alias uses, so there is a
+// single atomic implementation behind both URLs. Identity comes from the JWT
+// (protect + delivery): no partnerId, role or ownership is ever read from the
+// request body.
+router.post("/offers/:id/accept", protect, delivery, deliveryOpsController.acceptOffer);
+router.post("/offers/:id/claim", protect, delivery, deliveryOpsController.acceptOffer);
+
 function isValidObjectId(id) {
     return mongoose.Types.ObjectId.isValid(String(id || ""));
 }

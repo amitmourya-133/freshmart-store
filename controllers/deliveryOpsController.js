@@ -35,6 +35,45 @@ const DELIVERY_OTP_TTL_MS = 15 * 60 * 1000; // 15 minutes
 const OTP_REISSUE_COOLDOWN_MS = 3 * 60 * 1000; // 3 minutes between re-issues
 const MAX_SIGNATURE_BYTES = 300 * 1024;
 
+// The one and only definition of "this delivery run is still live". Used by
+// every query, by the auto-dispatch guards and mirrored by the partial unique
+// index in models/DeliveryAssignment.js, so the code and the database can never
+// disagree about which statuses block a second partner.
+const ACTIVE_STATUSES = ["ASSIGNED", "ACCEPTED", "PICKED_UP", "EN_ROUTE"];
+
+// Structured delivery events. One grep-able line per meaningful transition, so
+// an operator can answer "who got this order and when" from the function logs
+// alone. Deliberately carries NO secrets and NO customer PII: ids and order
+// numbers only, never names, phones, addresses, tokens or push endpoints.
+const DELIVERY_EVENTS = [
+    "ORDER_CREATED",
+    "AUTO_DISPATCH_STARTED",
+    "OFFER_CREATED",
+    "OFFER_PUSH_SENT",
+    "OFFER_PUSH_FAILED",
+    "OFFER_ACCEPT_ATTEMPT",
+    "ORDER_ASSIGNED",
+    "OFFER_WON",
+    "OFFER_LOST",
+    "OFFER_EXPIRED",
+    "AUTO_DISPATCH_RETRY",
+    "AUTO_DISPATCH_SKIPPED",
+];
+
+function logDeliveryEvent(name, fields) {
+    if (DELIVERY_EVENTS.indexOf(name) === -1) name = "AUTO_DISPATCH_SKIPPED";
+    let line = "[delivery-event] " + name;
+    try {
+        const keys = Object.keys(fields || {}).sort();
+        for (const k of keys) {
+            const v = fields[k];
+            if (v === undefined || v === null || v === "") continue;
+            line += " " + k + "=" + String(v).slice(0, 80).replace(/\s+/g, " ");
+        }
+    } catch (e) { /* never let logging break a delivery */ }
+    console.log(line);
+}
+
 function isValidObjectId(id) {
     return mongoose.Types.ObjectId.isValid(String(id || ""));
 }
@@ -75,26 +114,94 @@ async function logWarn(tag, e) {
 }
 
 // ===============================
+// ELIGIBLE PARTNERS (one source of truth)
+// ===============================
+
+// The single definition of "who may be offered this order right now", reused by
+// the broadcast, the auto-assigner and the accept path so those three can never
+// disagree about eligibility. A partner qualifies only when ALL of these hold:
+//   * role === "delivery"                          - delivery role, read from the DB
+//   * partnerStatus === "approved"                 - not pending / rejected / revoked
+//   * isAvailable === true                         - not on a break
+//   * holds no OTHER active assignment             - not overloaded
+//   * holds no active assignment for THIS order    - never offered twice
+// `requireFreshLocation` additionally demands a GPS ping inside the stale
+// window and is used by the auto-assigner, which must not dispatch a partner it
+// cannot locate. Manual claiming never requires it: a partner who never shares
+// location may still accept by hand.
+//
+// A valid push subscription is deliberately NOT a filter: a partner without one
+// is still a real, reachable partner (they see the offer in their panel), and
+// dropping them would strand the order whenever a browser permission lapses.
+async function getAvailableDeliveryPartners(opts) {
+    const options = opts || {};
+    const orderId = options.orderId || null;
+    const requireFreshLocation = Boolean(options.requireFreshLocation);
+
+    const partners = await User.find({
+        role: "delivery",
+        partnerStatus: "approved",
+        isAvailable: true,
+    })
+        .select("_id name email zone lastLat lastLng lastLocationAt isAvailable partnerStatus role")
+        .lean();
+    if (!partners.length) return [];
+
+    const or = [{ deliveryUser: { $in: partners.map(function (p) { return p._id; }) } }];
+    if (orderId) or.push({ order: orderId });
+    const busy = await DeliveryAssignment.find({
+        status: { $in: ACTIVE_STATUSES },
+        $or: or,
+    })
+        .select("deliveryUser order")
+        .lean();
+
+    const busyIds = new Set(busy.map(function (a) { return String(a.deliveryUser); }));
+    let pool = partners.filter(function (p) { return !busyIds.has(String(p._id)); });
+    if (!pool.length) return [];
+
+    if (requireFreshLocation) {
+        let staleMinutes = 15;
+        try {
+            const s = await Settings.getSettings();
+            staleMinutes = Number(s.deliveryStaleMinutes) || 15;
+        } catch (e) { /* keep the default window */ }
+        pool = pool.filter(function (p) { return hasFreshLocation(p, staleMinutes); });
+    }
+    return pool;
+}
+
+// ===============================
 // ASSIGNMENT CREATION (shared)
 // ===============================
 
 // Create the assignment for an order, mint the delivery OTP and tell BOTH
 // sides. `mode` records how it happened (admin click / claim / auto).
 // Returns the saved assignment, or null when one already exists.
-async function createAssignment(opts) {
+// Create the assignment for an order, mint the delivery OTP and tell BOTH
+// sides. `mode` records how it happened (admin click / claim / auto).
+// Returns a RESULT object ({ok, reason, assignment}) so callers can tell
+// "somebody else already won this order" apart from a real failure.
+async function createAssignmentResult(opts) {
     const { order, partner, byUserId, mode, distanceKmValue } = opts;
 
     // A closed order can never accept a new delivery run: an admin force-assign
     // or auto-assign retry must fail instead of resurrecting a completed order.
     if (!order || order.status === "Delivered" || order.status === "Cancelled") {
-        return null;
+        return { ok: false, reason: "ORDER_CLOSED", assignment: null };
     }
 
+    // Advisory fast path only. The AUTHORITATIVE guard is the partial unique
+    // index one_active_assignment_per_order, which MongoDB evaluates inside the
+    // insert below: two partners pressing Accept in the same millisecond both
+    // pass this read, and only the index can stop the second one.
     const existing = await DeliveryAssignment.findOne({
         order: order._id,
-        status: { $in: ["ASSIGNED", "ACCEPTED", "PICKED_UP", "EN_ROUTE"] },
+        status: { $in: ACTIVE_STATUSES },
     });
-    if (existing) return null;
+    if (existing) {
+        return { ok: false, reason: "ORDER_ALREADY_ASSIGNED", assignment: null, winner: existing };
+    }
 
     const otp = generateOtp(4);
     const assignment = new DeliveryAssignment({
@@ -109,7 +216,29 @@ async function createAssignment(opts) {
         otpAttempts: 0,
     });
     if (Number.isFinite(Number(distanceKmValue))) assignment.distanceKm = Number(distanceKmValue);
-    await assignment.save();
+
+    try {
+        await assignment.save();
+    } catch (e) {
+        // 11000 == the unique index refused a SECOND active assignment for this
+        // order: a partner claim and an auto-assign (or two partners) raced and
+        // somebody else won. That is a normal first-accept-wins outcome, never a
+        // failure to retry, so it is reported as a lost race, not a 500.
+        if (e && e.code === 11000) {
+            const winner = await DeliveryAssignment.findOne({
+                order: order._id,
+                status: { $in: ACTIVE_STATUSES },
+            });
+            logDeliveryEvent("OFFER_LOST", {
+                orderId: String(order._id),
+                partnerId: String(partner && partner._id),
+                mode: mode || "admin",
+                reason: "ORDER_ALREADY_ASSIGNED",
+            });
+            return { ok: false, reason: "ORDER_ALREADY_ASSIGNED", assignment: null, winner: winner };
+        }
+        throw e;
+    }
 
     // The customer proves the drop with this OTP. Email only; the plain value
     // is never stored.
@@ -160,7 +289,22 @@ async function createAssignment(opts) {
         await logWarn("delivery-assign-notify-customer", e);
     }
 
-    return assignment;
+    logDeliveryEvent("ORDER_ASSIGNED", {
+        orderId: String(order._id),
+        orderNumber: order.orderNumber || "",
+        partnerId: String(partner._id),
+        mode: mode || "admin",
+        distanceKm: Number.isFinite(Number(distanceKmValue)) ? Number(distanceKmValue) : "",
+    });
+
+    return { ok: true, assignment: assignment, reason: null };
+}
+
+// Back-compat wrapper for the existing admin force-assign / auto-assign callers:
+// the saved assignment, or null when the order is closed or already taken.
+async function createAssignment(opts) {
+    const result = await createAssignmentResult(opts);
+    return result.ok ? result.assignment : null;
 }
 
 // ===============================
@@ -170,7 +314,14 @@ async function createAssignment(opts) {
 // Alert every approved + online partner about a freshly placed order and open
 // a claim window. Called from the order controller right after the order is
 // persisted; never awaited by the checkout response.
-async function broadcastNewOrder(order) {
+//
+// IDEMPOTENT: dispatch may fire more than once for the same order (duplicate
+// checkout retry, the order controller plus a manual re-alert, the auto-retry
+// sweep). It returns early when a live OPEN offer already exists, and if two
+// callers still race past that check, the loser cancels its own offer - so one
+// order can never accumulate two competing open offers.
+async function broadcastNewOrder(order, opts) {
+    const options = opts || {};
     try {
         if (!order || !order._id) return { broadcast: false, reason: "no order" };
 
@@ -188,40 +339,47 @@ async function broadcastNewOrder(order) {
         // An order that is already assigned needs no broadcast.
         const assigned = await DeliveryAssignment.findOne({
             order: order._id,
-            status: { $in: ["ASSIGNED", "ACCEPTED", "PICKED_UP", "EN_ROUTE"] },
+            status: { $in: ACTIVE_STATUSES },
         }).select("_id");
-        if (assigned) return { broadcast: false, reason: "already assigned" };
-
-        const candidates = await User.find({
-            role: "delivery",
-            partnerStatus: "approved",
-            isAvailable: true,
-        })
-            .select("_id name phone lastLat lastLng zone isAvailable")
-            .lean();
-
-        // A partner who already holds an active assignment for THIS order (e.g.
-        // a race between an admin assignment and this broadcast) must not be
-        // offered it a second time: two active paths to the same order are never
-        // created server-side.
-        if (candidates.length) {
-            const bound = await DeliveryAssignment.find({
-                order: order._id,
-                deliveryUser: { $in: candidates.map(function (c) { return c._id; }) },
-                status: { $in: ["ASSIGNED", "ACCEPTED", "PICKED_UP", "EN_ROUTE"] },
-            })
-                .select("deliveryUser")
-                .lean();
-            if (bound.length) {
-                const boundIds = new Set(bound.map(function (b) { return String(b.deliveryUser); }));
-                const free = candidates.filter(function (c) { return !boundIds.has(String(c._id)); });
-                if (!free.length) return { broadcast: false, reason: "already assigned" };
-                candidates.length = 0;
-                Array.prototype.push.apply(candidates, free);
-            }
+        if (assigned) {
+            logDeliveryEvent("AUTO_DISPATCH_SKIPPED", { orderId: String(order._id), reason: "ALREADY_ASSIGNED" });
+            return { broadcast: false, reason: "already assigned" };
         }
 
+        // Idempotency guard: a claim window for this order is already live.
+        const liveOffer = await DeliveryOffer.findOne({
+            order: order._id,
+            status: "OPEN",
+            expiresAt: { $gt: new Date() },
+        })
+            .select("_id round expiresAt")
+            .lean();
+        if (liveOffer) {
+            logDeliveryEvent("AUTO_DISPATCH_SKIPPED", {
+                orderId: String(order._id),
+                offerId: String(liveOffer._id),
+                round: liveOffer.round,
+                reason: "DUPLICATE_DISPATCH",
+            });
+            return { broadcast: false, reason: "already dispatched", offerId: String(liveOffer._id), round: liveOffer.round };
+        }
+
+        const candidates = await getAvailableDeliveryPartners({ orderId: order._id });
+
         if (!candidates.length) {
+            // Distinguish "the fleet is empty" from "somebody just won this
+            // order while we were looking": the second case must never page an
+            // admin to assign a delivery that already has a partner.
+            const won = await DeliveryAssignment.findOne({
+                order: order._id,
+                status: { $in: ACTIVE_STATUSES },
+            })
+                .select("_id")
+                .lean();
+            if (won) {
+                logDeliveryEvent("AUTO_DISPATCH_SKIPPED", { orderId: String(order._id), reason: "ALREADY_ASSIGNED" });
+                return { broadcast: false, reason: "already assigned" };
+            }
             // Nobody online: the admin must assign by hand. Tell them loudly.
             try {
                 await notificationController.notifyRole("admin", {
@@ -238,6 +396,7 @@ async function broadcastNewOrder(order) {
             } catch (e) {
                 await logWarn("broadcast-admin-alert", e);
             }
+            logDeliveryEvent("AUTO_DISPATCH_SKIPPED", { orderId: String(order._id), reason: "NO_AVAILABLE_PARTNER" });
             return { broadcast: false, reason: "no online partner", candidates: 0 };
         }
 
@@ -246,15 +405,60 @@ async function broadcastNewOrder(order) {
         // Auto-assign gets its own deadline inside the claim window so partners
         // always get a grace period to claim on their own first.
         const autoDelay = Math.min(Number(settings.deliveryAutoAssignDelaySeconds) || 0, ttl);
+        const round = (lastRound && Number(lastRound.round) ? Number(lastRound.round) : 0) + 1;
+
+        logDeliveryEvent("AUTO_DISPATCH_STARTED", {
+            orderId: String(order._id),
+            orderNumber: order.orderNumber || "",
+            partners: candidates.length,
+            round: round,
+            ttlSeconds: ttl,
+            trigger: options.trigger || "order_created",
+        });
+
         const offer = await DeliveryOffer.create({
             order: order._id,
-            round: (lastRound && Number(lastRound.round) ? Number(lastRound.round) : 0) + 1,
+            round: round,
             status: "OPEN",
             mode: "broadcast",
             ttlSeconds: ttl,
             expiresAt: new Date(Date.now() + ttl * 1000),
             autoAssignAt: settings.deliveryAutoAssign ? new Date(Date.now() + autoDelay * 1000) : null,
             zone: order.deliveryLocation && order.deliveryLocation.city ? String(order.deliveryLocation.city) : "",
+        });
+
+        // Two dispatch calls that raced past the idempotency guard would both
+        // have created an offer for this order. The one with the LOWER _id keeps
+        // the claim window and the other cancels itself at once, so a partner can
+        // never see two competing live offers for the same order.
+        const rival = await DeliveryOffer.findOne({
+            order: order._id,
+            status: "OPEN",
+            _id: { $lt: offer._id },
+            expiresAt: { $gt: new Date() },
+        })
+            .select("_id")
+            .lean();
+        if (rival) {
+            await DeliveryOffer.updateOne(
+                { _id: offer._id, status: "OPEN" },
+                { $set: { status: "CANCELLED", claimSource: "raced" } }
+            );
+            logDeliveryEvent("AUTO_DISPATCH_SKIPPED", {
+                orderId: String(order._id),
+                offerId: String(offer._id),
+                reason: "DUPLICATE_DISPATCH",
+            });
+            return { broadcast: false, reason: "duplicate dispatch", offerId: String(rival._id), round: round };
+        }
+
+        logDeliveryEvent("OFFER_CREATED", {
+            orderId: String(order._id),
+            orderNumber: order.orderNumber || "",
+            offerId: String(offer._id),
+            round: round,
+            partners: candidates.length,
+            expiresAt: new Date(offer.expiresAt).toISOString(),
         });
 
         const orderLabel = order.orderNumber || String(order._id);
@@ -271,8 +475,8 @@ async function broadcastNewOrder(order) {
                 // fleet at once. Mirroring here too would double-ring every phone.
                 await notificationController.notifyBase(partner._id, {
                     type: "delivery_offer",
-                    title: "New delivery nearby",
-                    message: "Order " + orderLabel + " · ₹" + amount + near + " · accept in " + ttl + "s",
+                    title: "New FreshMart Delivery",
+                    message: "Order #" + orderLabel + " is ready for pickup · ₹" + amount + near + " · accept in " + ttl + "s",
                     dedupeKey: "delivery_offer:" + String(offer._id) + ":" + String(partner._id),
                     push: false,
                     data: {
@@ -280,6 +484,7 @@ async function broadcastNewOrder(order) {
                         offerId: String(offer._id),
                         orderId: String(order._id),
                         orderNumber: orderLabel,
+                        action: "ACCEPT_ORDER",
                     },
                 });
                 entry.inApp = true;
@@ -295,13 +500,24 @@ async function broadcastNewOrder(order) {
         try {
             const res = await pushController.sendPushToUsers(
                 candidates.map(function (c) { return c._id; }),
-                "New delivery nearby",
-                "Order " + orderLabel + " · ₹" + amount + " · accept in " + ttl + "s",
+                "New FreshMart Delivery",
+                "Order #" + orderLabel + " is ready for pickup.",
                 "/delivery.html",
                 {
                     tag: "delivery-offer-" + String(offer._id),
                     requireInteraction: true,
                     vibrate: [220, 110, 220, 110, 420],
+                    // Actionable from the lock screen: the payload tells the
+                    // service worker which offer this is, so tapping the
+                    // notification lands the partner on that exact ACCEPT button
+                    // instead of a generic dashboard.
+                    data: {
+                        action: "ACCEPT_ORDER",
+                        offerId: String(offer._id),
+                        orderId: String(order._id),
+                        orderNumber: orderLabel,
+                        link: "delivery.html",
+                    },
                 }
             );
             push = res.sent;
@@ -313,12 +529,48 @@ async function broadcastNewOrder(order) {
                     if (pushedIds.has(String(entry.user))) entry.push = true;
                 }
             }
+            if (res.sent > 0) {
+                logDeliveryEvent("OFFER_PUSH_SENT", {
+                    offerId: String(offer._id),
+                    orderId: String(order._id),
+                    recipients: res.recipients || 0,
+                    subscriptions: res.sent,
+                    failed: res.failed,
+                    deactivated: res.deactivated,
+                });
+            } else {
+                // No live browser subscription is NOT a dispatch failure: the
+                // in-app notification already reached every partner and the offer
+                // stays claimable from their panel. Dead endpoints were already
+                // deactivated by pushController (404/410).
+                logDeliveryEvent("OFFER_PUSH_FAILED", {
+                    offerId: String(offer._id),
+                    orderId: String(order._id),
+                    recipients: 0,
+                    subscriptions: 0,
+                    deactivated: res.deactivated,
+                    reason: res.deactivated > 0 ? "SUBSCRIPTION_GONE" : "NO_ACTIVE_SUBSCRIPTION",
+                });
+            }
         } catch (e) {
             await logWarn("offer-push", e);
+            logDeliveryEvent("OFFER_PUSH_FAILED", {
+                offerId: String(offer._id),
+                orderId: String(order._id),
+                reason: "PUSH_ERROR",
+            });
         }
 
         await offer.save();
-        return { broadcast: true, offerId: String(offer._id), partners: candidates.length, inApp: inApp, push: push, ttlSeconds: ttl };
+        return {
+            broadcast: true,
+            offerId: String(offer._id),
+            round: round,
+            partners: candidates.length,
+            inApp: inApp,
+            push: push,
+            ttlSeconds: ttl,
+        };
     } catch (e) {
         await logWarn("broadcast-new-order", e);
         return { broadcast: false, reason: "error" };
@@ -375,14 +627,15 @@ async function sweepExpiredOffers(limit) {
                 const partner = await pickNearestOnlinePartner(order, true);
                 if (partner) {
                     const km = distanceKm(partner, order);
-                    const assignment = await createAssignment({
+                    const created = await createAssignmentResult({
                         order: order,
                         partner: partner,
                         byUserId: null,
                         mode: "auto",
                         distanceKmValue: km,
                     });
-                    if (assignment) {
+                    if (created.ok) {
+                        const assignment = created.assignment;
                         await DeliveryOffer.updateOne(
                             { _id: offer._id },
                             {
@@ -397,21 +650,21 @@ async function sweepExpiredOffers(limit) {
                             }
                         );
                         notifyOfferClosed(offer, partner, order).catch(function () { /* non-fatal */ });
+                        logDeliveryEvent("OFFER_WON", {
+                            offerId: String(offer._id),
+                            orderId: String(order._id),
+                            partnerId: String(partner._id),
+                            claimSource: "auto",
+                        });
                         out.autoAssigned += 1;
                         continue;
                     }
-                    // The dispatch lost the race: a partner's manual claim (or an
-                    // admin assignment) already owns this order. Close the offer
-                    // instead of re-opening it, so the order never keeps being
-                    // offered to partners it is already assigned to, and closed
-                    // orders never re-enter the pipeline.
-                    const won = await DeliveryAssignment.findOne({
-                        order: order._id,
-                        status: { $in: ["ASSIGNED", "ACCEPTED", "PICKED_UP", "EN_ROUTE"] },
-                    })
-                        .select("_id")
-                        .lean();
-                    if (won) {
+                    // The dispatch lost the race (E11000 from the unique index, or
+                    // the order was already assigned): close the offer instead of
+                    // re-opening it, so the order never keeps being offered to
+                    // partners it is already assigned to, and closed orders never
+                    // re-enter the pipeline.
+                    if (created.reason === "ORDER_ALREADY_ASSIGNED" || created.reason === "ORDER_CLOSED") {
                         await DeliveryOffer.updateOne(
                             { _id: offer._id },
                             { $set: { status: "CANCELLED", claimSource: "raced" } }
@@ -428,10 +681,57 @@ async function sweepExpiredOffers(limit) {
                 }
             }
 
-            // The claim window closed with no partner: escalate to the admin so
-            // no order is ever silently stranded.
+            // The claim window closed with nobody claiming it. Before bothering a
+            // human, re-check the fleet and broadcast a fresh round - but only
+            // while the order is still inside its bounded round budget, so a
+            // single unservable address can never re-ring every partner's phone
+            // forever. Past the budget the order escalates to the admin.
+            const maxRounds = Math.min(Number(settings.deliveryMaxDispatchRounds) || 3, 5);
+            const usedRounds = Number(offer.round) || 1;
+            if (usedRounds < maxRounds) {
+                const stillOpen = await DeliveryAssignment.findOne({
+                    order: order._id,
+                    status: { $in: ACTIVE_STATUSES },
+                })
+                    .select("_id")
+                    .lean();
+                if (stillOpen) {
+                    // A partner won it in the meantime: nothing left to retry.
+                    await DeliveryOffer.updateOne(
+                        { _id: offer._id },
+                        { $set: { status: "CANCELLED", claimSource: "raced" } }
+                    );
+                    continue;
+                }
+                const retry = await broadcastNewOrder(order, { trigger: "auto_retry" });
+                out.retried += 1;
+                logDeliveryEvent("AUTO_DISPATCH_RETRY", {
+                    orderId: String(order._id),
+                    orderNumber: order.orderNumber || "",
+                    offerId: String(offer._id),
+                    round: usedRounds,
+                    nextRound: usedRounds + 1,
+                    maxRounds: maxRounds,
+                    result: retry && retry.broadcast ? "re-broadcast" : String((retry && retry.reason) || "skipped"),
+                });
+                // The retry either opened a new claim window or decided it could
+                // not; either way this offer is finished.
+                await DeliveryOffer.updateOne({ _id: offer._id }, { $set: { status: "EXPIRED" } });
+                continue;
+            }
+
+            // Round budget spent: escalate to the admin so no order is ever
+            // silently stranded.
             await DeliveryOffer.updateOne({ _id: offer._id }, { $set: { status: "EXPIRED" } });
             out.escalated += 1;
+            logDeliveryEvent("OFFER_EXPIRED", {
+                offerId: String(offer._id),
+                orderId: String(order._id),
+                orderNumber: order.orderNumber || "",
+                round: usedRounds,
+                maxRounds: maxRounds,
+                outcome: "ESCALATED",
+            });
             try {
                 await notificationController.notifyRole("admin", {
                     type: "delivery_unclaimed",
@@ -457,37 +757,17 @@ async function sweepExpiredOffers(limit) {
 }
 
 // Nearest approved + online partner that has sent a GPS ping inside the
-// configured freshness window. requireFreshLocation is used by auto-assign:
-// a partner who never shares location cannot be dispatched automatically, even
-// though they can still accept an offer manually.
+// configured freshness window. Eligibility comes from the shared
+// getAvailableDeliveryPartners() so this auto-picker can never hand an order to
+// somebody the broadcast would have considered ineligible.
 async function pickNearestOnlinePartner(order, requireFreshLocation) {
-    const candidates = await User.find({
-        role: "delivery",
-        partnerStatus: "approved",
-        isAvailable: true,
-    })
-        .select("_id name email phone lastLat lastLng lastLocationAt")
-        .lean();
+    const candidates = await getAvailableDeliveryPartners({
+        orderId: order ? order._id : null,
+        requireFreshLocation: requireFreshLocation,
+    });
     if (!candidates.length) return null;
 
-    const activeIds = new Set(
-        (await DeliveryAssignment.find({
-            deliveryUser: { $in: candidates.map(function (c) { return c._id; }) },
-            status: { $in: ["ASSIGNED", "ACCEPTED", "PICKED_UP", "EN_ROUTE"] },
-        })
-            .select("deliveryUser")
-            .lean()).map(function (a) { return String(a.deliveryUser); })
-    );
-
-    let pool = candidates.filter(function (c) { return !activeIds.has(String(c._id)); });
-    if (requireFreshLocation) {
-        const opsSettings = await Settings.getSettings();
-        const fresh = pool.filter(function (c) { return hasFreshLocation(c, opsSettings.deliveryStaleMinutes); });
-        if (!fresh.length) return null;
-        pool = fresh;
-    }
-
-    const ranked = pool
+    const ranked = candidates
         .map(function (c) { return { partner: c, km: distanceKm(c, order) }; })
         .sort(function (a, b) {
             const ak = Number.isFinite(a.km) ? a.km : Number.MAX_SAFE_INTEGER;
@@ -682,21 +962,67 @@ exports.listOpenOffers = async (req, res) => {
     }
 };
 
-// POST /api/delivery-ops/offers/:id/claim - first come, first served.
-exports.claimOffer = async (req, res) => {
+// POST /api/delivery/offers/:id/accept  (and its alias
+// POST /api/delivery-ops/offers/:id/claim) - FIRST ACCEPT WINS.
+//
+// Three independent locks stand between a partner's tap and a second partner on
+// the same order, in this order:
+//   1. the offer itself: an atomic findOneAndUpdate that only matches a still
+//      OPEN, unexpired offer that this partner was actually notified about and
+//      has not declined - so partner A can never accept partner B's offer, and
+//      only one partner can flip a given offer;
+//   2. the order: the partial unique index one_active_assignment_per_order makes
+//      MongoDB reject a second ACTIVE assignment, which is what decides a race
+//      between two partners on DIFFERENT offers of the same order (possible
+//      after an auto-retry round);
+//   3. the loser is told exactly why, and every other open offer is closed so
+//      the rest of the fleet stops ringing for an order that is already taken.
+//
+// Identity comes from the verified JWT only. partnerId, role and order
+// ownership in the request body are never read.
+exports.acceptOffer = async (req, res) => {
     try {
         if (!isValidObjectId(req.params.id)) {
-            return res.status(400).json({ success: false, message: "Invalid offer id" });
+            return res.status(400).json({ success: false, assigned: false, reason: "INVALID_OFFER_ID", message: "Invalid offer id" });
         }
         const user = await User.findById(req.user._id);
-        if (!user) return res.status(404).json({ success: false, message: "User not found" });
+        if (!user) return res.status(404).json({ success: false, assigned: false, reason: "USER_NOT_FOUND", message: "User not found" });
         if (user.partnerStatus !== "approved" || user.role !== "delivery") {
-            return res.status(403).json({ success: false, message: "Only approved delivery partners can claim orders." });
+            return res.status(403).json({ success: false, assigned: false, reason: "NOT_A_DELIVERY_PARTNER", message: "Only approved delivery partners can claim orders." });
         }
 
-        // Atomic: the first writer wins, everyone else gets 409. A partner who
-        // already declined this order is out of the running (same rule the feed
-        // uses), so a stale page cannot claim what they passed on.
+        logDeliveryEvent("OFFER_ACCEPT_ATTEMPT", { offerId: String(req.params.id), partnerId: String(user._id) });
+
+        // Fast, non-destructive pre-check. Purely an optimisation for the common
+        // case: it spares the loser a pointless claim and decides nothing on its
+        // own, because the two locks below are what actually arbitrate.
+        const peek = await DeliveryOffer.findById(req.params.id).select("order status expiresAt").lean();
+        if (peek) {
+            const alreadyTaken = await DeliveryAssignment.findOne({
+                order: peek.order,
+                status: { $in: ACTIVE_STATUSES },
+            })
+                .select("_id deliveryUser")
+                .lean();
+            if (alreadyTaken) {
+                logDeliveryEvent("OFFER_LOST", {
+                    offerId: String(req.params.id),
+                    orderId: String(peek.order),
+                    partnerId: String(user._id),
+                    reason: "ORDER_ALREADY_ASSIGNED",
+                });
+                return res.status(409).json({
+                    success: false,
+                    assigned: false,
+                    reason: "ORDER_ALREADY_ASSIGNED",
+                    message: "Order already picked by another delivery partner.",
+                });
+            }
+        }
+
+        // LOCK 1 - atomic single-winner claim of the offer. A partner who already
+        // declined this order is out of the running (same rule the feed uses), so
+        // a stale page cannot claim what they passed on.
         const offer = await DeliveryOffer.findOneAndUpdate(
             {
                 _id: req.params.id,
@@ -709,42 +1035,120 @@ exports.claimOffer = async (req, res) => {
             { new: true }
         );
         if (!offer) {
-            return res.status(409).json({ success: false, message: "This order was already taken or the window closed." });
+            // Expired, already claimed, or never offered to this partner. Work
+            // out which, so the partner gets an honest message instead of a
+            // generic refusal.
+            const peek = await DeliveryOffer.findById(req.params.id).lean();
+            let reason = "OFFER_UNAVAILABLE";
+            let message = "This order was already taken or the window closed.";
+            if (!peek) {
+                reason = "OFFER_NOT_FOUND";
+                message = "Offer not found.";
+            } else if (String(peek.claimedBy || "") === String(user._id)) {
+                // Same partner tapping twice: they already own it.
+                return res.json({
+                    success: true,
+                    assigned: true,
+                    alreadyAccepted: true,
+                    orderId: String(peek.order),
+                    status: "ASSIGNED",
+                    offerId: String(peek._id),
+                    message: "You already accepted this order.",
+                });
+            } else if (peek.status === "OPEN" && !(peek.notified || []).some(function (n) { return String(n.user) === String(user._id); })) {
+                reason = "OFFER_NOT_ASSIGNED_TO_YOU";
+                message = "This offer was not sent to you.";
+            } else if (peek.status === "OPEN" && new Date(peek.expiresAt).getTime() <= Date.now()) {
+                reason = "OFFER_EXPIRED";
+                message = "This offer expired before you accepted it.";
+            }
+            logDeliveryEvent("OFFER_LOST", {
+                offerId: String(req.params.id),
+                partnerId: String(user._id),
+                reason: reason,
+            });
+            return res.status(409).json({ success: false, assigned: false, reason: reason, message: message });
         }
 
         const order = await Order.findById(offer.order);
         if (!order) {
             await DeliveryOffer.updateOne({ _id: offer._id }, { $set: { status: "CANCELLED" } });
-            return res.status(404).json({ success: false, message: "Order no longer exists." });
+            return res.status(404).json({ success: false, assigned: false, reason: "ORDER_NOT_FOUND", message: "Order no longer exists." });
         }
 
         const km = distanceKm(user, order);
-        let assignment;
+        let created;
         try {
-            assignment = await createAssignment({ order: order, partner: user, byUserId: user._id, mode: "claim", distanceKmValue: km });
+            created = await createAssignmentResult({ order: order, partner: user, byUserId: user._id, mode: "claim", distanceKmValue: km });
         } catch (e) {
-            // Assignment failed: hand the offer back so the order is not lost.
+            // Something unexpected went wrong: hand the offer back so the order
+            // is not stranded, then surface the error.
             await DeliveryOffer.updateOne(
-                { _id: offer._id },
-                { $set: { status: "OPEN", claimedBy: null, claimedAt: null, claimSource: "partner", expiresHandledAt: null }, $unset: { expiresHandledAt: 1 } }
+                { _id: offer._id, status: "CLAIMED" },
+                { $set: { status: "OPEN", claimedBy: null, claimedAt: null, claimSource: "partner" }, $unset: { expiresHandledAt: 1 } }
             );
             throw e;
         }
-        if (!assignment) {
-            // Someone else already holds an active assignment for this order.
-            await DeliveryOffer.updateOne({ _id: offer._id }, { $set: { status: "ASSIGNED" } });
-            return res.status(409).json({ success: false, message: "This order is already assigned to another partner." });
+
+        if (!created.ok) {
+            // LOCK 2 decided against us: somebody else owns this order now
+            // (pre-check miss, or the unique index rejected a concurrent insert).
+            await DeliveryOffer.updateOne({ _id: offer._id }, { $set: { status: "CANCELLED", claimSource: "raced" } });
+            logDeliveryEvent("OFFER_LOST", {
+                offerId: String(offer._id),
+                orderId: String(order._id),
+                partnerId: String(user._id),
+                reason: created.reason,
+            });
+            return res.status(409).json({
+                success: false,
+                assigned: false,
+                reason: created.reason === "ORDER_CLOSED" ? "ORDER_CLOSED" : "ORDER_ALREADY_ASSIGNED",
+                message: "Order already picked by another delivery partner.",
+            });
         }
 
-        await DeliveryOffer.updateOne({ _id: offer._id }, { $set: { assignment: assignment._id, distanceKm: Number.isFinite(km) ? km : null } });
+        const assignment = created.assignment;
+        await DeliveryOffer.updateOne(
+            { _id: offer._id },
+            { $set: { assignment: assignment._id, distanceKm: Number.isFinite(km) ? km : null } }
+        );
+        // LOCK 3 - close every other live offer for this order so the rest of the
+        // fleet stops ringing their phones for something that is already taken.
+        const closed = await DeliveryOffer.updateMany(
+            { order: order._id, status: "OPEN", _id: { $ne: offer._id } },
+            { $set: { status: "CANCELLED", claimSource: "raced" } }
+        );
         // The rest of the fleet should stop ringing their phones for this order.
         notifyOfferClosed(offer, user, order).catch(function () { /* non-fatal */ });
 
-        return res.json({ success: true, message: "Order accepted. Collect the OTP from the customer at delivery.", assignment: assignment, offerId: String(offer._id) });
+        logDeliveryEvent("OFFER_WON", {
+            offerId: String(offer._id),
+            orderId: String(order._id),
+            orderNumber: order.orderNumber || "",
+            partnerId: String(user._id),
+            claimSource: "partner",
+            rivalsClosed: closed.modifiedCount || 0,
+        });
+
+        return res.json({
+            success: true,
+            assigned: true,
+            orderId: String(order._id),
+            status: "ASSIGNED",
+            offerId: String(offer._id),
+            assignmentId: String(assignment._id),
+            message: "Order accepted. Collect the OTP from the customer at delivery.",
+            assignment: assignment,
+        });
     } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
+        return res.status(500).json({ success: false, assigned: false, reason: "SERVER_ERROR", message: e.message });
     }
 };
+
+// Back-compat alias: the original partner-panel endpoint now runs the exact same
+// atomic accept path, so the two routes can never behave differently.
+exports.claimOffer = exports.acceptOffer;
 
 // Tell everyone else who was notified that the order is gone.
 async function notifyOfferClosed(offer, winner, order) {
@@ -755,8 +1159,8 @@ async function notifyOfferClosed(offer, winner, order) {
         if (!others.length) return;
         await notificationController.notifyBase(winner._id, {
             type: "delivery_offer_closed",
-            title: "You have this delivery",
-            message: "Open Delivery Partner Panel to start the drop.",
+            title: "Order assigned to you.",
+            message: "You won order " + (order.orderNumber || "") + ". Start the pickup from your Delivery Panel.",
             dedupeKey: "offer_closed:" + String(offer._id),
             data: { link: "delivery.html" },
             push: false,
@@ -765,7 +1169,7 @@ async function notifyOfferClosed(offer, winner, order) {
             await notificationController.notifyBase(id, {
                 type: "delivery_offer_closed",
                 title: "Order taken",
-                message: "Order " + (order.orderNumber || "") + " was accepted by another partner.",
+                message: "Order already picked by another delivery partner.",
                 dedupeKey: "offer_closed_others:" + String(offer._id) + ":" + id,
                 data: { link: "delivery.html" },
             }).catch(function () { });
@@ -1213,14 +1617,33 @@ exports.adminListPartners = async (req, res) => {
             };
         });
 
+        // ---- Auto-dispatch monitoring -------------------------------------
+        // Everything an operator needs to answer "did this order get dispatched
+        // on its own, to whom, when, and did it need a retry or a human?" -
+        // without joining tables by hand.
+        const assignmentByOrder = new Map();
+        for (const a of assignments) {
+            const key = a.order && a.order._id ? String(a.order._id) : "";
+            if (key && !assignmentByOrder.has(key)) assignmentByOrder.set(key, a);
+        }
+        const closedOffersByOrder = new Map();
+        for (const o of offers) {
+            if (o.status !== "EXPIRED" && o.status !== "CANCELLED") continue;
+            const key = String(o.order);
+            closedOffersByOrder.set(key, (closedOffersByOrder.get(key) || 0) + 1);
+        }
+        const maxRounds = Math.min(Number(settings.deliveryMaxDispatchRounds) || 3, 5);
+
         return res.json({
             success: true,
             partners: shapedPartners,
             applicants: shapedApplicants,
             offersToday: offers.map(function (o) {
+                const key = String(o.order);
+                const assignment = assignmentByOrder.get(key) || null;
                 return {
                     _id: String(o._id),
-                    orderId: String(o.order),
+                    orderId: key,
                     status: o.status,
                     mode: o.mode,
                     round: o.round,
@@ -1230,6 +1653,16 @@ exports.adminListPartners = async (req, res) => {
                     claimSource: o.claimSource,
                     createdAt: o.createdAt,
                     expiresAt: o.expiresAt,
+                    // --- auto-dispatch status ---
+                    autoDispatch: o.mode === "broadcast",
+                    assignedAt: assignment ? assignment.assignedAt : null,
+                    assignMode: assignment ? assignment.assignMode : null,
+                    deliveryStatus: assignment ? assignment.status : null,
+                    deliveredAt: assignment ? assignment.deliveredAt : null,
+                    closedOffers: closedOffersByOrder.get(key) || 0,
+                    retries: Math.max(0, (Number(o.round) || 1) - 1),
+                    maxRounds: maxRounds,
+                    retryExhausted: (Number(o.round) || 1) >= maxRounds && !assignment,
                 };
             }),
             ops: {
@@ -1239,6 +1672,7 @@ exports.adminListPartners = async (req, res) => {
                 autoAssignDelaySeconds: Number(settings.deliveryAutoAssignDelaySeconds) || 90,
                 maxOtpReissue: Number(settings.deliveryMaxOtpReissue),
                 staleMinutes: Number(settings.deliveryStaleMinutes) || 15,
+                maxDispatchRounds: maxRounds,
             },
         });
     } catch (e) {
@@ -1489,6 +1923,7 @@ exports.adminGetOpsSettings = async (req, res) => {
                 autoAssignDelaySeconds: Number(s.deliveryAutoAssignDelaySeconds),
                 maxOtpReissue: Number(s.deliveryMaxOtpReissue),
                 staleMinutes: Number(s.deliveryStaleMinutes),
+                maxDispatchRounds: Number(s.deliveryMaxDispatchRounds) || 3,
             },
         });
     } catch (e) {
@@ -1531,6 +1966,13 @@ exports.adminUpdateOpsSettings = async (req, res) => {
             }
             s.deliveryStaleMinutes = Math.round(n);
         }
+        if (body.maxDispatchRounds != null) {
+            const n = Number(body.maxDispatchRounds);
+            if (!Number.isFinite(n) || n < 1 || n > 5) {
+                return res.status(400).json({ success: false, message: "maxDispatchRounds must be between 1 and 5." });
+            }
+            s.deliveryMaxDispatchRounds = Math.round(n);
+        }
         await s.save();
         return res.json({ success: true, message: "Delivery settings saved.", ops: {
             broadcastEnabled: s.deliveryBroadcastEnabled,
@@ -1539,6 +1981,7 @@ exports.adminUpdateOpsSettings = async (req, res) => {
             autoAssignDelaySeconds: s.deliveryAutoAssignDelaySeconds,
             maxOtpReissue: s.deliveryMaxOtpReissue,
             staleMinutes: s.deliveryStaleMinutes,
+            maxDispatchRounds: s.deliveryMaxDispatchRounds,
         } });
     } catch (e) {
         return res.status(500).json({ success: false, message: e.message });
@@ -1559,6 +2002,10 @@ exports.adminPrunePush = async (req, res) => {
 exports.broadcastNewOrder = broadcastNewOrder;
 exports.sweepExpiredOffers = sweepExpiredOffers;
 exports.createAssignment = createAssignment;
+exports.createAssignmentResult = createAssignmentResult;
+exports.getAvailableDeliveryPartners = getAvailableDeliveryPartners;
 exports.distanceKm = distanceKm;
 exports.pickNearestOnlinePartner = pickNearestOnlinePartner;
+exports.logDeliveryEvent = logDeliveryEvent;
+exports.ACTIVE_STATUSES = ACTIVE_STATUSES;
 exports.DELIVERY_OTP_TTL_MS = DELIVERY_OTP_TTL_MS;

@@ -14,4 +14,4 @@ Disallow: /admin-partners.html
 
 # Private/authenticated pages are marked noindex in their own <head>; the
 # sitemap below lists only public, indexable pages.
-Sitemap: https://freshmart-store-jet.vercel.app/sitemap.xml
+Sitemap: https://freshmartstore.in/sitemap.xml

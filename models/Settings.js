@@ -44,7 +44,13 @@ const settingsSchema = new mongoose.Schema(
         // How many times a delivery OTP may be re-issued per assignment.
         deliveryMaxOtpReissue: { type: Number, default: 2, min: 0, max: 5 },
         // A partner with no location ping for this long is shown as stale.
-        deliveryStaleMinutes: { type: Number, default: 15, min: 1, max: 240 }
+        deliveryStaleMinutes: { type: Number, default: 15, min: 1, max: 240 },
+        // How many broadcast ROUNDS an order may get before the delivery
+        // operations give up and escalate to the admin. Bounded on purpose: a
+        // fresh round re-alerts every online partner's phone, so an unbounded
+        // retry would spam the whole fleet for one unservable address. 1 = the
+        // legacy behaviour (one broadcast, then escalate).
+        deliveryMaxDispatchRounds: { type: Number, default: 3, min: 1, max: 5 }
     },
     { timestamps: true }
 );
@@ -108,6 +114,10 @@ settingsSchema.statics.getSettings = async function () {
     }
     if (doc.deliveryStaleMinutes === undefined || doc.deliveryStaleMinutes === null) {
         doc.deliveryStaleMinutes = 15;
+        changed = true;
+    }
+    if (doc.deliveryMaxDispatchRounds === undefined || doc.deliveryMaxDispatchRounds === null) {
+        doc.deliveryMaxDispatchRounds = 3;
         changed = true;
     }
     if (changed) await doc.save();

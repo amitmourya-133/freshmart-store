@@ -105,6 +105,17 @@
   "routes": [
     {
       "src": "/(.*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.freshmartstore.in"
+        }
+      ],
+      "dest": "https://freshmartstore.in/$1",
+      "statusCode": 301
+    },
+    {
+      "src": "/(.*)",
       "continue": true,
       "headers": {
         "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.postalpincode.in https://nominatim.openstreetmap.org; font-src 'self'; frame-src 'self' https://www.openstreetmap.org; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; worker-src 'self'; manifest-src 'self'; upgrade-insecure-requests",

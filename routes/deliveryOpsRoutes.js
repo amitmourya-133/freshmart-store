@@ -34,8 +34,13 @@ router.get("/offers", protect, delivery, deliveryOps.listOpenOffers);
 // GET /api/delivery-ops/active - lean view of the runs in progress
 router.get("/active", protect, delivery, deliveryOps.activeBoard);
 
-// POST /api/delivery-ops/offers/:id/claim - atomic first-come claim
-router.post("/offers/:id/claim", protect, delivery, deliveryOps.claimOffer);
+// POST /api/delivery-ops/offers/:id/claim - atomic first-accept-wins claim.
+// POST /api/delivery/offers/:id/accept - the same operation under its canonical
+// name. Both are registered here (and mirrored in routes/deliveryRoutes.js) so
+// the partner panel and any future client use one implementation and can never
+// observe different behaviour from the two URLs.
+router.post("/offers/:id/claim", protect, delivery, deliveryOps.acceptOffer);
+router.post("/offers/:id/accept", protect, delivery, deliveryOps.acceptOffer);
 
 // POST /api/delivery-ops/offers/:id/decline - not taking this one
 router.post("/offers/:id/decline", protect, delivery, deliveryOps.declineOffer);

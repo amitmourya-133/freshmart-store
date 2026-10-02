@@ -1,4 +1,4 @@
-// ===============================
+﻿// ===============================
 // DELIVERY OPERATIONS — PARTNER PANEL
 // Adds the live layer on top of delivery.html: the incoming-offer feed
 // (Phase 2), the OTP re-issue / COD cash / signature tools (Phase 5), the
@@ -199,11 +199,11 @@
         if (state.claiming) return;
         state.claiming = true;
         toast("Claiming order…", "info");
-        request("/delivery-ops/offers/" + encodeURIComponent(offerId) + "/claim", { method: "POST" })
+        request("/delivery/offers/" + encodeURIComponent(offerId) + "/accept", { method: "POST" })
             .then(function (r) {
                 state.claiming = false;
                 var d = r.data || {};
-                if (d.success) {
+                if (d.success && d.assigned) {
                     toast(d.message || "Order accepted.", "success");
                     refreshAll();
                 } else {
@@ -211,9 +211,27 @@
                     loadOffers();
                 }
             })
-            .catch(function () {
+            .catch(function (err) {
                 state.claiming = false;
-                toast("Could not reach the server. Check your connection.", "error");
+                try {
+                    // Fallback to legacy claim endpoint for compatibility.
+                    request("/delivery-ops/offers/" + encodeURIComponent(offerId) + "/claim", { method: "POST" })
+                        .then(function (r2) {
+                            var d2 = r2.data || {};
+                            if (d2.success) {
+                                toast(d2.message || "Order accepted.", "success");
+                                refreshAll();
+                            } else {
+                                toast(d2.message || "This order was already taken.", "error");
+                                loadOffers();
+                            }
+                        })
+                        .catch(function () {
+                            toast("Could not reach the server. Check your connection.", "error");
+                        });
+                } catch (e) {
+                    toast("Could not reach the server. Check your connection.", "error");
+                }
             });
     }
 
@@ -264,6 +282,11 @@
 
             var buttons = [];
 
+            var nxt = nextStatusFor(a.status);
+            if (nxt) {
+                var label = nxt === 'PICKED_UP' ? 'Start pickup' : (nxt === 'EN_ROUTE' ? 'Start delivery' : (nxt === 'DELIVERED' ? 'Mark delivered' : nxt));
+                buttons.push('<button type="button" class="ops-btn ops-btn-accept status-btn" data-status="' + escapeHtml(nxt) + '" data-id="' + escapeHtml(a.assignmentId) + '">' + escapeHtml(label) + '</button>');
+            }
             // OTP re-issue: the customer says the code never arrived.
             var reissueLeft = Math.max(0, Number(a.otpReissueMax || 0) - Number(a.otpReissueCount || 0));
             var waiting = Number(a.otpReissueReadyInSeconds) || 0;
@@ -581,6 +604,18 @@
 
         // Offer accept / decline (delegated: the markup is re-rendered often).
         document.addEventListener("click", function (e) {
+        var t = e.target;
+        if (t.classList.contains("status-btn")) {
+            var st = t.getAttribute("data-status");
+            var aid = t.getAttribute("data-id");
+            if (aid && st) {
+                if (st === "DELIVERED") {
+                    if (!window.confirm("Mark this delivery as DELIVERED?")) return;
+                }
+                advanceDeliveryStatus(aid, st);
+            }
+            return;
+        }
             var t = e.target;
             if (!t || !t.getAttribute) return;
             var claimId = t.getAttribute("data-claim");
@@ -632,3 +667,14 @@
         loadHistory: loadHistory
     };
 })();
+
+function nextStatusFor(s) { if (s==='ACCEPTED') return 'PICKED_UP'; if (s==='PICKED_UP') return 'EN_ROUTE'; if (s==='EN_ROUTE') return 'DELIVERED'; return null; }
+
+function advanceDeliveryStatus(assignmentId, toStatus) {
+    if (!assignmentId || !toStatus) return;
+    request('/delivery/status/' + encodeURIComponent(assignmentId), { method: 'PUT', body: { status: toStatus } })
+        .then(function(r){ var d=r.data||{}; toast(d.message||(d.success?'Status updated.':'Could not update status.'), d.success?'success':'error'); if (d.success){ loadActive(); loadHistory(); } })
+        .catch(function(){ toast('Network error.','error'); });
+}
+
+

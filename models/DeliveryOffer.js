@@ -63,5 +63,9 @@ deliveryOfferSchema.index({ status: 1, expiresAt: 1 });
 deliveryOfferSchema.index({ status: 1, autoAssignAt: 1 });
 // A partner's open-offer feed.
 deliveryOfferSchema.index({ status: 1, notified: 1 });
+// Idempotent-dispatch guard: "does this order already have a live OPEN offer?"
+// is the first thing broadcastNewOrder asks, and the auto-retry path asks it
+// again per expired offer, so it runs on every single order.
+deliveryOfferSchema.index({ order: 1, status: 1, expiresAt: 1 });
 
 module.exports = mongoose.model("DeliveryOffer", deliveryOfferSchema);

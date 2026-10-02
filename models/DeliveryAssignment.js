@@ -141,4 +141,24 @@ const DeliveryAssignmentSchema = new mongoose.Schema(
 DeliveryAssignmentSchema.index({ order: 1 });
 DeliveryAssignmentSchema.index({ deliveryUser: 1, status: 1 });
 
+// FIRST-ACCEPT-WINS GUARANTEE (db-enforced).
+// The controller's read-then-write "is this order already assigned?" check is
+// advisory only: two partners can press Accept in the same millisecond and both
+// reads see nothing. This partial UNIQUE index is the real lock - MongoDB itself
+// refuses the second ACTIVE assignment for an order (error 11000), which is what
+// makes "never two partners on one order" true under concurrency rather than
+// merely likely. Terminal rows (DELIVERED / REJECTED / CANCELLED) are outside
+// the filter, so a completed delivery never blocks the next run and history is
+// never rewritten. Verified against MongoDB 8.0 ($in in partialFilterExpression).
+const ACTIVE_ASSIGNMENT_STATUSES = ["ASSIGNED", "ACCEPTED", "PICKED_UP", "EN_ROUTE"];
+DeliveryAssignmentSchema.index(
+    { order: 1 },
+    {
+        unique: true,
+        name: "one_active_assignment_per_order",
+        partialFilterExpression: { status: { $in: ACTIVE_ASSIGNMENT_STATUSES } },
+    }
+);
+DeliveryAssignmentSchema.statics.ACTIVE_STATUSES = ACTIVE_ASSIGNMENT_STATUSES;
+
 module.exports = mongoose.model("DeliveryAssignment", DeliveryAssignmentSchema);

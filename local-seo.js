@@ -29,7 +29,7 @@
                 "@context": "https://schema.org",
                 "@type": "GroceryStore",
                 "name": cfg.name || "FreshMart",
-                "url": cfg.url || "https://freshmart-store-jet.vercel.app/",
+                "url": cfg.url || "https://freshmartstore.in/",
                 "priceRange": "₹"
             };
             if (cfg.description) schema.description = cfg.description;

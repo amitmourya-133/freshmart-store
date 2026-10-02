@@ -59,6 +59,8 @@ app.set("trust proxy", 1);
 // deployments use *.vercel.app. Anything else (e.g. a malicious page trying
 // to call these APIs) gets no CORS headers.
 const ALLOWED_ORIGINS = [
+    "https://freshmartstore.in",
+    "https://www.freshmartstore.in",
     "https://freshmart-store-jet.vercel.app",
     "https://freshmart-store-git-main-alexa-65b1.vercel.app",
     "http://localhost:5000",

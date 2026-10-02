@@ -1,7 +1,7 @@
 {
   "_README": "Local SEO business facts. Keep every optional field empty (\"\") unless a real value is approved by the business owner. Fields are NEVER auto-guessed - anything set here is treated as verified for structured data. Replicate to production only with owner confirmation.",
   "name": "FreshMart",
-  "url": "https://freshmart-store-jet.vercel.app/",
+  "url": "https://freshmartstore.in/",
   "description": "Online fruit, vegetable and grocery store with fast home delivery.",
   "address": {
     "city": "",
