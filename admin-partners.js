@@ -220,17 +220,26 @@
         var host = document.getElementById("opsOfferRows");
         if (!host) return;
         if (!state.offers.length) {
-            host.innerHTML = '<tr><td colspan="8" class="ops-empty">No broadcasts in the last 24 hours.</td></tr>';
+            host.innerHTML = '<tr><td colspan="11" class="ops-empty">No broadcasts in the last 24 hours.</td></tr>';
             return;
         }
         host.innerHTML = state.offers.map(function (o) {
-            var re = o.status !== "ASSIGNED" && o.status !== "CLAIMED"
+            var settled = o.status === "ASSIGNED" || o.status === "CLAIMED" || o.assignedAt;
+            var re = !settled
                 ? '<button type="button" class="ops-btn ops-btn-ghost" data-rebroadcast="' + esc(o.orderId) + '">Re-alert partners</button>'
                 : "";
+            // Dispatch monitoring: who got it, when, and did it need retries.
+            var assigned = o.assignedAt
+                ? esc(new Date(o.assignedAt).toLocaleString())
+                : '<span class="ops-empty">unassigned</span>';
+            var retryCell = esc(o.retries) + "/" + esc(o.maxRounds) +
+                (o.retryExhausted ? ' <span class="ops-empty">exhausted</span>' : "");
             return "<tr><td>" + esc(o.orderId) + "</td><td>" + esc(o.round) + "</td><td>" + esc(o.status) +
                 "</td><td>" + esc(o.notified) + "</td><td>" + esc(o.declined) + "</td><td>" +
                 esc(o.claimSource || "-") + (o.claimedBy ? " (" + esc(String(o.claimedBy).slice(-6)) + ")" : "") +
-                "</td><td>" + esc(o.createdAt ? new Date(o.createdAt).toLocaleString() : "-") + "</td><td>" + re + "</td></tr>";
+                "</td><td>" + esc(o.deliveryStatus || "-") + "</td><td>" + esc(o.assignMode || "-") + "</td><td>" +
+                assigned + "</td><td>" + retryCell + "</td><td>" +
+                esc(o.createdAt ? new Date(o.createdAt).toLocaleString() : "-") + "</td><td>" + re + "</td></tr>";
         }).join("");
     }
 
