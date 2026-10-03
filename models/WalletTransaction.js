@@ -18,7 +18,19 @@ const walletTxSchema = new mongoose.Schema(
         type: {
             type: String,
             required: true,
-            enum: ["REFERRAL_REWARD", "CASHBACK", "REFUND", "WALLET_DEBIT", "ADMIN_CREDIT"],
+            enum: [
+                "REFERRAL_REWARD", "CASHBACK", "REFUND", "WALLET_DEBIT",
+                "ADMIN_CREDIT",
+                // SEC-06: the group-reward engine has always issued
+                // "GROUP_REWARD" (and now "GROUP_REWARD_REVERSAL"), but neither
+                // value was in this enum. Every credit therefore failed schema
+                // validation, the error was swallowed by the caller, and the
+                // group was still marked ACHIEVED - so customers silently never
+                // received their colony reward. Adding the two values is purely
+                // additive: no existing document changes, and documents that
+                // already carry other types are untouched.
+                "GROUP_REWARD", "GROUP_REWARD_REVERSAL"
+            ],
         },
         amount: { type: Number, required: true },
         balanceAfter: { type: Number, default: 0 },

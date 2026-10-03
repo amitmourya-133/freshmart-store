@@ -27,7 +27,7 @@ const AGE_WINDOW_MS = 180 * 24 * 60 * 60 * 1000;
 async function footprintFor(userId) {
     const days180 = new Date(Date.now() - AGE_WINDOW_MS);
     const rows = await Order.aggregate([
-        { $match: { user: require("mongoose").Types.ObjectId(String(userId)), createdAt: { $gte: days180 } } },
+        { $match: { user: new (require("mongoose").Types.ObjectId)(String(userId)), createdAt: { $gte: days180 } } },
         {
             $project: {
                 status: 1,

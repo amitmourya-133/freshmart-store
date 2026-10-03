@@ -8,6 +8,7 @@
 // ===============================
 
 const Review = require("../models/Review");
+const { safeErrorMessage } = require("../utils/safeError");
 const Product = require("../models/Product");
 const Order = require("../models/Order");
 const mongoose = require("mongoose");
@@ -80,7 +81,7 @@ exports.getProductReviews = async (req, res) => {
             .limit(50);
         res.json({ success: true, count: reviews.length, data: reviews });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -138,9 +139,9 @@ exports.addProductReview = async (req, res) => {
         res.status(201).json({ success: true, data: review, message: "Review submitted for approval" });
     } catch (error) {
         if (error && error.name === "ValidationError") {
-            return res.status(400).json({ success: false, message: error.message });
+            return res.status(400).json({ success: false, message: safeErrorMessage(error) });
         }
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -162,8 +163,8 @@ exports.uploadReviewPhoto = async (req, res) => {
         const url = await cloudinary.uploadImageBytes(parsed.buffer, parsed.type, REVIEWS_FOLDER);
         return res.json({ success: true, data: { url } });
     } catch (error) {
-        const status = (error && error.status) || 500;
-        return res.status(status).json({ success: false, message: (error && error.message) || "Upload failed" });
+        const status = (error && error.status) || 502;
+        return res.status(status).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -206,9 +207,9 @@ exports.updateOwnReview = async (req, res) => {
         res.json({ success: true, data: review, message: "Review updated and queued for approval" });
     } catch (error) {
         if (error && error.name === "ValidationError") {
-            return res.status(400).json({ success: false, message: error.message });
+            return res.status(400).json({ success: false, message: safeErrorMessage(error) });
         }
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -232,7 +233,7 @@ exports.deleteReview = async (req, res) => {
         await recomputeProductRating(productId);
         res.json({ success: true, message: "Review deleted" });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -256,7 +257,7 @@ exports.adminListReviews = async (req, res) => {
             .populate("user", "name email");
         res.json({ success: true, count: reviews.length, data: reviews });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -282,6 +283,6 @@ exports.adminModerateReview = async (req, res) => {
         await recomputeProductRating(review.product);
         res.json({ success: true, data: review });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };

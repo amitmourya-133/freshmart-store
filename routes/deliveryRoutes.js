@@ -1,10 +1,46 @@
 const express = require("express");
+const { safeErrorMessage } = require("../utils/safeError");
 const router = express.Router();
 const mongoose = require("mongoose");
 const DeliveryAssignment = require("../models/DeliveryAssignment");
 const User = require("../models/User");
 const Order = require("../models/Order");
 const { protect, admin, delivery } = require("../middleware/auth");
+const { rateLimit } = require("../utils/rateLimit");
+const { parseImageDataUri } = require("../utils/productImage");
+
+// PARTNER-SIDE RATE LIMITS (SEC-03c)
+// The delivery surface had no per-route limit of its own; only the app-wide
+// /api bucket covered it. Two concrete abuse cases:
+//   * /status carries the 4-digit delivery-OTP check. The 5-attempt cap is
+//     per ASSIGNMENT, so a partner holding many assignments could still make
+//     5 guesses on each; this caps the guessing rate as well.
+//   * /accept and /location are cheap write endpoints: without a limit one
+//     partner can spam the offer board and their location on every partner.
+//
+// Both are keyed on the authenticated partner ACCOUNT, not the IP: delivery
+// partners sit behind carrier NAT / office Wi-Fi / shared VPN egress, so an
+// IP-keyed bucket on these routes takes out an entire fleet at once (and an
+// attacker rotates IPs for free against a logged-in endpoint). `userKeyFrom`
+// falls back to the IP for anonymous callers.
+//
+// The OTP budget is applied only to the transition that actually checks a code.
+// /status also carries ACCEPTED / PICKED_UP / EN_ROUTE, which are not guesses -
+// a partner closing out a busy evening legitimately posts dozens of status
+// writes, and holding those to a guess-sized budget was locking out real
+// drivers (an IP-keyed 20/10min OTP bucket on the whole route).
+const OTP_GUESS_LIMIT = 20; // per account, per 10 min
+const PARTNER_WRITE_LIMIT = 600; // per account, per 10 min (~1/s sustained)
+const otpGuessLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: OTP_GUESS_LIMIT, keyBy: "user" });
+const partnerWriteLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: PARTNER_WRITE_LIMIT, keyBy: "user" });
+
+// Only DELIVERED carries the delivery OTP, so only DELIVERED spends the OTP
+// budget. Anything else passes straight through to the write limiter.
+function otpGuessBudget(req, res, next) {
+    const requested = String((req.body && req.body.status) || "").toUpperCase();
+    if (requested !== "DELIVERED") return next();
+    return otpGuessLimiter(req, res, next);
+}
 
 // Cloudinary image upload helper
 const { isCloudinaryConfigured, uploadImageBytes } = require("../utils/cloudinary");
@@ -32,8 +68,8 @@ const { completeOrderDelivery } = require("../utils/deliveryCompletion");
 // single atomic implementation behind both URLs. Identity comes from the JWT
 // (protect + delivery): no partnerId, role or ownership is ever read from the
 // request body.
-router.post("/offers/:id/accept", protect, delivery, deliveryOpsController.acceptOffer);
-router.post("/offers/:id/claim", protect, delivery, deliveryOpsController.acceptOffer);
+router.post("/offers/:id/accept", protect, delivery, partnerWriteLimiter, deliveryOpsController.acceptOffer);
+router.post("/offers/:id/claim", protect, delivery, partnerWriteLimiter, deliveryOpsController.acceptOffer);
 
 function isValidObjectId(id) {
     return mongoose.Types.ObjectId.isValid(String(id || ""));
@@ -196,7 +232,7 @@ router.post("/assign", protect, admin, async (req, res) => {
     } catch (error) {
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: safeErrorMessage(error),
         });
     }
 });
@@ -230,13 +266,13 @@ router.get("/today", protect, delivery, async (req, res) => {
     } catch (error) {
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: safeErrorMessage(error),
         });
     }
 });
 
 // PUT /api/delivery/accept — delivery partner accepts assignment
-router.put("/accept", protect, delivery, async (req, res) => {
+router.put("/accept", protect, delivery, partnerWriteLimiter, async (req, res) => {
     try {
         const { assignmentId } = req.body;
 
@@ -280,13 +316,13 @@ router.put("/accept", protect, delivery, async (req, res) => {
     } catch (error) {
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: safeErrorMessage(error),
         });
     }
 });
 
 // PUT /api/delivery/reject — delivery partner rejects assignment
-router.put("/reject", protect, delivery, async (req, res) => {
+router.put("/reject", protect, delivery, partnerWriteLimiter, async (req, res) => {
     try {
         const { assignmentId } = req.body;
 
@@ -322,7 +358,7 @@ router.put("/reject", protect, delivery, async (req, res) => {
     } catch (error) {
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: safeErrorMessage(error),
         });
     }
 });
@@ -330,7 +366,7 @@ router.put("/reject", protect, delivery, async (req, res) => {
 // PUT /api/delivery/status — update delivery status (forward-only transitions)
 // DELIVERED additionally requires the customer OTP (server-side verification,
 // limited attempts, expiry, single-use) and advances order/payment for COD only.
-router.put("/status", protect, delivery, async (req, res) => {
+router.put("/status", protect, delivery, otpGuessBudget, partnerWriteLimiter, async (req, res) => {
     try {
         const { assignmentId, status, otp } = req.body;
 
@@ -505,9 +541,12 @@ router.put("/status", protect, delivery, async (req, res) => {
             assignment,
         });
     } catch (error) {
-        return res.status(500).json({
+        // SEC-07: completeOrderDelivery raises a 409 for a cancelled order, so
+        // the status/code have to travel with the message instead of being
+        // flattened into a generic 500.
+        return res.status(safeErrorStatus(error)).json({
             success: false,
-            message: error.message,
+            message: safeErrorMessage(error),
         });
     }
 });
@@ -567,7 +606,7 @@ router.get("/earnings", protect, delivery, async (req, res) => {
     } catch (error) {
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: safeErrorMessage(error),
         });
     }
 });
@@ -576,11 +615,11 @@ router.get("/earnings", protect, delivery, async (req, res) => {
 // Delegates to the delivery-operations controller so the break reason, the
 // partnerStatus gate and the "share your location" hint behave identically
 // here and on /api/delivery-ops/availability.
-router.put("/availability", protect, delivery, deliveryOpsController.setAvailability);
+router.put("/availability", protect, delivery, partnerWriteLimiter, deliveryOpsController.setAvailability);
 
 // PUT /api/delivery/location — delivery partner shares a real device location
 // (used for live tracking; never fabricated server-side).
-router.put("/location", protect, delivery, async (req, res) => {
+router.put("/location", protect, delivery, partnerWriteLimiter, async (req, res) => {
     try {
         const { lat, lng } = req.body;
         const nLat = Number(lat);
@@ -614,7 +653,7 @@ router.put("/location", protect, delivery, async (req, res) => {
     } catch (error) {
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: safeErrorMessage(error),
         });
     }
 });
@@ -656,31 +695,18 @@ router.post(
                 });
             }
 
-            // Determine image type from data URI
-            const typeMatch = imageData.match(/^data:image\/([a-z]+);/i);
-            if (!typeMatch) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid image data URI format",
-                });
-            }
-            const type = typeMatch[1].toLowerCase();
-            if (type !== "png" && type !== "jpeg" && type !== "webp") {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid image type. Only PNG, JPEG, WebP are allowed",
-                });
-            }
-
-            // Validate file size (max 1.5MB decoded)
-            const decodedBuffer = Buffer.from(imageData.replace(/^data:image\/[a-z]+;base64,/i, ""), "base64");
-            const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024;
-            if (decodedBuffer.length > MAX_IMAGE_BYTES) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Image too large. Maximum size is 1.5 MB",
-                });
-            }
+// SEC-14: the type used to come from the DATA URI the client sent
+            // (`data:image/<type>;`) and the bytes were never inspected, so a
+            // partner could store any payload - HTML, SVG with script, anything
+            // - in the image bucket and have it rendered later under our CDN
+            // host. The product-upload path already sniffed magic bytes via
+            // parseImageDataUri; this endpoint now uses the same helper, so the
+            // authoritative type comes from the bytes and only PNG/JPEG/WEBP
+            // pass. parseImageDataUri throws a 400-style error for everything it
+            // rejects, which the catch below maps back to 400.
+            const parsed = parseImageDataUri(imageData);
+            const decodedBuffer = parsed.buffer;
+            const type = parsed.type;
 
             // Upload to Cloudinary
             const result = await uploadImageBytes(decodedBuffer, type);
@@ -694,11 +720,19 @@ router.post(
                 proofImage: result,
                 message: "Proof image uploaded successfully",
             });
-        } catch (error) {
-            console.error("Proof image upload error:", error.message);
-            return res.status(500).json({
+    } catch (error) {
+            // SEC-14: parseImageDataUri rejects non-images with status 400 -
+            // preserve that so the partner sees "unsupported format" instead of
+            // a generic 500. Cloudinary/network failures stay 500 with no
+            // internal detail.
+            const status = (error && error.status) || 502;
+            const message = status === 400 ? error.message : "Image upload failed. Please try again.";
+            if (status !== 400) {
+                require("../utils/logger").error({ ev: "proof_upload_failed", err: (error && error.message) || "unknown" });
+            }
+            return res.status(status === 400 ? 400 : 502).json({
                 success: false,
-                message: "Image upload failed. Please try again.",
+                message: message,
             });
         }
     }
@@ -737,7 +771,7 @@ router.get("/management/partners", protect, admin, async (req, res) => {
     } catch (error) {
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: safeErrorMessage(error),
         });
     }
 });
@@ -763,7 +797,7 @@ router.get(
         } catch (error) {
             return res.status(500).json({
                 success: false,
-                message: error.message,
+                message: safeErrorMessage(error),
             });
         }
     }

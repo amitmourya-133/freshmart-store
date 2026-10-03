@@ -15,11 +15,13 @@
 // ===============================
 
 const crypto = require("crypto");
+const { safeErrorMessage } = require("../utils/safeError");
 const Product = require("../models/Product");
 const Order = require("../models/Order");
 const User = require("../models/User");
 const notificationController = require("../controllers/notificationController");
 const analytics = require("../utils/analytics");
+const creditLease = require("../utils/creditLease");
 
 function round2(n) {
     return Math.round(n * 100) / 100;
@@ -37,7 +39,7 @@ function invoiceNumberFor() {
 // not cancelled/refunded).
 async function creditUsedFor(userId) {
     const rows = await Order.aggregate([
-        { $match: { user: require("mongoose").Types.ObjectId(String(userId)), orderType: "b2b", paymentMode: "credit", status: { $ne: "Cancelled" } } },
+        { $match: { user: new (require("mongoose").Types.ObjectId)(String(userId)), orderType: "b2b", paymentMode: "credit", status: { $ne: "Cancelled" } } },
         { $group: { _id: null, used: { $sum: { $ifNull: ["$total", 0] } }, open: { $sum: { $cond: [{ $in: ["$status", ["Delivered", "Completed", "Out for Delivery", "Confirmed", "Placed"]] }, { $ifNull: ["$total", 0] }, 0] } } } },
     ]);
     return rows.length ? rows[0] : { used: 0, open: 0 };
@@ -53,14 +55,33 @@ exports.b2bProducts = async (req, res) => {
             .lean();
         res.json({ success: true, count: products.length, data: products });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
 // Core builder used by both the HTTP handler and the recurring processor.
 // Throws { status, message }; returns { order, creditStatus } when the order
 // was persisted with stock reserved.
+//
+// SEC-05: the whole build runs inside a per-buyer credit lease. The credit
+// ceiling is an aggregate over existing orders, so "read the exposure, compare
+// it to the limit, then persist" was a genuine TOCTOU: N requests fired in
+// parallel all read the same exposure and all passed, letting a buyer commit
+// far more than their approved limit. Holding the lease makes the re-read and
+// the insert one critical section, while the order collection remains the only
+// source of truth (no cached counter to drift, nothing to migrate, and it works
+// without MongoDB transactions).
 async function buildB2BOrder(buyer, body, opts) {
+    const usesCredit = buyer.b2bApproved === true && Number(buyer.creditLimit) > 0;
+    if (!usesCredit) {
+        return buildB2BOrderUnlocked(buyer, body, opts);
+    }
+    return creditLease.withCreditLease(buyer._id, function () {
+        return buildB2BOrderUnlocked(buyer, body, opts);
+    });
+}
+
+async function buildB2BOrderUnlocked(buyer, body, opts) {
     const { items, poNumber, deliverySlot, deliveryAddress } = body;
     if (!Array.isArray(items) || !items.length) throw Object.assign(new Error("Order items are required"), { status: 400 });
 
@@ -189,8 +210,22 @@ exports.createB2BOrder = async (req, res) => {
         const result = await buildB2BOrder(req.user, req.body);
         res.status(201).json({ success: true, data: result.order, creditStatus: result.creditStatus });
     } catch (error) {
-        const status = error && error.status ? error.status : 400;
-        res.status(status).json({ success: false, message: error.message });
+        // A deliberate business refusal carries its own 4xx status (validation,
+        // stock, credit limit, lease busy). Anything else is an internal failure
+        // and used to be reported as 400 with no detail anywhere, which made a
+        // real bug indistinguishable from a customer mistake. It is now logged
+        // server-side and answered as 500.
+        const explicit = error && Number.isInteger(error.status);
+        const status = explicit && error.status >= 400 && error.status < 500 ? error.status : 500;
+        if (status === 500) {
+            require("../utils/logger").error({
+                ev: "b2b_order_failed",
+                userId: String(req.user && req.user._id),
+                err: (error && error.message) || "unknown",
+                kind: (error && error.name) || typeof error
+            });
+        }
+        res.status(status).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -216,7 +251,7 @@ exports.myB2BOrders = async (req, res) => {
             };
         }) });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -236,7 +271,7 @@ exports.myCredit = async (req, res) => {
             },
         });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -256,7 +291,7 @@ exports.scheduleRecurring = async (req, res) => {
         await order.save();
         res.json({ success: true, data: order });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -269,7 +304,7 @@ exports.cancelRecurring = async (req, res) => {
         await order.save();
         res.json({ success: true, data: order });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -300,7 +335,7 @@ exports.adminAccounts = async (req, res) => {
         }
         res.json({ success: true, count: out.length, data: out });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -337,7 +372,7 @@ exports.adminUpdateAccount = async (req, res) => {
         await user.save();
         res.json({ success: true, data: { _id: user._id, b2bApproved: user.b2bApproved, creditLimit: user.creditLimit, creditTermsDays: user.creditTermsDays } });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -377,7 +412,7 @@ exports.processRecurring = async (req, res) => {
         }
         res.json({ success: true, data: { scanned: due.length, created: created } });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 

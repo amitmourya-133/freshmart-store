@@ -39,6 +39,23 @@ async function findValidCoupon(rawCode, options) {
     if (coupon.usageLimit != null && coupon.usageLimit > 0 && coupon.usageCount >= coupon.usageLimit) {
         throw { status: 400, message: "This coupon has reached its usage limit" };
     }
+    // SEC-09: eligibility that needs an identity must not be skipped for guests.
+// Both restricted checks below were gated on `if (userId ...)`, so with no
+// session (guest checkout) a coupon that is capped per user or targeted at one
+// customer segment was accepted with NO verification at all: the cap was never
+// read and the segment check was skipped entirely. A guest could therefore
+// redeem a NEW_CUSTOMER-only code, or a 1-per-customer code, once per guest
+// session, forever.
+//
+// The rule is now explicit: a coupon carrying a restriction that can only be
+// checked against an account requires a signed-in customer. Coupons with
+// neither restriction (plain global codes) still work for guests.
+const needsIdentity = function (coupon) {
+    return !!coupon.segment || (coupon.perUserLimit != null && coupon.perUserLimit > 0);
+};
+if (!userId && needsIdentity(coupon)) {
+    throw { status: 400, message: "Please sign in to use this coupon" };
+}
     if (userId && coupon.perUserLimit != null && coupon.perUserLimit > 0) {
         const used = await couponUsedCount(coupon._id, userId);
         if (used >= coupon.perUserLimit) {

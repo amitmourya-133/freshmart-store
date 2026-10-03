@@ -7,6 +7,7 @@
 // ===============================
 
 const crypto = require("crypto");
+const { safeErrorMessage } = require("../utils/safeError");
 const mongoose = require("mongoose");
 const Order = require("../models/Order");
 const Product = require("../models/Product");
@@ -205,7 +206,7 @@ exports.createReturn = async function (req, res) {
 
         res.status(201).json({ success: true, data: rt });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -217,7 +218,7 @@ exports.listMyReturns = async function (req, res) {
         const returns = await ReturnRequest.find({ user: req.user._id }).sort({ createdAt: -1 });
         res.json({ success: true, count: returns.length, data: returns });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -240,7 +241,7 @@ exports.getReturn = async function (req, res) {
         }
         res.json({ success: true, data: rt });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -267,7 +268,7 @@ exports.cancelReturn = async function (req, res) {
         await rt.save();
         res.json({ success: true, data: rt });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -286,7 +287,7 @@ exports.adminListReturns = async function (req, res) {
             .populate("order", "orderNumber total paymentStatus status");
         res.json({ success: true, count: returns.length, data: returns });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -373,9 +374,9 @@ exports.adminUpdateReturnStatus = async function (req, res) {
         res.json({ success: true, data: rt });
     } catch (error) {
         if (error && error.name === "ValidationError") {
-            return res.status(400).json({ success: false, message: error.message });
+            return res.status(400).json({ success: false, message: safeErrorMessage(error) });
         }
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 

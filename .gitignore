@@ -20,6 +20,7 @@ Thumbs.db
 .idea/
 .vercel
 .env*
+!.env.example
 
 # Runtime files (never commit)
 push-subscriptions.json
@@ -40,3 +41,24 @@ subs.txt
 profile.txt
 auth.txt
 safecheck.txt
+
+# Credentials / private keys that must never reach the repo, whatever the name.
+# `.env*` above covers the dotenv variants; these are the non-dotenv shapes.
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+*service-account*.json
+*serviceaccount*.json
+firebase-adminsdk*.json
+google-services*.json
+id_rsa
+id_ed25519
+
+# Local scratch/temp state
+*.pid
+*.seed
+.cache/
+tmp/
+temp/

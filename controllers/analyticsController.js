@@ -7,6 +7,7 @@
 // ===============================
 
 const AnalyticsEvent = require("../models/AnalyticsEvent");
+const { safeErrorMessage } = require("../utils/safeError");
 const Order = require("../models/Order");
 const User = require("../models/User");
 const analytics = require("../utils/analytics");
@@ -159,6 +160,6 @@ exports.adminAnalytics = async (req, res) => {
             stockWaiting: stockInfo,
         });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };

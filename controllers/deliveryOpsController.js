@@ -20,6 +20,7 @@
 // ===============================
 
 const mongoose = require("mongoose");
+const { safeErrorMessage } = require("../utils/safeError");
 const User = require("../models/User");
 const Order = require("../models/Order");
 const DeliveryAssignment = require("../models/DeliveryAssignment");
@@ -823,7 +824,7 @@ exports.applyAsPartner = async (req, res) => {
 
         return res.json({ success: true, message: "Application submitted. An admin will review it.", partnerStatus: user.partnerStatus });
     } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(e) });
     }
 };
 
@@ -875,7 +876,7 @@ exports.myPartnerStatus = async (req, res) => {
             },
         });
     } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(e) });
     }
 };
 
@@ -906,7 +907,7 @@ exports.setAvailability = async (req, res) => {
             message: user.isAvailable ? "You are online. New orders will alert you." : "You are offline.",
         });
     } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(e) });
     }
 };
 
@@ -958,7 +959,7 @@ exports.listOpenOffers = async (req, res) => {
 
         return res.json({ success: true, offers: shaped, serverTime: now });
     } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(e) });
     }
 };
 
@@ -1142,7 +1143,7 @@ exports.acceptOffer = async (req, res) => {
             assignment: assignment,
         });
     } catch (e) {
-        return res.status(500).json({ success: false, assigned: false, reason: "SERVER_ERROR", message: e.message });
+        return res.status(500).json({ success: false, assigned: false, reason: "SERVER_ERROR", message: safeErrorMessage(e) });
     }
 };
 
@@ -1193,7 +1194,7 @@ exports.declineOffer = async (req, res) => {
         if (!offer) return res.status(404).json({ success: false, message: "Offer not found or already closed." });
         return res.json({ success: true, message: "Offer declined." });
     } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(e) });
     }
 };
 
@@ -1275,7 +1276,7 @@ exports.reissueOtp = async (req, res) => {
             remaining: max - assignment.otpReissueCount,
         });
     } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(e) });
     }
 };
 
@@ -1340,7 +1341,7 @@ exports.confirmCash = async (req, res) => {
                 : "Cash recorded. The difference will show in the day-end reconciliation.",
         });
     } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(e) });
     }
 };
 
@@ -1376,7 +1377,7 @@ exports.saveSignature = async (req, res) => {
         await assignment.save();
         return res.json({ success: true, message: "Signature saved.", signedAt: assignment.signatureAt });
     } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(e) });
     }
 };
 
@@ -1447,7 +1448,7 @@ exports.activeBoard = async (req, res) => {
             serverTime: new Date(),
         });
     } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(e) });
     }
 };
 
@@ -1506,7 +1507,7 @@ exports.myHistory = async (req, res) => {
             deliveries: rows,
         });
     } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(e) });
     }
 };
 
@@ -1676,7 +1677,7 @@ exports.adminListPartners = async (req, res) => {
             },
         });
     } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(e) });
     }
 };
 
@@ -1740,7 +1741,7 @@ exports.adminReviewPartner = async (req, res) => {
 
         return res.json({ success: true, partnerStatus: user.partnerStatus, role: user.role, message: "Partner updated." });
     } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(e) });
     }
 };
 
@@ -1798,7 +1799,7 @@ exports.adminForceAssign = async (req, res) => {
         }
         return res.json({ success: true, message: "Order assigned to " + (partner.name || "partner") + ".", assignment: assignment, offersClosed: openOffers.length });
     } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(e) });
     }
 };
 
@@ -1808,7 +1809,7 @@ exports.adminSweepOffers = async (req, res) => {
         const result = await sweepExpiredOffers(Number(req.body.limit) || 50);
         return res.json({ success: true, ...result });
     } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(e) });
     }
 };
 
@@ -1824,7 +1825,7 @@ exports.adminRebroadcast = async (req, res) => {
         const result = await broadcastNewOrder(order);
         return res.json({ success: true, broadcast: result });
     } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(e) });
     }
 };
 
@@ -1906,7 +1907,7 @@ exports.adminReconciliation = async (req, res) => {
             },
         });
     } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(e) });
     }
 };
 
@@ -1927,7 +1928,7 @@ exports.adminGetOpsSettings = async (req, res) => {
             },
         });
     } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(e) });
     }
 };
 
@@ -1984,7 +1985,7 @@ exports.adminUpdateOpsSettings = async (req, res) => {
             maxDispatchRounds: s.deliveryMaxDispatchRounds,
         } });
     } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(e) });
     }
 };
 
@@ -1994,7 +1995,7 @@ exports.adminPrunePush = async (req, res) => {
         const pruned = await pushController.pruneFlakySubscriptions(Number(req.body.maxFailures) || 25);
         return res.json({ success: true, pruned: pruned, message: pruned + " stale push subscription(s) deactivated." });
     } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(e) });
     }
 };
 

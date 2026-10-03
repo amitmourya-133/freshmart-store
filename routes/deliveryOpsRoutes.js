@@ -12,6 +12,16 @@
 
 const express = require("express");
 const router = express.Router();
+const { rateLimit } = require("../utils/rateLimit");
+// SEC-03c: partner application + ops writes were only covered by the app-wide
+// /api bucket. Applying as a partner is a public-facing form, so it gets its own
+// tight budget; the rest of the partner board is a normal write budget.
+// Keyed on the authenticated account (see utils/rateLimit.js userKeyFrom):
+// partners and staff share carrier NAT / office egress, so an IP-keyed bucket
+// here blocks a whole fleet or a whole office. `protect` runs before the
+// limiter on every route below, so the account is always available.
+const partnerApplyLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 5, keyBy: "user" });
+const opsWriteLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 600, keyBy: "user" });
 const { protect, admin, delivery } = require("../middleware/auth");
 const deliveryOps = require("../controllers/deliveryOpsController");
 
@@ -20,13 +30,13 @@ const deliveryOps = require("../controllers/deliveryOpsController");
 // ===============================
 
 // POST /api/delivery-ops/apply - apply to become a delivery partner
-router.post("/apply", protect, deliveryOps.applyAsPartner);
+router.post("/apply", protect, partnerApplyLimiter, deliveryOps.applyAsPartner);
 
 // GET /api/delivery-ops/me - my partner status, live counters and ops switches
 router.get("/me", protect, deliveryOps.myPartnerStatus);
 
 // PUT /api/delivery-ops/availability - go online/offline (with an optional break reason)
-router.put("/availability", protect, delivery, deliveryOps.setAvailability);
+router.put("/availability", protect, delivery, opsWriteLimiter, deliveryOps.setAvailability);
 
 // GET /api/delivery-ops/offers - open offers addressed to me, nearest first
 router.get("/offers", protect, delivery, deliveryOps.listOpenOffers);
@@ -39,20 +49,20 @@ router.get("/active", protect, delivery, deliveryOps.activeBoard);
 // name. Both are registered here (and mirrored in routes/deliveryRoutes.js) so
 // the partner panel and any future client use one implementation and can never
 // observe different behaviour from the two URLs.
-router.post("/offers/:id/claim", protect, delivery, deliveryOps.acceptOffer);
-router.post("/offers/:id/accept", protect, delivery, deliveryOps.acceptOffer);
+router.post("/offers/:id/claim", protect, delivery, opsWriteLimiter, deliveryOps.acceptOffer);
+router.post("/offers/:id/accept", protect, delivery, opsWriteLimiter, deliveryOps.acceptOffer);
 
 // POST /api/delivery-ops/offers/:id/decline - not taking this one
-router.post("/offers/:id/decline", protect, delivery, deliveryOps.declineOffer);
+router.post("/offers/:id/decline", protect, delivery, opsWriteLimiter, deliveryOps.declineOffer);
 
 // POST /api/delivery-ops/assignments/:id/otp/reissue - the customer lost the OTP
-router.post("/assignments/:id/otp/reissue", protect, delivery, deliveryOps.reissueOtp);
+router.post("/assignments/:id/otp/reissue", protect, delivery, opsWriteLimiter, deliveryOps.reissueOtp);
 
 // POST /api/delivery-ops/assignments/:id/cash - record COD cash collected
-router.post("/assignments/:id/cash", protect, delivery, deliveryOps.confirmCash);
+router.post("/assignments/:id/cash", protect, delivery, opsWriteLimiter, deliveryOps.confirmCash);
 
 // POST /api/delivery-ops/assignments/:id/signature - recipient sign-off
-router.post("/assignments/:id/signature", protect, delivery, deliveryOps.saveSignature);
+router.post("/assignments/:id/signature", protect, delivery, opsWriteLimiter, deliveryOps.saveSignature);
 
 // GET /api/delivery-ops/history - my completed drops + earnings/COD summary
 router.get("/history", protect, delivery, deliveryOps.myHistory);

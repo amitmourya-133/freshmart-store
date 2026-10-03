@@ -13,6 +13,7 @@
 // ===============================
 
 const Order = require("../models/Order");
+const { safeErrorMessage } = require("../utils/safeError");
 const Product = require("../models/Product");
 const Settings = require("../models/Settings");
 
@@ -148,6 +149,6 @@ exports.getDashboard = async (req, res) => {
             }
         });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };

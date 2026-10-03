@@ -6,6 +6,7 @@
 // ===============================
 
 const Coupon = require("../models/Coupon");
+const { safeErrorMessage } = require("../utils/safeError");
 const CouponUsage = require("../models/CouponUsage");
 const User = require("../models/User");
 const segments = require("../utils/segments");
@@ -102,9 +103,9 @@ exports.validateCoupon = async (req, res) => {
         });
     } catch (error) {
         if (error && error.status) {
-            return res.status(error.status).json({ success: false, message: error.message, data: { valid: false } });
+            return res.status(error.status).json({ success: false, message: safeErrorMessage(error), data: { valid: false } });
         }
-        res.status(400).json({ success: false, message: error.message, data: { valid: false } });
+        res.status(400).json({ success: false, message: safeErrorMessage(error), data: { valid: false } });
     }
 };
 
@@ -157,7 +158,7 @@ exports.listAvailableCoupons = async (req, res) => {
 
         res.json({ success: true, count: data.length, data: data });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -167,7 +168,7 @@ exports.segmentSummary = async (req, res) => {
         const summary = await segments.segmentCounts();
         res.json({ success: true, data: summary });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -198,7 +199,7 @@ exports.issueSegmentCoupon = async (req, res) => {
         res.status(201).json({ success: true, data: coupon, targetedSegment: coupon.segment });
     } catch (error) {
         if (error && error.code === 11000) return res.status(400).json({ success: false, message: "A coupon with this code already exists" });
-        res.status(400).json({ success: false, message: error.message });
+        res.status(400).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -252,7 +253,7 @@ exports.listCoupons = async (req, res) => {
 
         res.json({ success: true, count: data.length, data: data });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -271,12 +272,12 @@ exports.createCoupon = async (req, res) => {
         res.status(201).json({ success: true, data: coupon });
     } catch (error) {
         if (error && error.name === "ValidationError") {
-            return res.status(400).json({ success: false, message: error.message });
+            return res.status(400).json({ success: false, message: safeErrorMessage(error) });
         }
         if (error && error.code === 11000) {
             return res.status(400).json({ success: false, message: "A coupon with this code already exists" });
         }
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -304,12 +305,12 @@ exports.updateCoupon = async (req, res) => {
         res.json({ success: true, data: coupon });
     } catch (error) {
         if (error && error.name === "ValidationError") {
-            return res.status(400).json({ success: false, message: error.message });
+            return res.status(400).json({ success: false, message: safeErrorMessage(error) });
         }
         if (error && error.code === 11000) {
             return res.status(400).json({ success: false, message: "A coupon with this code already exists" });
         }
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -322,6 +323,6 @@ exports.deleteCoupon = async (req, res) => {
         }
         res.json({ success: true, message: "Coupon deleted", data: { id: coupon._id } });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };

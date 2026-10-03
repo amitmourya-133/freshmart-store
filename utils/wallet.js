@@ -17,6 +17,35 @@ async function getOrCreateWallet(userId) {
     );
 }
 
+// ATOMIC $inc that cannot race on the lazy wallet insert.
+//
+// The first credit for a user has to create the Wallet document, and the natural
+// way to write that is a single `findOneAndUpdate({user}, {$inc}, {upsert})`.
+// That is exactly where the money went missing: with `user` carrying a UNIQUE
+// index, N concurrent first-time credits are N concurrent upserts against the
+// same key. MongoDB resolves the insert race, but under real concurrency one
+// increment can be dropped from the returned/applied update while the ledger
+// row is still written - the customer is short one credit and the balance
+// silently disagrees with the ledger (observed: 25 concurrent ₹100 credits
+// produced a ₹2400 balance with 25 ledger rows).
+//
+// So existence and mutation are separated: create-if-missing first (the unique
+// index makes losing racers a harmless no-op), then apply a plain atomic $inc to
+// a document that is guaranteed to exist. A deleted-in-between wallet is
+// re-created and retried instead of losing the money.
+async function incrementWallet(userId, inc) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+        await getOrCreateWallet(userId);
+        const updated = await Wallet.findOneAndUpdate(
+            { user: userId },
+            Object.assign({ $inc: inc, $set: { lastActivityAt: new Date() } }),
+            { new: true }
+        );
+        if (updated) return updated;
+    }
+    throw new Error("Wallet update failed after retries");
+}
+
 // Credit a wallet with a positive amount. Pass referenceType/referenceId to
 // make the payment idempotent: a repeated credit for the same
 // (type, referenceId) returns the earlier transaction without double-paying.
@@ -36,8 +65,15 @@ async function credit({ userId, type, amount, referenceType, referenceId, descri
         }
     }
 
-    const wallet = await getOrCreateWallet(userId);
-    const nextBalance = Math.round((wallet.balance + money) * 100) / 100;
+    // ATOMIC CREDIT. This used to read `wallet.balance`, add to it in JS and
+    // `wallet.save()` the result. Two concurrent credits (a referral reward
+    // plus a cashback, or the same webhook delivered twice in parallel) both
+    // read the same starting balance, both wrote the same `nextBalance`, and
+    // one credit vanished - while BOTH ledger rows recorded the same
+    // `balanceAfter`. $inc lets MongoDB do the addition under the document lock,
+    // so the balance can never be lost and balanceAfter is always the real
+    // post-credit value.
+    const updated = await incrementWallet(userId, { balance: money, totalCredited: money });
 
     let tx;
     try {
@@ -45,7 +81,7 @@ async function credit({ userId, type, amount, referenceType, referenceId, descri
             user: userId,
             type: type,
             amount: money,
-            balanceAfter: nextBalance,
+            balanceAfter: updated.balance,
             referenceType: referenceType || null,
             referenceId: referenceId ? String(referenceId).slice(0, 120) : null,
             description: String(description || "").slice(0, 240),
@@ -53,19 +89,21 @@ async function credit({ userId, type, amount, referenceType, referenceId, descri
         });
     } catch (err) {
         // Unique (type, referenceId) race lost -> someone else already paid it.
+        // The $inc above already moved the money, so undo it here; otherwise
+        // the loser of the race would leave the balance inflated with no
+        // matching ledger row.
         if (err && err.code === 11000 && referenceType && referenceId) {
+            await Wallet.updateOne(
+                { user: userId },
+                { $inc: { balance: -money, totalCredited: -money } }
+            );
             const prior = await WalletTransaction.findOne({ type: type, referenceId: String(referenceId) });
             return { created: false, tx: prior || null, wallet: await getOrCreateWallet(userId) };
         }
         throw err;
     }
 
-    wallet.balance = nextBalance;
-    wallet.totalCredited = Math.round((wallet.totalCredited + money) * 100) / 100;
-    wallet.lastActivityAt = new Date();
-    await wallet.save();
-
-    return { created: true, tx, wallet };
+    return { created: true, tx, wallet: updated };
 }
 
 // Debit a wallet (e.g. WALLET_DEBIT). Fails if the balance is not sufficient.
@@ -105,9 +143,15 @@ async function debit({ userId, type, amount, referenceType, referenceId, descrip
             createdBy: createdBy || "system",
         });
     } catch (err) {
+        // Same compensation as credit(): the atomic $inc above already moved the
+        // money, so a lost unique-index race has to put it back.
         if (err && err.code === 11000 && referenceType && referenceId) {
+            await Wallet.updateOne(
+                { user: userId },
+                { $inc: { balance: money, totalDebited: -money } }
+            );
             const prior = await WalletTransaction.findOne({ type: type, referenceId: String(referenceId) });
-            return { created: false, tx: prior || null, wallet: updated };
+            return { created: false, tx: prior || null, wallet: await getOrCreateWallet(userId) };
         }
         throw err;
     }

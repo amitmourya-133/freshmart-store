@@ -3,6 +3,7 @@
 // ===============================
 
 const Cart = require("../models/Cart");
+const { safeErrorMessage } = require("../utils/safeError");
 const Product = require("../models/Product");
 const mongoose = require("mongoose");
 const { getMultFromWeight, round2 } = require("../utils/pricing");
@@ -77,7 +78,7 @@ exports.getCart = async (req, res) => {
         const items = (cart.items || []).map(toItemView).filter(Boolean);
         res.json({ success: true, data: { items } });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -138,7 +139,7 @@ exports.setCart = async (req, res) => {
         await cart.save();
         res.json({ success: true, data: { items } });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -196,7 +197,7 @@ exports.mergeCart = async (req, res) => {
         const items = ((populated && populated.items) || []).map(toItemView).filter(Boolean);
         res.json({ success: true, data: { items } });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -206,6 +207,6 @@ exports.clearCart = async (req, res) => {
         await Cart.findOneAndDelete({ user: req.user._id });
         res.json({ success: true });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };

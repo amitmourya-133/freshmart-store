@@ -8,6 +8,7 @@
 // ===============================
 
 const webpush = require("web-push");
+const { safeErrorMessage } = require("../utils/safeError");
 const PushSubscription = require("../models/PushSubscription");
 
 const pubKey = process.env.VAPID_PUBLIC_KEY;
@@ -77,7 +78,7 @@ exports.subscribe = async (req, res) => {
 
         return res.json({ success: true, message: "Subscribed to push notifications" });
     } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(e) });
     }
 };
 
@@ -93,7 +94,7 @@ exports.unsubscribe = async (req, res) => {
         }
         return res.json({ success: true, message: "Unsubscribed from push notifications" });
     } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(e) });
     }
 };
 
@@ -109,7 +110,7 @@ exports.getMyPushStatus = async (req, res) => {
         const active = await PushSubscription.countDocuments({ user: req.user._id, active: true });
         return res.json({ success: true, configured: isConfigured(), activeSubscriptions: active });
     } catch (e) {
-        return res.status(500).json({ success: false, message: e.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(e) });
     }
 };
 

@@ -3,6 +3,7 @@
 // ===============================
 
 const mongoose = require("mongoose");
+const { safeErrorMessage } = require("../utils/safeError");
 const GroupOrder = require("../models/GroupOrder");
 const notificationController = require("../controllers/notificationController");
 const analytics = require("../utils/analytics");
@@ -80,7 +81,7 @@ exports.createGroup = async (req, res) => {
 
         res.status(201).json({ success: true, data: publicGroup(group.toObject()) });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -106,7 +107,7 @@ exports.listGroups = async (req, res) => {
             data: groups.map(publicGroup),
         });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -118,7 +119,7 @@ exports.getGroup = async (req, res) => {
         if (!group) return res.status(404).json({ success: false, message: "Group not found" });
         res.json({ success: true, data: publicGroup(group) });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -141,7 +142,7 @@ exports.joinGroup = async (req, res) => {
 
         res.json({ success: true, message: "Joined group", data: publicGroup(group.toObject()) });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -155,7 +156,7 @@ exports.leaveGroup = async (req, res) => {
         await group.save();
         res.json({ success: true, message: "Left group", data: publicGroup(group.toObject()) });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -175,7 +176,7 @@ exports.orderForGroup = async (req, res) => {
         const orderController = require("./orderController");
         return await orderController.createOrder(req, res, { honorGroupId: true });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -190,7 +191,7 @@ exports.closeGroup = async (req, res) => {
         await group.save();
         res.json({ success: true, message: "Group closed", data: publicGroup(group.toObject()) });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -200,7 +201,7 @@ exports.sweep = async (req, res) => {
         const summary = await groupRewards.sweepGroups(Number(req.body.limit) || 50);
         res.json({ success: true, data: summary });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 

@@ -125,6 +125,28 @@ async function sendOtpEmail({ to, otp, purpose }) {
 // otherwise successful order.
 // ===============================
 
+// HTML escaping for every value interpolated into a mail body.
+// Customer-controlled text reaches these templates: a group title is typed by
+// any customer (POST /api/groups -> `title`), a return/cancellation reason is
+// free text, and product names are admin-editable. Interpolating those raw
+// into the HTML body meant a title of `<img src=x onerror=...>` was delivered
+// as live markup to a real inbox, and mail clients happily render it.
+// Escaping at the sink protects every caller at once, including the ones we
+// have not audited.
+function esc(value) {
+    return String(value == null ? "" : value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+// Strips CR/LF so a value can never inject extra mail headers.
+function headerSafe(value) {
+    return String(value == null ? "" : value).replace(/[\r\n]+/g, " ").trim();
+}
+
 function indianDate(d) {
     try {
         return new Date(d || Date.now()).toLocaleString("en-IN", {
@@ -148,7 +170,7 @@ function orderItemsHtml(order) {
     let rows = "";
     items.forEach(function (i) {
         const qty = i.quantity || 1;
-        const line = (i.name || "Item") + " × " + qty;
+        const line = esc(i.name || "Item") + " &times; " + esc(qty);
         rows += '<tr><td style="padding:6px 8px;border-bottom:1px solid #ececec;color:#333;">' + line + '</td>' +
             '<td style="padding:6px 8px;border-bottom:1px solid #ececec;color:#333;text-align:right;">' + inr((i.price || 0) * qty) + '</td></tr>';
     });
@@ -167,7 +189,7 @@ async function sendOrderEmail({ to, subject, title, bodyHtml, order }) {
         ["Discount", (order.discount || 0) > 0 ? "− " + inr(order.discount) : "—"],
         ["Total", inr(order.total)]
     ];
-    if (order.couponCode) totals.splice(totals.length - 1, 0, ["Coupon", order.couponCode]);
+if (order.couponCode) totals.splice(totals.length - 1, 0, ["Coupon", esc(order.couponCode)]);
     let totalsRows = "";
     totals.forEach(function (row) {
         totalsRows += '<tr><td style="padding:4px 8px;color:#666;font-size:14px;">' + row[0] + '</td>' +
@@ -177,18 +199,18 @@ async function sendOrderEmail({ to, subject, title, bodyHtml, order }) {
     const html =
         '<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;padding:24px;border:1px solid #e4e4e4;border-radius:12px;">' +
         '<h2 style="color:#159447;margin:0 0 4px;">🥬 FreshMart</h2>' +
-        '<p style="color:#333;font-size:15px;font-weight:bold;margin:10px 0 2px;">' + title + '</p>' +
-        '<p style="color:#777;font-size:13px;margin:0 0 12px;">Order ' + (order.orderNumber || "") +
-        (ref ? ' • Tracking: <strong>' + ref + '</strong>' : '') +
-        ' • ' + indianDate(order.createdAt) + '</p>' +
-        '<p style="color:#333;font-size:14px;">Status: <strong>' + (order.status || "Placed") + '</strong> &nbsp;•&nbsp; Payment: ' +
-        (order.payment || "Cash On Delivery") + ' (' + (order.paymentStatus || "PENDING") + ')</p>' +
+        '<p style="color:#333;font-size:15px;font-weight:bold;margin:10px 0 2px;">' + esc(title) + '</p>' +
+        '<p style="color:#777;font-size:13px;margin:0 0 12px;">Order ' + esc(order.orderNumber || "") +
+        (ref ? ' • Tracking: <strong>' + esc(ref) + '</strong>' : '') +
+        ' • ' + esc(indianDate(order.createdAt)) + '</p>' +
+        '<p style="color:#333;font-size:14px;">Status: <strong>' + esc(order.status || "Placed") + '</strong> &nbsp;•&nbsp; Payment: ' +
+        esc(order.payment || "Cash On Delivery") + ' (' + esc(order.paymentStatus || 'PENDING') + ')</p>' +
         orderItemsHtml(order) +
         '<table style="width:100%;border-collapse:collapse;">' + totalsRows + '</table>' +
-        bodyHtml +
+        (bodyHtml || "") +
         '<p style="color:#999;font-size:12px;margin-top:18px;">Need help? Reply to this email or visit the FreshMart store. Do not share your order reference with strangers.</p>' +
         '</div>';
-    return sendEmail({ to: recipient, subject: subject, html: html });
+    return sendEmail({ to: recipient, subject: headerSafe(subject), html: html });
 }
 
 // A. Order confirmation (sent after a successful order is persisted).
@@ -209,7 +231,7 @@ async function sendOrderStatusUpdate({ to, order, previousStatus }) {
         order: order,
         subject: "Order " + (order.status || "") + " - FreshMart #" + (order.orderNumber || ""),
         title: "🚚 Your order status has changed",
-        bodyHtml: '<p style="color:#333;font-size:14px;">Your order status changed from <strong>' + (previousStatus || "") + '</strong> to <strong>' + (order.status || "") + '</strong>.</p>' +
+        bodyHtml: '<p style="color:#333;font-size:14px;">Your order status changed from <strong>' + esc(previousStatus || "") + '</strong> to <strong>' + esc(order.status || "") + '</strong>.</p>' +
             '<p style="color:#666;font-size:13px;">You can track the latest status anytime on the FreshMart Orders page and the order tracking section.</p>'
     });
 }
@@ -236,18 +258,21 @@ async function sendDeliveryAssignment({ to, order, partnerName }) {
         '<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;padding:24px;border:1px solid #e4e4e4;border-radius:12px;">' +
         '<h2 style="color:#159447;margin:0 0 4px;">🥬 FreshMart</h2>' +
         '<p style="color:#333;font-size:15px;font-weight:bold;margin:10px 0 2px;">New Delivery Assignment</p>' +
-        '<p style="color:#777;font-size:13px;margin:0 0 12px;">Order <strong>' + (order.orderNumber || "") + '</strong> • ' + indianDate(order.createdAt) + '</p>' +
-        '<p style="color:#333;font-size:14px;">Hi ' + (partnerName || "Partner") + ', a new order has been assigned to you for delivery.</p>' +
+        '<p style="color:#777;font-size:13px;margin:0 0 12px;">Order <strong>' + esc(order.orderNumber || "") + '</strong> • ' + esc(indianDate(order.createdAt)) + '</p>' +
+        '<p style="color:#333;font-size:14px;">Hi ' + esc(partnerName || "Partner") + ', a new order has been assigned to you for delivery.</p>' +
         '<p style="color:#333;font-size:14px;margin-top:10px;">Delivery Address:<br><strong>' + escHtmlAddr(order.customer) + '</strong></p>' +
         (order.deliveryLocation && order.deliveryLocation.latitude != null
             ? '<p style="color:#666;font-size:13px;">GPS: ' + order.deliveryLocation.latitude.toFixed(6) + ', ' + order.deliveryLocation.longitude.toFixed(6) + '</p>'
             : '') +
-        '<p style="color:#666;font-size:13px;margin-top:10px;">Payment: ' + (order.payment || "Cash On Delivery") + ' • Total: <strong>' + inr(order.total) + '</strong></p>' +
+        '<p style="color:#666;font-size:13px;margin-top:10px;">Payment: ' + esc(order.payment || "Cash On Delivery") + ' • Total: <strong>' + inr(order.total) + '</strong></p>' +
         '<p style="color:#999;font-size:12px;margin-top:18px;">You will receive the delivery OTP from the customer at the time of delivery.</p>' +
         '</div>';
     return sendEmail({ to: recipient, subject: "New Delivery - FreshMart #" + (order.orderNumber || ""), html: html });
 }
 
+// Escapes the delivery address block. This is 100% customer-typed data (name,
+// address, city, landmark) and it is delivered to the delivery partner's inbox,
+// so it has to be escaped like any other untrusted value.
 function escHtmlAddr(c) {
     if (!c) return "";
     const parts = [
@@ -258,7 +283,7 @@ function escHtmlAddr(c) {
         c.state || "",
         c.pincode || ""
     ];
-    return parts.filter(Boolean).join(", ");
+    return esc(parts.filter(Boolean).join(", "));
 }
 
-module.exports = { sendOtpEmail, sendEmail, sendOrderConfirmation, sendOrderStatusUpdate, sendDeliveryConfirmation, sendDeliveryAssignment, smtpHint };
+module.exports = { sendOtpEmail, sendEmail, sendOrderConfirmation, sendOrderStatusUpdate, sendDeliveryConfirmation, sendDeliveryAssignment, smtpHint, esc };

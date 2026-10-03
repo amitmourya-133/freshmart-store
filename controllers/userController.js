@@ -3,6 +3,7 @@
 // ===============================
 
 const User = require("../models/User");
+const { safeErrorMessage } = require("../utils/safeError");
 const Order = require("../models/Order");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
@@ -296,7 +297,7 @@ exports.signup = async (req, res) => {
             message: "If an account exists for this email, an OTP has been sent. Please verify your email to complete signup."
         });
     } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+        res.status(400).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -355,7 +356,7 @@ setAuthCookie(req, res, user._id);
         }
         return res.status(429).json({ success: false, message: "Too many incorrect attempts. Request a new code." });
     } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+        res.status(400).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -386,7 +387,7 @@ exports.signupResendOtp = async (req, res) => {
 
         res.json({ success: true, message: "A new verification code has been sent to your email." });
     } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+        res.status(400).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -436,7 +437,7 @@ exports.login = async (req, res) => {
         if (wantsToken(req)) body.token = generateToken(user._id);
         res.json(body);
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -464,7 +465,7 @@ exports.forgotPasswordRequest = async (req, res) => {
 
         res.json({ success: true, message: "If an account exists for this email, an OTP has been sent." });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -502,7 +503,7 @@ exports.forgotPasswordVerify = async (req, res) => {
         }
         return res.status(429).json({ success: false, message: "Too many incorrect attempts. Request a new code." });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -532,7 +533,7 @@ exports.forgotPasswordResendOtp = async (req, res) => {
 
         res.json({ success: true, message: "A new OTP has been sent to your email." });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -560,7 +561,7 @@ exports.forgotPasswordReset = async (req, res) => {
 
         res.json({ success: true, message: "Your password has been reset. You can now log in with your new password." });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -578,7 +579,7 @@ exports.getMe = async (req, res) => {
         data.walletBalance = wallet ? Math.round(wallet.balance * 100) / 100 : 0;
         return res.json({ success: true, data });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -680,7 +681,7 @@ exports.updateMe = async (req, res) => {
     } catch (error) {
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: safeErrorMessage(error),
         });
     }
 };
@@ -758,14 +759,14 @@ exports.googleLogin = async (req, res) => {
         try {
             idToken = await googleAuth.exchangeCodeForIdToken(code);
         } catch (e) {
-            return res.status(e.status || 400).json({ success: false, message: e.message });
+            return res.status(e.status || 400).json({ success: false, message: safeErrorMessage(e) });
         }
 
         let claims;
         try {
             claims = await googleAuth.verifyIdToken(idToken, googleAuth.clientId());
         } catch (e) {
-            return res.status(e.status || 400).json({ success: false, message: e.message });
+            return res.status(e.status || 400).json({ success: false, message: safeErrorMessage(e) });
         }
 
         // Find-or-create by googleId; if the email already has an account
@@ -814,7 +815,7 @@ exports.googleLogin = async (req, res) => {
         if (wantsToken(req)) body.token = generateToken(user._id);
         res.json(body);
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -852,7 +853,7 @@ exports.getUserOrders = async (req, res) => {
         const orders = await Order.find({ user: id }).sort({ createdAt: -1 }).limit(200);
         res.json({ success: true, count: orders.length, user: user, data: orders });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -898,6 +899,6 @@ exports.listUsers = async (req, res) => {
 
         res.json({ success: true, count: data.length, data: data });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };

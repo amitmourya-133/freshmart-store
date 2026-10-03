@@ -3,9 +3,16 @@
 // ===============================
 
 const AutopayMandate = require("../models/AutopayMandate");
+const { safeErrorMessage } = require("../utils/safeError");
 const UserSubscription = require("../models/UserSubscription");
 const autopay = require("../utils/autopay");
 const analytics = require("../utils/analytics");
+const SubscriptionPlan = require("../models/SubscriptionPlan");
+
+// SEC-11: ceiling for a mandate created WITHOUT a subscription (an explicit
+// amount the customer typed). Well above any real FreshMart plan, but low
+// enough that a tampered request cannot authorise a five-figure recurring pull.
+const MAX_STANDALONE_MANDATE_AMOUNT = 100000;
 
 // POST /api/autopay/mandate — request a mandate. Requires EXPLICIT consent
 // (consentAccepted: true in the body). Without a configured provider the
@@ -18,17 +25,54 @@ exports.createMandate = async (req, res) => {
             return res.status(400).json({ success: false, message: "Explicit consent is required to set up autopay (UPDI mandate under NPCI guidelines)" });
         }
 
-        let chargeAmount = 0;
+let chargeAmount = 0;
         let frequencyDays = 30;
         let planId = null;
         if (subscriptionId) {
             const sub = await UserSubscription.findOne({ _id: subscriptionId, user: req.user._id }).lean();
             if (!sub) return res.status(404).json({ success: false, message: "Subscription not found" });
             if (sub.status !== "active") return res.status(400).json({ success: false, message: "Autopay can only attach to an active subscription" });
-            chargeAmount = req.body.chargeAmount ? Number(req.body.chargeAmount) : 0;
             planId = sub.plan || null;
+
+            // SEC-11: the charge amount is SERVER-AUTHORITATIVE. It used to be
+            // read straight from `req.body.chargeAmount`, so the browser decided
+            // how much a recurring mandate would pull. Fixing the plan price to
+            // ₹1 (or to 0 to dodge the charge) needed nothing but a devtools
+            // edit. The plan price is now the only source when a subscription is
+            // attached, and a conflicting client value is rejected outright
+            // rather than silently ignored.
+            const plan = planId ? await SubscriptionPlan.findById(planId).lean() : null;
+            const serverAmount = plan && Number.isFinite(Number(plan.pricing && plan.pricing.amount))
+                ? Math.round(Number(plan.pricing.amount) * 100) / 100
+                : null;
+            if (serverAmount == null) {
+                return res.status(400).json({ success: false, message: "This plan has no chargeable price. Autopay cannot be set up for it." });
+            }
+            if (req.body.chargeAmount != null && req.body.chargeAmount !== "") {
+                const clientAmount = Math.round(Number(req.body.chargeAmount) * 100) / 100;
+                if (!Number.isFinite(clientAmount) || Math.abs(clientAmount - serverAmount) > 0.01) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "The requested autopay amount does not match your plan price. Refresh and try again.",
+                    });
+                }
+            }
+            chargeAmount = serverAmount;
+            if (plan && plan.deliveryEveryDays) {
+                frequencyDays = Math.min(366, Math.max(1, Math.round(Number(plan.deliveryEveryDays) || 30)));
+            }
         } else {
-            chargeAmount = req.body.chargeAmount ? Number(req.body.chargeAmount) : 0;
+            // No subscription attached: an explicit amount is still required, but
+            // it is bounded and rounded so it cannot be used to set up an
+            // arbitrary recurring pull (or a negative/NaN one).
+            const raw = req.body.chargeAmount != null && req.body.chargeAmount !== "" ? Number(req.body.chargeAmount) : 0;
+            if (!Number.isFinite(raw) || raw < 0 || raw > MAX_STANDALONE_MANDATE_AMOUNT) {
+                return res.status(400).json({
+                    success: false,
+                    message: "A valid chargeAmount between 0 and " + MAX_STANDALONE_MANDATE_AMOUNT + " is required.",
+                });
+            }
+            chargeAmount = Math.round(raw * 100) / 100;
         }
 
         const last4 = String(bankAccountLast4 || "").trim();
@@ -43,8 +87,10 @@ exports.createMandate = async (req, res) => {
             user: req.user._id,
             subscription: subscriptionId || null,
             plan: planId,
-            chargeAmount: Number.isFinite(chargeAmount) && chargeAmount > 0 ? chargeAmount : 0,
-            frequencyDays: Math.min(366, Math.max(1, Math.round(Number(req.body.frequencyDays) || 30))),
+chargeAmount: Number.isFinite(chargeAmount) && chargeAmount > 0 ? chargeAmount : 0,
+            // SEC-11: frequency follows the server-side plan when there is one;
+            // the client value is only honoured for a standalone mandate.
+            frequencyDays: subscriptionId ? frequencyDays : Math.min(366, Math.max(1, Math.round(Number(req.body.frequencyDays) || 30))),
             consentAcceptedAt: new Date(),
             consentInfo: "FreshMart recurring subscription charge; user-reviewed and accepted at " + new Date().toISOString() + ".",
             bankAccountLast4: last4 || null,
@@ -78,7 +124,7 @@ exports.createMandate = async (req, res) => {
                 : "Mandate " + (mandate.status === "ACTIVE" ? "activated" : "pending"),
         });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -92,7 +138,7 @@ exports.myMandate = async (req, res) => {
         const mandate = await AutopayMandate.findOne({ user: req.user._id }).sort({ createdAt: -1 }).lean();
         res.json({ success: true, data: mandate ? safeMandate(mandate) : null, provider: autopay.providerInfo() });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -109,7 +155,7 @@ exports.cancelMandate = async (req, res) => {
         await mandate.save();
         res.json({ success: true, data: safeMandate(mandate) });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -127,7 +173,7 @@ exports.webhook = async (req, res) => {
         const result = await autopay.applyChargeEvent(event);
         res.json({ success: true, applied: result.ok });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -137,7 +183,7 @@ exports.adminList = async (req, res) => {
         const mandates = await AutopayMandate.find({}).sort({ createdAt: -1 }).limit(200).populate("user", "name email").lean();
         res.json({ success: true, count: mandates.length, data: mandates.map(safeMandate), provider: autopay.providerInfo() });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 

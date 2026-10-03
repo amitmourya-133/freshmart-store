@@ -10,6 +10,9 @@ const express = require("express");
 const cors = require("cors");
 const path = require("path");
 const cookieParser = require("cookie-parser");
+const { rateLimit } = require("./utils/rateLimit");
+const { safeErrorMessage, safeErrorStatus, errorLogEntry } = require("./utils/safeError");
+const logger = require("./utils/logger");
 
 // Import routes
 const productRoutes = require("./routes/productRoutes");
@@ -49,10 +52,35 @@ mime.define({ "image/jpeg": ["jfif"] }, true);
 // MIDDLEWARE
 // ===============================
 
-// Vercel (and any reverse proxy) terminates TLS in front of this app; trust
-// the first proxy hop so req.ip / req.secure reflect the real client connection
-// (required for rate limiting and for Secure cookies behind HTTPS).
-app.set("trust proxy", 1);
+// PROXY TRUST (SEC-03). `trust proxy` decides two security-relevant things:
+// `req.ip` (the key every rate limiter uses) and `req.secure` (which decides
+// whether the session cookie gets the Secure flag).
+//
+//   * Behind the Vercel edge (or any real reverse proxy) we must trust exactly
+//     the hops in front of us, otherwise every client collapses into one shared
+//     rate-limit bucket.
+//   * When node/server.js is exposed directly over plain HTTP there is NO proxy.
+//     Trusting X-Forwarded-For there would let any client mint an unlimited
+//     number of "IP" buckets by rotating one header, and would let a client
+//     forge req.secure.
+//
+// So the hop count is environment-driven instead of hard-coded:
+//   TRUST_PROXY=<n|true|false>  explicit override (highest precedence)
+//   Vercel runtime               -> 1 hop (default, unchanged behavior)
+//   everything else (self-hosted)-> 0 (no proxy is trusted)
+const TRUST_PROXY_RAW = process.env.TRUST_PROXY;
+function resolveTrustProxy() {
+    if (TRUST_PROXY_RAW != null && TRUST_PROXY_RAW !== "") {
+        if (TRUST_PROXY_RAW === "true") return true;
+        if (TRUST_PROXY_RAW === "false") return false;
+        const hops = Number(TRUST_PROXY_RAW);
+        return Number.isFinite(hops) && hops >= 0 ? hops : false;
+    }
+    // Vercel sets VERCEL=1 in every serverless invocation.
+    if (process.env.VERCEL) return 1;
+    return false;
+}
+app.set("trust proxy", resolveTrustProxy());
 
 // Restrict cross-origin browsers to known origins. The API only needs to be
 // consumed by the deployed site and local dev servers; Vercel preview
@@ -97,6 +125,40 @@ app.use((req, res, next) => {
     }
     next();
 });
+
+// GLOBAL API RATE LIMIT (SEC-03b)
+// Most sensitive routers already carry their own tight limiter (auth 30/10min,
+// OTP, uploads, B2B, coupons...). What was missing is a FLOOR for the areas
+// that had none at all: /api/delivery (partner accept/OTP/proof),
+// /api/delivery-ops (admin broadcast + offer creation), /api/reviews,
+// /api/returns, /api/payments, /api/notifications and the admin dashboard.
+//
+// This bucket is deliberately generous (2000 requests / 5 min, ~6.7 req/s
+// sustained) because it only has to stop a flood and keep a single client
+// from pinning the serverless instance; the abuse-sensitive endpoints keep
+// their own strict per-route limits. Mounted before the body parser so a
+// flood is rejected before we spend CPU/bandwidth on it.
+//
+// `keyBy: "user"` — an IP-keyed floor is a liability in production, not a
+// safeguard. Grocery traffic concentrates on shared egress: carrier NAT on
+// mobile, a society/college or an office behind one address, and (on Vercel)
+// `req.ip` is the real client IP, so one bucket is shared by every user behind
+// that address. At 1000/5min a busy office or a housing-society cluster starts
+// receiving 429s for ordinary browsing/cart/tracking while nobody is attacking
+// anything - the failure mode is indistinguishable from an outage and there is
+// nothing the affected user can do about it. Keying the floor on the
+// authenticated account keeps the flood protection (one abusive account still
+// gets 2000/5min, and it burns only its own bucket) while a shared IP can no
+// longer exhaust a budget that belongs to other people. Anonymous traffic keeps
+// the IP key exactly as before, which is where the flood risk actually is.
+//
+// Escape hatch for load tests / isolated suites: RATE_LIMIT_GLOBAL_MAX=0.
+const GLOBAL_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_GLOBAL_WINDOW_MS) || 5 * 60 * 1000;
+const GLOBAL_LIMIT_MAX = Number(process.env.RATE_LIMIT_GLOBAL_MAX) || 2000;
+const globalApiLimiter = GLOBAL_LIMIT_MAX > 0
+    ? rateLimit({ windowMs: GLOBAL_LIMIT_WINDOW_MS, max: GLOBAL_LIMIT_MAX, keyBy: "user" })
+    : function (req, res, next) { next(); };
+app.use("/api", globalApiLimiter);
 
 // Parses the httpOnly session cookie (freshmart_token) on every request.
 app.use(cookieParser());
@@ -200,7 +262,8 @@ app.get("/api/ops/cron/delivery-sweep", async (req, res) => {
         const result = await deliveryOps.sweepExpiredOffers(Number(req.query.limit) || 50);
         return res.json({ success: true, ...result });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        logger.error({ ev: "cron_delivery_sweep_failed", err: (error && error.message) || "unknown" });
+        return res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 });
 
@@ -235,5 +298,37 @@ app.use("/", (req, res, next) => {
 });
 
 app.use(express.static(path.join(__dirname, ".")));
+
+// ===============================
+// TERMINAL HANDLERS (SEC-04a)
+// ===============================
+// Registered LAST so they only ever see a request that no route matched or
+// that threw past its own handler.
+
+// Unknown /api path -> JSON 404. Without this, an unmatched /api/... request
+// fell through to the static handler and came back as Express's HTML
+// "Cannot GET /api/nope", which leaked nothing but was inconsistent with every
+// other API response (and 404'd with 200-ish HTML semantics for some clients).
+app.use((req, res, next) => {
+    if (!req.path.startsWith("/api")) return next();
+    return res.status(404).json({ success: false, message: "Not found" });
+});
+
+// Last-resort error handler. Any error that reaches here was NOT caught by the
+// route's own try/catch, so before this existed Express answered with its
+// default HTML body — which in development mode prints a full stack trace and
+// in production still echoes `err.message` verbatim (a Mongo driver's text for
+// most failures). Everything internal is now logged server-side and answered
+// with a generic message; deliberate 4xx messages from our own validation still
+// pass through via utils/safeError.
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+    const entry = errorLogEntry(err, req.originalUrl ? req.path : null);
+    entry.reqid = res.getHeader("x-request-id") || undefined;
+    logger.error(entry);
+    if (res.headersSent) return next(err);
+    const status = safeErrorStatus(err, 500);
+    return res.status(status).json({ success: false, message: safeErrorMessage(err) });
+});
 
 module.exports = app;

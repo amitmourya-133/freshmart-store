@@ -5,6 +5,7 @@
 // ===============================
 
 const referral = require("../utils/referral");
+const { safeErrorMessage } = require("../utils/safeError");
 const analytics = require("../utils/analytics");
 const User = require("../models/User");
 
@@ -29,7 +30,7 @@ exports.getMyReferral = async (req, res) => {
             },
         });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -51,6 +52,6 @@ exports.claim = async (req, res) => {
         });
         return res.json({ success: true, message: "Referral code applied!", data: { referredBy: result.referrerId } });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };

@@ -1,4 +1,5 @@
 const express = require("express");
+const { safeErrorMessage } = require("../utils/safeError");
 const router = express.Router();
 const mongoose = require("mongoose");
 const SubscriptionPlan = require("../models/SubscriptionPlan");
@@ -74,7 +75,7 @@ router.get("/plans", async (req, res) => {
     } catch (error) {
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: safeErrorMessage(error),
         });
     }
 });
@@ -92,7 +93,7 @@ router.get("/my", protect, async (req, res) => {
     } catch (error) {
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: safeErrorMessage(error),
         });
     }
 });
@@ -108,7 +109,7 @@ router.get("/admin/all", protect, admin, async (req, res) => {
     } catch (error) {
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: safeErrorMessage(error),
         });
     }
 });
@@ -129,7 +130,7 @@ router.get("/admin/subscribers", protect, admin, async (req, res) => {
             subscriptions: subs,
         });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 });
 
@@ -142,7 +143,7 @@ router.post("/admin/process-due", protect, admin, async (req, res) => {
         const summary = await subscriptionBox.fulfillDueSubscriptions(limit);
         return res.json({ success: true, data: summary });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 });
 
@@ -191,7 +192,7 @@ router.post("/admin", protect, admin, async (req, res) => {
     } catch (error) {
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: safeErrorMessage(error),
         });
     }
 });
@@ -244,7 +245,7 @@ router.put("/admin/:planId", protect, admin, async (req, res) => {
     } catch (error) {
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: safeErrorMessage(error),
         });
     }
 });
@@ -276,7 +277,7 @@ router.delete("/admin/:planId", protect, admin, async (req, res) => {
     } catch (error) {
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: safeErrorMessage(error),
         });
     }
 });
@@ -299,10 +300,15 @@ router.post("/:planId", protect, async (req, res) => {
             });
         }
 
-        // Check if user already has active subscription
+// Check if the customer already has a live subscription.
+        // SEC-13: this used to match `status: "active"` only, so a PAUSED
+        // subscription did not block a second one - the customer could stack a
+        // second active subscription (and a second autopay mandate) behind a
+        // paused plan, because the copy literally told them to "cancel or pause
+        // it first". Any subscription that is not cancelled/expired blocks.
         const existing = await UserSubscription.findOne({
             user: req.user.id,
-            status: "active",
+            status: { $nin: ["cancelled", "expired"] },
         });
         if (existing) {
             return res.status(400).json({
@@ -360,10 +366,37 @@ router.post("/:planId", protect, async (req, res) => {
     } catch (error) {
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: safeErrorMessage(error),
         });
     }
 });
+
+// SEC-13: subscription lifecycle state machine.
+//
+// Pause/resume/cancel had no transition guard at all - each handler loaded the
+// subscription and assigned its target status unconditionally. That made the
+// lifecycle rewritable: `PUT /cancel` then `PUT /resume` brought a CANCELLED
+// subscription back to `active` (so a stopped recurring charge could be
+// silently re-armed), a cancelled subscription could be "paused" instead of
+// reported as already final, and every repeat call re-sent the notification and
+// overwrote `cancelDate`.
+//
+// cancelled is now terminal, and each move only accepts its real predecessor.
+const SUBSCRIPTION_TRANSITIONS = {
+    paused: ["active"],
+    active: ["paused"],
+    cancelled: ["active", "paused"],
+};
+
+function subscriptionTransitionError(subscription, target) {
+    const allowed = SUBSCRIPTION_TRANSITIONS[target] || [];
+    if (allowed.indexOf(String(subscription.status)) !== -1) return null;
+    if (String(subscription.status) === target) {
+        return "Subscription is already " + target;
+    }
+    return "A " + String(subscription.status) + " subscription cannot be changed to " + target +
+        (allowed.length ? " (allowed from: " + allowed.join(", ") + ")" : "");
+}
 
 // PUT /api/subscriptions/:subscriptionId/pause — pause subscription (protected, customer)
 router.put("/:subscriptionId/pause", protect, async (req, res) => {
@@ -376,11 +409,11 @@ router.put("/:subscriptionId/pause", protect, async (req, res) => {
             user: req.user.id,
         });
         if (!subscription) {
-            return res.status(404).json({
-                success: false,
-                message: "Subscription not found",
-            });
+            return res.status(404).json({ success: false, message: "Subscription not found" });
         }
+
+        const bad = subscriptionTransitionError(subscription, "paused");
+        if (bad) return res.status(400).json({ success: false, message: bad });
 
         subscription.status = "paused";
         await subscription.save();
@@ -394,7 +427,7 @@ router.put("/:subscriptionId/pause", protect, async (req, res) => {
     } catch (error) {
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: safeErrorMessage(error),
         });
     }
 });
@@ -416,6 +449,9 @@ router.put("/:subscriptionId/resume", protect, async (req, res) => {
             });
         }
 
+const bad = subscriptionTransitionError(subscription, "active");
+        if (bad) return res.status(400).json({ success: false, message: bad });
+
         subscription.status = "active";
         await subscription.save();
         inboxSub(req.user.id, "Subscription resumed", "Your subscription is active again.", "", "sub:" + String(subscription._id) + ":resume");
@@ -428,7 +464,7 @@ router.put("/:subscriptionId/resume", protect, async (req, res) => {
     } catch (error) {
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: safeErrorMessage(error),
         });
     }
 });
@@ -450,6 +486,9 @@ router.put("/:subscriptionId/cancel", protect, async (req, res) => {
             });
         }
 
+const bad = subscriptionTransitionError(subscription, "cancelled");
+        if (bad) return res.status(400).json({ success: false, message: bad });
+
         subscription.status = "cancelled";
         subscription.cancelDate = new Date();
         await subscription.save();
@@ -469,7 +508,7 @@ router.put("/:subscriptionId/cancel", protect, async (req, res) => {
     } catch (error) {
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: safeErrorMessage(error),
         });
     }
 });

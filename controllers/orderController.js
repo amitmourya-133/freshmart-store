@@ -3,6 +3,7 @@
 // ===============================
 
 const crypto = require("crypto");
+const { safeErrorMessage } = require("../utils/safeError");
 const Order = require("../models/Order");
 const Product = require("../models/Product");
 const User = require("../models/User");
@@ -474,6 +475,22 @@ async function applyCancellation(order, by) {
     order.status = "Cancelled";
     pushHistory(order, "Cancelled", by);
     await order.save();
+
+    // SEC-06: a colony reward that was already credited has to come back when
+    // the order behind it is cancelled, otherwise the customer keeps money for
+    // an order that no longer exists. Best-effort: the reversal is idempotent,
+    // and any failure is logged rather than blocking the cancellation (the
+    // customer asked to cancel; that must always succeed).
+    try {
+        await require("../utils/groupRewards").reverseRewardsForOrder(order._id);
+    } catch (e) {
+        require("../utils/logger").error({
+            ev: "group_reward_reversal_on_cancel_failed",
+            orderId: String(order._id),
+            err: (e && e.message) || "unknown"
+        });
+    }
+
     return { ok: true, order: order };
 }
 
@@ -871,7 +888,7 @@ exports.createOrder = async (req, res) => {
         }
     } catch (error) {
         if (error && error.status) {
-            return res.status(error.status).json({ success: false, message: error.message });
+            return res.status(error.status).json({ success: false, message: safeErrorMessage(error) });
         }
         if (error && error.name === "CastError") {
             return res.status(400).json({ success: false, message: "Invalid product in cart" });
@@ -879,7 +896,7 @@ exports.createOrder = async (req, res) => {
         if (error && error.code === 11000) {
             return res.status(409).json({ success: false, message: "This order reference is already in use. Please try again." });
         }
-        res.status(400).json({ success: false, message: error.message });
+        res.status(400).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -912,9 +929,9 @@ exports.quoteOrder = async (req, res) => {
         });
     } catch (error) {
         if (error && error.status) {
-            return res.status(error.status).json({ success: false, message: error.message });
+            return res.status(error.status).json({ success: false, message: safeErrorMessage(error) });
         }
-        res.status(400).json({ success: false, message: error.message });
+        res.status(400).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -942,7 +959,7 @@ exports.getOrders = async (req, res) => {
             .populate("user", "name email phone");
         res.json({ success: true, count: orders.length, data: orders });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -992,7 +1009,7 @@ exports.getOverview = async (req, res) => {
             }
         });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -1016,7 +1033,7 @@ exports.getMyOrders = async (req, res) => {
         }
         res.json({ success: true, count: docs.length, data: docs });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -1050,7 +1067,7 @@ exports.getOrder = async (req, res) => {
         if (error && error.name === "CastError") {
             return res.status(404).json({ success: false, message: "Order not found" });
         }
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -1207,7 +1224,7 @@ exports.updateOrderStatus = async (req, res) => {
         if (error && error.name === "CastError") {
             return res.status(404).json({ success: false, message: "Order not found" });
         }
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -1239,7 +1256,7 @@ exports.cancelOrder = async (req, res) => {
         if (error && error.name === "CastError") {
             return res.status(404).json({ success: false, message: "Order not found" });
         }
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -1283,7 +1300,7 @@ exports.updatePaymentStatus = async (req, res) => {
         if (error && error.name === "CastError") {
             return res.status(404).json({ success: false, message: "Order not found" });
         }
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -1345,6 +1362,6 @@ exports.getOrderByNumber = async (req, res) => {
             }
         });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };

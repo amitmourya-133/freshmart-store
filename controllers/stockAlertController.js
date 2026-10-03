@@ -5,6 +5,7 @@
 // ===============================
 
 const StockAlert = require("../models/StockAlert");
+const { safeErrorMessage } = require("../utils/safeError");
 const Product = require("../models/Product");
 const stockAlert = require("../utils/stockAlert");
 const analytics = require("../utils/analytics");
@@ -46,7 +47,7 @@ exports.subscribe = async (req, res) => {
         if (error && error.code === 11000) {
             return res.json({ success: true, message: "We'll notify you when it's back in stock!" });
         }
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -73,6 +74,6 @@ exports.adminWaiting = async (req, res) => {
             },
         });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };

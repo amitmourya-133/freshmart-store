@@ -44,6 +44,18 @@ async function completeOrderDelivery(order, assignment, opts) {
         return { order: order, assignment: assignment || null, alreadyDelivered: true };
     }
 
+    // SEC-07: Cancelled is TERMINAL. This primitive only guarded against
+    // "Delivered", so a partner could still complete a cancelled order: the
+    // status flipped back to Delivered, a COD order was flipped to PAID with a
+    // paymentAt, the assignment was closed as DELIVERED and the partner earned
+    // the fee - all after the customer had already cancelled and had their stock
+    // restored. Refuse instead of silently resurrecting the order.
+    if (order.status === "Cancelled") {
+        const err = new Error("This order was cancelled and cannot be marked delivered. Contact support to resolve the parcel.");
+        err.status = 409;
+        throw err;
+    }
+
     pushDeliveredEntry(order, opts.by, opts.reason);
     order.status = "Delivered";
     // Payment source of truth is preserved: only COD (cash handed over at the

@@ -9,6 +9,7 @@
 // ===============================
 
 const Settings = require("../models/Settings");
+const { safeErrorMessage } = require("../utils/safeError");
 const { deliveryCoverageFor } = require("../utils/geo");
 
 // Public read-only delivery policy (for the checkout summary display).
@@ -18,7 +19,7 @@ exports.getShippingPolicy = async (req, res) => {
         const policy = await Settings.getShippingPolicy();
         res.json({ success: true, data: policy });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -35,7 +36,7 @@ exports.getDeliveryCoverage = async (req, res) => {
         const coverage = await deliveryCoverageFor(lat, lng);
         res.json({ success: true, data: coverage });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -59,7 +60,7 @@ exports.getSettings = async (req, res) => {
             }
         });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -168,6 +169,6 @@ exports.updateSettings = async (req, res) => {
             }
         });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };

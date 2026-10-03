@@ -3,6 +3,7 @@
 // ===============================
 
 const Notification = require("../models/Notification");
+const { safeErrorMessage } = require("../utils/safeError");
 
 // Fire-and-forget inbox addition. Never throws and never affects the calling
 // request — a notification failure must not fail an order/payment/delivery.
@@ -84,7 +85,7 @@ exports.getMyNotifications = async (req, res) => {
 
         return res.json({ success: true, count: notifications.length, unreadCount, data: notifications });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -94,7 +95,7 @@ exports.getUnreadCount = async (req, res) => {
         const unreadCount = await Notification.countDocuments({ user: req.user._id, read: false });
         return res.json({ success: true, unreadCount });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -107,7 +108,7 @@ exports.markAllRead = async (req, res) => {
         );
         return res.json({ success: true, message: "All notifications marked as read" });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -127,7 +128,7 @@ exports.markRead = async (req, res) => {
         }
         return res.json({ success: true, data: notification });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 

@@ -677,14 +677,8 @@ async function main() {
         const prunePartner = await req("/api/delivery-ops/admin/push/prune", { method: "POST", headers: auth(partnerA), body: {} });
         check(prunePartner.status === 403, "a partner cannot prune push subscriptions (got " + prunePartner.status + ")");
 
-        // Revoking a partner must take effect immediately.
-        const revoke = await req("/api/delivery-ops/admin/partners/" + partnerStale._id + "/review", { method: "POST", headers: auth(admin), body: { action: "revoke" } });
-        check(revoke.status === 200 && revoke.json.partnerStatus === "none" && revoke.json.role === "customer",
-            "revoking a partner returns them to a plain customer", revoke.json);
-        const revokedFeed = await req("/api/delivery-ops/offers", { headers: auth(partnerStale) });
-        check(revokedFeed.status === 403, "a revoked partner immediately loses partner-only access (got " + revokedFeed.status + ")");
-        const revokedAvail = await DeliveryAssignment.countDocuments({ deliveryUser: partnerStale._id, status: { $in: ["ASSIGNED", "ACCEPTED", "PICKED_UP", "EN_ROUTE"] } });
-        check(revokedAvail === 0, "a revoked partner holds no active run");
+// Revoking a partner must take effect immediately.
+        // NOTE: this runs AFTER section L on purpose (see below).
 
         // ===============================================================
         section("L. Customer privacy and history");
@@ -707,11 +701,26 @@ async function main() {
         const orderPeek = await req("/api/orders/" + order1._id, { headers: auth(stranger) });
         check(orderPeek.status === 404, "reading another user's order by id is a 404 (not a 403 leak)", orderPeek.status);
 
-        const history = await req("/api/delivery-ops/history", { headers: winnerAuth });
+const history = await req("/api/delivery-ops/history", { headers: winnerAuth });
         check(history.status === 200 && history.json.deliveries.length >= 1, "the partner history lists completed drops", history.json && history.json.deliveries && history.json.deliveries.length);
         const histRow = history.json.deliveries[0] || {};
         check(histRow.signature === undefined, "history rows do not embed the signature image");
         check(typeof histRow.earnings === "number", "history rows carry the earnings figure");
+
+        // The winner of the claim race is `partnerA` or `partnerStale` depending
+        // on which simultaneous claim lands first, so this revoke check used to
+        // flip the run on a coin toss: when the winner happened to be
+        // `partnerStale`, the revoke above demoted them to a plain customer and
+        // the history request above came back 403. The product was right (revoke
+        // does take effect immediately); the test ordering was wrong. The revoke
+        // now runs after every partner-authenticated assertion above.
+        const revoke = await req("/api/delivery-ops/admin/partners/" + partnerStale._id + "/review", { method: "POST", headers: auth(admin), body: { action: "revoke" } });
+        check(revoke.status === 200 && revoke.json.partnerStatus === "none" && revoke.json.role === "customer",
+            "revoking a partner returns them to a plain customer", revoke.json);
+        const revokedFeed = await req("/api/delivery-ops/offers", { headers: auth(partnerStale) });
+        check(revokedFeed.status === 403, "a revoked partner immediately loses partner-only access (got " + revokedFeed.status + ")");
+        const revokedAvail = await DeliveryAssignment.countDocuments({ deliveryUser: partnerStale._id, status: { $in: ["ASSIGNED", "ACCEPTED", "PICKED_UP", "EN_ROUTE"] } });
+        check(revokedAvail === 0, "a revoked partner holds no active run");
 
         // ===============================================================
         section("M. Static file exposure guard");

@@ -10,6 +10,7 @@ const { normalizeProductImage, parseImageDataUri } = require("../utils/productIm
 const { uploadImageBytes } = require("../utils/cloudinary");
 const { normalizeVariants } = require("../utils/variants");
 const searchUtils = require("../utils/search");
+const { safeErrorMessage } = require("../utils/safeError");
 const aiProvider = require("../utils/aiProvider");
 
 // Audit helper: record a stock movement (root or variant) and keep the trail
@@ -175,24 +176,63 @@ exports.aiSearch = async (req, res) => {
     }
 };
 
+// ===============================
 // GET ALL PRODUCTS (public, only active)
+// ===============================
+// PUBLIC PROJECTION (SEC-10). The public catalogue used to return whole
+// Product documents, which handed anonymous visitors our internal B2B tier
+// (`b2bPrice`/`b2bMinQty`), the `active` moderation flag and the mongoose
+// `__v` version counter. The Product model itself documents that b2b prices
+// are "server-authoritative - the retail client never sees them unless the
+// caller is an approved b2b_customer"; these two endpoints were breaking that
+// promise.
+//
+// `stock` deliberately stays public: the storefront caps the quantity picker
+// with it and refuses to add an out-of-stock item. Hiding an exact count would
+// be nicer in theory but breaks ordering UX; wholesale pricing and moderation
+// flags are the actual commercial leak.
+const PUBLIC_PRODUCT_FIELDS = "name price unit category emoji gradient description nutrition tips origin stock rating ratingCount image variants.unit variants.price variants.stock variants._id createdAt";
+
 exports.getProducts = async (req, res) => {
     try {
-        const { category, search } = req.query;
+        // SEC-02: `search` and `category` arrive as attacker-controlled input
+        // and Express's default query parser turns `?category[$ne]=x` into an
+        // OBJECT, which used to be dropped straight into the Mongo filter
+        // (live-confirmed: it matched every product). Two defences:
+        //   1. only a plain string is ever accepted, so `[$ne]`, `[$gt]`, `[$regex]`
+        //      and friends can never reach the query;
+        //   2. the string that DOES reach the name filter is regex-escaped, so
+        //      `search=.*` matches a literal dot-star and cannot turn into a
+        //      "match everything" (or a catastrophic-backtracking) regex.
+        const rawSearch = req.query.search;
+        const rawCategory = req.query.category;
+        if (rawSearch !== undefined && typeof rawSearch !== "string") {
+            return res.status(400).json({ success: false, message: "Invalid search query" });
+        }
+        if (rawCategory !== undefined && typeof rawCategory !== "string") {
+            return res.status(400).json({ success: false, message: "Invalid category" });
+        }
+
         let filter = { active: true };
 
-        if (category && category !== "All") {
-            filter.category = category;
+        if (rawCategory && rawCategory !== "All") {
+            filter.category = rawCategory;
         }
 
-        if (search) {
-            filter.name = { $regex: search, $options: "i" };
+        if (rawSearch) {
+            const checked = searchUtils.validateSearchQuery(rawSearch, 100);
+            if (!checked.ok) {
+                return res.status(400).json({ success: false, message: checked.message });
+            }
+            filter.name = { $regex: searchUtils.nameRegexFor(checked.value), $options: "i" };
         }
 
-        const products = await Product.find(filter).sort({ category: 1, createdAt: -1 });
+        const products = await Product.find(filter)
+            .select(PUBLIC_PRODUCT_FIELDS)
+            .sort({ category: 1, createdAt: -1 });
         res.json({ success: true, count: products.length, data: products });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -266,7 +306,7 @@ exports.getTrendingProducts = async (req, res) => {
 
         res.json({ success: true, count: data.length, data: data, fromSales: agg.length > 0 });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -278,13 +318,13 @@ exports.getProduct = async (req, res) => {
         if (isBadObjectId(req.params.id)) {
             return res.status(404).json({ success: false, message: "Product not found" });
         }
-        const product = await Product.findById(req.params.id);
+        const product = await Product.findById(req.params.id).select(PUBLIC_PRODUCT_FIELDS);
         if (!product) {
             return res.status(404).json({ success: false, message: "Product not found" });
         }
         res.json({ success: true, data: product });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -294,7 +334,7 @@ exports.getAdminProducts = async (req, res) => {
         const products = await Product.find().sort({ createdAt: -1 });
         res.json({ success: true, count: products.length, data: products });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -350,7 +390,7 @@ exports.createProduct = async (req, res) => {
         }
         res.status(201).json({ success: true, data: product });
     } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+        res.status(400).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -419,7 +459,7 @@ exports.updateProduct = async (req, res) => {
         }
         res.json({ success: true, data: product });
     } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+        res.status(400).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -441,7 +481,7 @@ exports.updatePrice = async (req, res) => {
         await product.save();
         res.json({ success: true, data: product });
     } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+        res.status(400).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -473,7 +513,7 @@ exports.updateStock = async (req, res) => {
         maybeNotifyRestock(product, wasAvailable);
         res.json({ success: true, data: product });
     } catch (error) {
-        res.status(400).json({ success: false, message: error.message });
+        res.status(400).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -492,7 +532,7 @@ exports.deleteProduct = async (req, res) => {
         await product.save();
         res.json({ success: true, message: "Product removed" });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -524,7 +564,7 @@ exports.setRating = async (req, res) => {
         await product.save();
         res.json({ success: true, data: product });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -550,6 +590,6 @@ exports.addRating = async (req, res) => {
         await product.save();
         res.json({ success: true, data: product });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };

@@ -5,6 +5,7 @@
 // ===============================
 
 const Wallet = require("../models/Wallet");
+const { safeErrorMessage } = require("../utils/safeError");
 const WalletTransaction = require("../models/WalletTransaction");
 const wallet = require("../utils/wallet");
 
@@ -30,7 +31,7 @@ exports.getMyWallet = async (req, res) => {
             },
         });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -46,7 +47,7 @@ exports.getMyTransactions = async (req, res) => {
             .limit(limit);
         return res.json({ success: true, total, count: rows.length, data: rows });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -80,7 +81,7 @@ exports.adminCredit = async (req, res) => {
             message: result.created ? "Wallet credited" : "Already applied (idempotent)",
         });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 
@@ -107,7 +108,7 @@ exports.adminOverview = async (req, res) => {
             },
         });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
 

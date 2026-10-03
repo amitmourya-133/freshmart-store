@@ -44,9 +44,18 @@ module.exports = async (req, res) => {
             seedDefaultSubscriptionPlans().catch(function () { /* non-fatal */ });
         }
     } catch (error) {
+        // SEC-07: this used to answer with `"Could not connect to MongoDB: " +
+        // error.message`. A driver failure message carries the host, the
+        // database name and sometimes the URI credentials, so every client that
+        // hit the API while the database was down got the connection details for
+        // free. The detail goes to the log; the caller gets a generic message.
+        require("../utils/logger").error({
+            ev: "mongo_connect_failed",
+            err: (error && error.message) || "unknown"
+        });
         return res.status(500).json({
             success: false,
-            message: "Could not connect to MongoDB: " + error.message
+            message: "Could not connect to the database. Please try again shortly."
         });
     }
 
