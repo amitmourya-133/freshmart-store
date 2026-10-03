@@ -13,6 +13,9 @@ var jwt = require("jsonwebtoken");
 
 var BASE = "http://127.0.0.1:5000";
 var JWT_SECRET = process.env.JWT_SECRET;
+// The account under test must come from the environment: a hardcoded address
+// ends up in git history and in every clone of this repo.
+var TARGET_EMAIL = process.env.ADMIN_EMAIL || process.env.EMAIL_USER;
 var passed = 0, failed = 0, results = [];
 
 function log(tag, msg) {
@@ -67,8 +70,9 @@ function assert(cond, msg) {
     try {
         // ----- DB snapshot & admin JWT mint -----
         await mongoose.connect(process.env.MONGODB_URI);
-        var adminUser = await User.findOne({ email: "amitmourya822@gmail.com" }).lean();
-        if (!adminUser) throw new Error("Admin user amitmourya822@gmail.com not found");
+        if (!TARGET_EMAIL) throw new Error("Set ADMIN_EMAIL (or EMAIL_USER) in .env to the account under test");
+        var adminUser = await User.findOne({ email: TARGET_EMAIL }).lean();
+        if (!adminUser) throw new Error("Admin user not found for the configured ADMIN_EMAIL");
         var adminToken = jwt.sign({ id: adminUser._id }, JWT_SECRET, { expiresIn: "7d" });
         var productsBefore = await Product.countDocuments();
         var ordersBefore = await Order.countDocuments();
