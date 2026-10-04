@@ -1,0 +1,56 @@
+name: CI
+
+# The CSP hash allow-list is the one piece of PATH A that can rot silently: edit
+# an inline <script> block and its SHA-256 digest no longer matches, so the page
+# stops bootstrapping in production with no build error anywhere. This workflow
+# is the permanent guard for that.
+#
+# Everything here is deliberately secret-free and network-free so it runs on any
+# fork and pull request without exposing credentials: it needs no database and
+# no environment variables. The DB-backed regression suites stay local, since
+# they require MONGODB_URI.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Syntax + CSP hash guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Syntax check every JavaScript file
+        run: |
+          set -e
+          count=0
+          for f in $(find . -name '*.js' -not -path './node_modules/*' -not -path './.git/*'); do
+            node --check "$f"
+            count=$((count + 1))
+          done
+          echo "parsed $count JavaScript files"
+
+      - name: No executable inline event handlers
+        run: |
+          set -e
+          # Any on* attribute that a browser would compile as a handler.
+          hits=$(grep -rInE '<[a-zA-Z][^>]*[[:space:]]on(click|change|input|submit|error|load|focus|blur|keydown|keyup|mouse[a-z]+)[[:space:]]*=' --include='*.html' . || true)
+          if [ -n "$hits" ]; then
+            echo "Executable inline handlers found:"
+            echo "$hits"
+            exit 1
+          fi
+          echo "no executable inline handlers in HTML"
+
+      - name: CSP hash guard
+        run: node verify_csp_hashes.js
