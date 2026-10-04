@@ -124,7 +124,7 @@
       "src": "/(.*)",
       "continue": true,
       "headers": {
-        "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.postalpincode.in https://nominatim.openstreetmap.org; font-src 'self'; frame-src 'self' https://www.openstreetmap.org; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; worker-src 'self'; manifest-src 'self'; upgrade-insecure-requests",
+        "Content-Security-Policy": "default-src 'self'; script-src 'self' 'sha256-5E4kv0yJqsuBA5dWZXMVggBCcQSBYM5EKi0nWRuO2TE=' 'sha256-mkGHCh/CZhIcMe3N5brVBcW+qGcvpJr95hOI/Hzv9/Y=' 'sha256-AjxHWGLAep3r1KftZVXb0d1Iyjpek0SUDCCKmcdUsws='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.postalpincode.in https://nominatim.openstreetmap.org; font-src 'self'; frame-src 'self' https://www.openstreetmap.org; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; worker-src 'self'; manifest-src 'self'; upgrade-insecure-requests",
         "X-Content-Type-Options": "nosniff",
         "X-Frame-Options": "DENY",
         "Referrer-Policy": "strict-origin-when-cross-origin",

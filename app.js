@@ -174,7 +174,12 @@ app.use(require("./utils/logger").requestLogger);
 // the edge router also adds these for static files; here they guarantee the
 // API responses always carry them (and give local dev identical behaviour).
 // The CSP mirrors vercel.json so browser + API responses are consistent.
-const CSP = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.postalpincode.in https://nominatim.openstreetmap.org; font-src 'self'; frame-src 'self' https://www.openstreetmap.org; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; worker-src 'self'; manifest-src 'self'; upgrade-insecure-requests";
+// script-src no longer needs 'unsafe-inline': every on* handler was migrated to
+// data-act hooks resolved by the shared dispatcher in api.js, and the three
+// remaining executable inline script blocks are allow-listed by digest
+// (delivery.html, profile.html, signup.html). Kept as a literal so it stays
+// byte-identical to vercel.json and greppable during audits.
+const CSP = "default-src 'self'; script-src 'self' 'sha256-5E4kv0yJqsuBA5dWZXMVggBCcQSBYM5EKi0nWRuO2TE=' 'sha256-mkGHCh/CZhIcMe3N5brVBcW+qGcvpJr95hOI/Hzv9/Y=' 'sha256-AjxHWGLAep3r1KftZVXb0d1Iyjpek0SUDCCKmcdUsws='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.postalpincode.in https://nominatim.openstreetmap.org; font-src 'self'; frame-src 'self' https://www.openstreetmap.org; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; worker-src 'self'; manifest-src 'self'; upgrade-insecure-requests";
 app.use((req, res, next) => {
     res.setHeader("Content-Security-Policy", CSP);
     res.setHeader("X-Content-Type-Options", "nosniff");

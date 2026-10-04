@@ -116,7 +116,7 @@
                 </div>
 
                 <!-- Edit profile button -->
-                <button class="edit-btn fm-btn fm-btn-primary" onclick="toggleEdit(true)">Edit Profile</button>
+                <button class="edit-btn fm-btn fm-btn-primary" data-act="[[&quot;toggleEdit&quot;,[true]]]">Edit Profile</button>
             </div>
 
             <!-- Edit form (hidden by default, shown on edit button click) -->
@@ -140,7 +140,7 @@
                     </div>
                     
                     <button type="submit" class="save-btn fm-btn fm-btn-primary">Save Changes</button>
-                    <button type="button" onclick="toggleEdit(false)" class="cancel-btn fm-btn">Cancel</button>
+                    <button type="button" data-act="[[&quot;toggleEdit&quot;,[false]]]" class="cancel-btn fm-btn">Cancel</button>
                 </form>
             </div>
 
@@ -153,7 +153,7 @@
                     <!-- Addresses will be loaded by script.js -->
                 </div>
                 
-                <button class="add-address-btn fm-btn fm-btn-primary" onclick="toggleAddressForm(true)">+ Add New Address</button>
+                <button class="add-address-btn fm-btn fm-btn-primary" data-act="[[&quot;toggleAddressForm&quot;,[true]]]">+ Add New Address</button>
             </div>
 
             <!-- Address form (modal-like) -->
@@ -227,7 +227,7 @@
                     
                     <div class="form-actions">
                         <button type="submit" class="save-btn fm-btn fm-btn-primary" id="addressSaveBtn">Save Address</button>
-                        <button type="button" onclick="toggleAddressForm(false)" class="cancel-btn fm-btn">Cancel</button>
+                        <button type="button" data-act="[[&quot;toggleAddressForm&quot;,[false]]]" class="cancel-btn fm-btn">Cancel</button>
                     </div>
                 </form>
             </div>
@@ -283,8 +283,8 @@
                         </p>
                         <div class="fm-ref-code" id="referralCodeDisplay" title="Your referral code">—</div>
                         <div class="fm-ref-actions">
-                            <button type="button" class="fm-btn fm-btn-primary" onclick="copyReferralLink()">Copy code</button>
-                            <button type="button" class="fm-btn" onclick="shareReferral()">Share link</button>
+                            <button type="button" class="fm-btn fm-btn-primary" data-act="[[&quot;copyReferralLink&quot;,[]]]">Copy code</button>
+                            <button type="button" class="fm-btn" data-act="[[&quot;shareReferral&quot;,[]]]">Share link</button>
                         </div>
                     </div>
                     <div class="profile-card" style="padding:20px;">
@@ -292,7 +292,7 @@
                         <div class="fm-wallet-balance" id="walletBalanceDisplay">₹0</div>
                         <div class="fm-claim-row">
                             <input type="text" id="referralClaimInput" class="input-field" placeholder="Enter a friend's code" maxlength="8" autocomplete="off">
-                            <button type="button" class="fm-btn fm-btn-primary" onclick="claimReferral()">Claim</button>
+                            <button type="button" class="fm-btn fm-btn-primary" data-act="[[&quot;claimReferral&quot;,[]]]">Claim</button>
                         </div>
                     </div>
                 </div>
@@ -314,7 +314,7 @@
                         </p>
                     </div>
                     <label class="fm-switch" title="Toggle repeat-order reminders">
-                        <input type="checkbox" id="reminderOptOutToggle" onchange="toggleReminderOptOut(this)">
+                        <input type="checkbox" id="reminderOptOutToggle" data-act="[[&quot;toggleReminderOptOut&quot;,[&quot;$el&quot;]]]">
                         <span class="fm-switch-slider"></span>
                     </label>
                 </div>
@@ -532,9 +532,9 @@
                     '</div>' +
                     '<p class="fm-addr-lines">' + esc(lines) + '</p>' + note +
                     '<div class="fm-addr-actions">' +
-                        (!addr.isDefault ? '<button type="button" class="fm-btn" onclick="setDefaultAddress(' + i + ')">Set as default</button>' : '') +
-                        '<button type="button" class="fm-btn" onclick="editAddress(' + i + ')">Edit</button>' +
-                        '<button type="button" class="fm-btn fm-btn-danger" onclick="deleteAddress(' + i + ')">Delete</button>' +
+                        (!addr.isDefault ? '<button type="button" class="fm-btn" data-act="setDefaultAddress" data-arg=\'[' + i + ']\'>Set as default</button>' : '') +
+                        '<button type="button" class="fm-btn" data-act="editAddress" data-arg=\'[' + i + ']\'>Edit</button>' +
+                        '<button type="button" class="fm-btn fm-btn-danger" data-act="deleteAddress" data-arg=\'[' + i + ']\'>Delete</button>' +
                     '</div>' +
                 '</article>';
             }).join("");

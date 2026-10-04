@@ -19,7 +19,7 @@
         <div class="auth-box" id="main-content">
 
             <div style="text-align:right; margin-bottom:10px;">
-                <button type="button" class="dark-mode-toggle" id="darkModeToggle" onclick="toggleDarkMode()" title="Toggle Dark Mode" aria-label="Toggle dark mode">🌙</button>
+                <button type="button" class="dark-mode-toggle" id="darkModeToggle" data-act="[[&quot;toggleDarkMode&quot;,[]]]" title="Toggle Dark Mode" aria-label="Toggle dark mode">🌙</button>
             </div>
 
             <div class="auth-logo">
@@ -178,7 +178,7 @@
                         type="button"
                         class="auth-btn otp-resend-btn"
                         id="signupResendBtn"
-                        onclick="handleSignupResend()"
+                        data-act="[[&quot;handleSignupResend&quot;,[]]]"
                     >
                         Resend OTP
                     </button>
@@ -186,7 +186,7 @@
                 </form>
 
                 <p class="auth-bottom">
-                    <a href="#" onclick="event.preventDefault(); showSignupDetailsStep();">
+                    <a href="#" data-act="[[&quot;$prevent&quot;,[]],[&quot;showSignupDetailsStep&quot;,[]]]">
                         Edit details
                     </a>
                 </p>

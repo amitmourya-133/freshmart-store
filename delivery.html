@@ -14,8 +14,8 @@
     <a class="skip-link" href="#main-content">Skip to content</a><header>
         <div class="logo">FreshMart</div>
         <div class="header-actions">
-            <button type="button" class="secondary-btn" onclick="window.location.href='index.html'">Store</button>
-            <button type="button" class="dark-mode-toggle" id="darkModeToggle" onclick="toggleDarkMode()" title="Dark Mode" aria-label="Toggle dark mode">🌙</button>
+            <button type="button" class="secondary-btn" data-act="[[&quot;$nav&quot;,&quot;index.html&quot;]]">Store</button>
+            <button type="button" class="dark-mode-toggle" id="darkModeToggle" data-act="[[&quot;toggleDarkMode&quot;,[]]]" title="Dark Mode" aria-label="Toggle dark mode">🌙</button>
         </div>
     </header>
 
@@ -298,7 +298,7 @@
                     ? `
                     <div class="detail-row">
                         <strong>Location:</strong>
-                        <button type="button" class="loc-secondary-btn" onclick="viewDeliveryMap(${dLat}, ${dLng}, 'Customer Delivery Location')">View Map</button>
+                        <button type="button" class="loc-secondary-btn" data-act="[[&quot;viewDeliveryMap&quot;,[${JSON.stringify(dLat)},${JSON.stringify(dLng)},&quot;Customer Delivery Location&quot;]]]">View Map</button>
                         <a class="loc-secondary-btn" style="text-decoration:none;display:inline-block;" href="${dnHref}" target="_blank" rel="noopener noreferrer">Open in Maps</a>
                     </div>`
                     : `
@@ -312,7 +312,7 @@
             const isTerminal = status === "DELIVERED" || status === "REJECTED" || status === "CANCELLED";
             const shareBar = isTerminal ? '' : `
                 <div class="loc-share-bar" data-id="${assignment._id}">
-                    <button type="button" class="loc-action-btn share-live-btn" data-id="${assignment._id}" onclick="toggleLiveShare(this)">📡 Share My Live Location</button>
+                    <button type="button" class="loc-action-btn share-live-btn" data-id="${assignment._id}" data-act="[[&quot;toggleLiveShare&quot;,[&quot;$el&quot;]]]">📡 Share My Live Location</button>
                     <span class="loc-share-pill">Live location sharing…</span>
                 </div>`;
 

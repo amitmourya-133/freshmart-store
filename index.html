@@ -40,8 +40,8 @@
 <a class="skip-link" href="#main-content">Skip to content</a><!-- HEADER -->
 <header>
     <div class="site-nav">
-        <div class="logo" onclick="goSection('top')" title="FreshMart Home">FreshMart</div>
-        <button type="button" class="hamburger" id="hamburgerBtn" onclick="toggleMobileNav()" aria-expanded="false" aria-label="Open menu" title="Menu">
+        <div class="logo" data-act="[[&quot;goSection&quot;,[&quot;top&quot;]]]" title="FreshMart Home">FreshMart</div>
+        <button type="button" class="hamburger" id="hamburgerBtn" data-act="[[&quot;toggleMobileNav&quot;,[]]]" aria-expanded="false" aria-label="Open menu" title="Menu">
             <span></span>
             <span></span>
             <span></span>
@@ -50,30 +50,30 @@
 
     <div class="center-group">
         <nav class="nav-links" id="navLinks" aria-label="Primary navigation">
-            <button type="button" class="nav-link" onclick="goSection('top'); closeMobileNav()">Home</button>
-            <button type="button" class="nav-link" onclick="goSection('categories'); closeMobileNav()">Categories</button>
-            <button type="button" class="nav-link" onclick="goSection('products'); closeMobileNav()">Products</button>
+            <button type="button" class="nav-link" data-act="[[&quot;goSection&quot;,[&quot;top&quot;]],[&quot;closeMobileNav&quot;,[]]]">Home</button>
+            <button type="button" class="nav-link" data-act="[[&quot;goSection&quot;,[&quot;categories&quot;]],[&quot;closeMobileNav&quot;,[]]]">Categories</button>
+            <button type="button" class="nav-link" data-act="[[&quot;goSection&quot;,[&quot;products&quot;]],[&quot;closeMobileNav&quot;,[]]]">Products</button>
         </nav>
         <div class="search-box">
-            <input type="text" id="searchInput" placeholder="Search vegetables, fruits, grocery..." data-i18n-placeholder="search.placeholder" oninput="onSearchInput()" onkeydown="onSearchKeydown(event)" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="searchSuggest" aria-haspopup="listbox" aria-label="Search products">
-            <button type="button" id="voiceSearchBtn" class="voice-btn" onclick="startVoiceSearch()" aria-label="Voice Search" title="Voice Search" aria-pressed="false">
+            <input type="text" id="searchInput" placeholder="Search vegetables, fruits, grocery..." data-i18n-placeholder="search.placeholder" data-act="[[&quot;onSearchInput&quot;,[]]]" data-act="[[&quot;onSearchKeydown&quot;,[&quot;$e&quot;]]]" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="searchSuggest" aria-haspopup="listbox" aria-label="Search products">
+            <button type="button" id="voiceSearchBtn" class="voice-btn" data-act="[[&quot;startVoiceSearch&quot;,[]]]" aria-label="Voice Search" title="Voice Search" aria-pressed="false">
                 <svg viewBox="0 0 24 24" width="18" height="18" focusable="false" aria-hidden="true">
                     <path d="M12 14c1.66 0 3-1.34 3-3V6c0-1.66-1.34-3-3-3S9 4.34 9 6v5c0 1.66 1.34 3 3 3z"></path>
                     <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21H8v2h8v-2h-3v-3.08c3.39-.49 6-3.39 6-6.92h-2z"></path>
                 </svg>
             </button>
-            <button type="button" onclick="searchProducts()">Search</button>
+            <button type="button" data-act="[[&quot;searchProducts&quot;,[]]]">Search</button>
             <div id="searchSuggest" class="search-suggest" role="listbox" aria-expanded="false"></div>
         </div>
     </div>
 
     <div class="header-actions">
-        <button type="button" class="secondary-btn" data-i18n="nav.myorders" onclick="window.location.href='orders.html'">My Orders</button>
+        <button type="button" class="secondary-btn" data-i18n="nav.myorders" data-act="[[&quot;$nav&quot;,&quot;orders.html&quot;]]">My Orders</button>
         <div class="auth-area" id="authArea"></div>
-        <button type="button" class="secondary-btn wishlist-btn-header hide-on-mobile-nav" data-i18n="nav.wishlist" onclick="toggleWishlistPage()">Wishlist <span id="wishlistCount">0</span></button>
-        <button type="button" class="dark-mode-toggle" id="darkModeToggle" onclick="toggleDarkMode()" title="Toggle Dark Mode" aria-label="Toggle dark mode">Dark mode</button>
-        <button type="button" class="secondary-btn lang-toggle-btn" id="langToggle" onclick="toggleLanguage(this)" title="Switch language (English / Hindi)" aria-label="Switch language">हिं EN</button>
-        <button type="button" class="cart-btn" data-i18n="nav.cart" onclick="openCart()">
+        <button type="button" class="secondary-btn wishlist-btn-header hide-on-mobile-nav" data-i18n="nav.wishlist" data-act="[[&quot;toggleWishlistPage&quot;,[]]]">Wishlist <span id="wishlistCount">0</span></button>
+        <button type="button" class="dark-mode-toggle" id="darkModeToggle" data-act="[[&quot;toggleDarkMode&quot;,[]]]" title="Toggle Dark Mode" aria-label="Toggle dark mode">Dark mode</button>
+        <button type="button" class="secondary-btn lang-toggle-btn" id="langToggle" data-act="[[&quot;toggleLanguage&quot;,[&quot;$el&quot;]]]" title="Switch language (English / Hindi)" aria-label="Switch language">हिं EN</button>
+        <button type="button" class="cart-btn" data-i18n="nav.cart" data-act="[[&quot;openCart&quot;,[]]]">
             Cart <span id="cartCount">0</span>
         </button>
     </div>
@@ -84,7 +84,7 @@
     <div class="hero-content">
         <h1 data-i18n="hero.title">Freshness Delivered To Your Door</h1>
         <p data-i18n="hero.subtitle">Fresh vegetables, fruits and groceries at the best prices.</p>
-        <button type="button" data-i18n="hero.cta" onclick="scrollToProducts()">SHOP NOW</button>
+        <button type="button" data-i18n="hero.cta" data-act="[[&quot;scrollToProducts&quot;,[]]]">SHOP NOW</button>
     </div>
 </section>
 
@@ -96,7 +96,7 @@
                 <span class="banner-tag">TODAY'S DEAL</span>
                 <h2>Aaj Ka Offer!</h2>
                 <p>Fresh Tomato sirf <strong>₹60/kg</strong> — quality nomani guaranteed</p>
-                <button type="button" onclick="scrollToProducts()">Shop Now</button>
+                <button type="button" data-act="[[&quot;scrollToProducts&quot;,[]]]">Shop Now</button>
             </div>
             <div class="banner-visual"><img src="https://images.unsplash.com/photo-1546094096-0df4bcaaa337?auto=format&fit=crop&w=500&q=85" alt="Fresh tomatoes"></div>
         </div>
@@ -105,7 +105,7 @@
                 <span class="banner-tag">FREE DELIVERY</span>
                 <h2>Free Delivery!</h2>
                 <p>₹500+ ke order par <strong>FREE Delivery</strong> — abhi order karo</p>
-                <button type="button" onclick="scrollToProducts()">Shop Now</button>
+                <button type="button" data-act="[[&quot;scrollToProducts&quot;,[]]]">Shop Now</button>
             </div>
             <div class="banner-visual"><img src="https://images.unsplash.com/photo-1610832958506-aa56368176cf?auto=format&fit=crop&w=500&q=85" alt="Fresh produce delivery"></div>
         </div>
@@ -114,7 +114,7 @@
                 <span class="banner-tag">FRESH PICK</span>
                 <h2>Farm Fresh, Always!</h2>
                 <p>Fresh fruits &amp; veggies delivered to your doorstep</p>
-                <button type="button" onclick="scrollToProducts()">Shop Now</button>
+                <button type="button" data-act="[[&quot;scrollToProducts&quot;,[]]]">Shop Now</button>
             </div>
             <div class="banner-visual"><img src="https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=500&q=85" alt="Fresh vegetables"></div>
         </div>
@@ -126,15 +126,15 @@
 <section class="categories" id="categories">
     <h2 data-i18n="categories.title">Shop By Category</h2>
     <div class="category-container">
-        <div class="category" onclick="filterCategory('Vegetables')">
+        <div class="category" data-act="[[&quot;filterCategory&quot;,[&quot;Vegetables&quot;]]]">
             <div><img src="images/vegetables-category.webp" alt="Vegetables"></div>
             <h3 data-i18n="cat.vegetables">Vegetables</h3>
         </div>
-        <div class="category" onclick="filterCategory('Fruits')">
+        <div class="category" data-act="[[&quot;filterCategory&quot;,[&quot;Fruits&quot;]]]">
             <div><img src="https://images.unsplash.com/photo-1619546813926-a78fa6372cd2?auto=format&fit=crop&w=300&q=85" alt="Fruits"></div>
             <h3 data-i18n="cat.fruits">Fruits</h3>
         </div>
-        <div class="category" onclick="filterCategory('Grocery')">
+        <div class="category" data-act="[[&quot;filterCategory&quot;,[&quot;Grocery&quot;]]]">
             <div><img src="images/groceries-category.webp" alt="Grocery items"></div>
             <h3 data-i18n="cat.grocery">Grocery</h3>
         </div>
@@ -146,10 +146,10 @@
     <h2 data-i18n="products.title">Fresh Products</h2>
 
     <div class="cat-filter-bar">
-        <button class="cat-filter-btn cat-filter-active" data-cat="All" data-i18n="filter.all" onclick="showAllProducts()">All</button>
-        <button class="cat-filter-btn" data-cat="Vegetables" data-i18n="filter.vegetables" onclick="filterCategory('Vegetables')">Vegetables</button>
-        <button class="cat-filter-btn" data-cat="Fruits" data-i18n="filter.fruits" onclick="filterCategory('Fruits')">Fruits</button>
-        <button class="cat-filter-btn" data-cat="Grocery" data-i18n="filter.grocery" onclick="filterCategory('Grocery')">Grocery</button>
+        <button class="cat-filter-btn cat-filter-active" data-cat="All" data-i18n="filter.all" data-act="[[&quot;showAllProducts&quot;,[]]]">All</button>
+        <button class="cat-filter-btn" data-cat="Vegetables" data-i18n="filter.vegetables" data-act="[[&quot;filterCategory&quot;,[&quot;Vegetables&quot;]]]">Vegetables</button>
+        <button class="cat-filter-btn" data-cat="Fruits" data-i18n="filter.fruits" data-act="[[&quot;filterCategory&quot;,[&quot;Fruits&quot;]]]">Fruits</button>
+        <button class="cat-filter-btn" data-cat="Grocery" data-i18n="filter.grocery" data-act="[[&quot;filterCategory&quot;,[&quot;Grocery&quot;]]]">Grocery</button>
     </div>
 
     <div class="filter-row">
@@ -157,14 +157,14 @@
             <span class="price-filter-label">Price:</span>
             <strong id="priceRangeLabel" class="price-range-label">₹0 – ₹0</strong>
             <div class="range-wrap" id="priceRangeWrap">
-                <input type="range" id="priceMin" class="price-range-input" min="0" max="0" step="1" value="0" oninput="onPriceRangeChange()">
-                <input type="range" id="priceMax" class="price-range-input" min="0" max="0" step="1" value="0" oninput="onPriceRangeChange()">
+                <input type="range" id="priceMin" class="price-range-input" min="0" max="0" step="1" value="0" data-act="[[&quot;onPriceRangeChange&quot;,[]]]">
+                <input type="range" id="priceMax" class="price-range-input" min="0" max="0" step="1" value="0" data-act="[[&quot;onPriceRangeChange&quot;,[]]]">
             </div>
         </div>
 
         <div class="sort-wrap">
             <label for="sortSelect">Sort:</label>
-            <select id="sortSelect" onchange="changeSort(this.value)">
+            <select id="sortSelect" data-act="[[&quot;changeSort&quot;,[&quot;$val&quot;]]]">
                 <option value="default">Default</option>
                 <option value="low">Price: Low to High</option>
                 <option value="high">Price: High to Low</option>
@@ -172,7 +172,7 @@
             </select>
         </div>
 
-        <button type="button" class="clear-filters-btn" onclick="clearFilters()">Clear Filters</button>
+        <button type="button" class="clear-filters-btn" data-act="[[&quot;clearFilters&quot;,[]]]">Clear Filters</button>
     </div>
 
     <div id="resultsInfo" class="results-info"></div>
@@ -188,7 +188,7 @@
     </div>
 
     <div class="load-more-wrap">
-        <button type="button" class="load-more-btn" id="loadMoreBtn" onclick="loadMoreProducts()">Load More</button>
+        <button type="button" class="load-more-btn" id="loadMoreBtn" data-act="[[&quot;loadMoreProducts&quot;,[]]]">Load More</button>
     </div>
 </section>
 
@@ -207,7 +207,7 @@
 </section>
 
 <!-- SUBSCRIPTION CTA -->
-<section class="subscription-banner" onclick="window.location.href='subscription.html'">
+<section class="subscription-banner" data-act="[[&quot;$nav&quot;,&quot;subscription.html&quot;]]">
     <div>
         <h3 data-i18n="sub.banner.title">Weekly Veggie Box</h3>
         <p data-i18n="sub.banner.desc">Fresh vegetables delivered every week. Save up to 20%!</p>
@@ -250,22 +250,22 @@
 <!-- CART MODAL -->
 <div id="cartModal" class="cart-modal" role="dialog" aria-modal="true" aria-label="Your cart">
     <div class="cart-content">
-        <button type="button" class="close-btn" onclick="closeCart()">✕</button>
+        <button type="button" class="close-btn" data-act="[[&quot;closeCart&quot;,[]]]">✕</button>
         <h2>Your Cart</h2>
         <div id="cartItems"></div>
         <h3 id="cartTotal">Total: ₹0</h3>
         <div id="minOrderNoteCart" class="min-order-note" style="display:none;"></div>
-        <button type="button" class="checkout-btn" data-i18n="checkout.proceed" onclick="proceedToCheckout()">Proceed To Checkout</button>
+        <button type="button" class="checkout-btn" data-i18n="checkout.proceed" data-act="[[&quot;proceedToCheckout&quot;,[]]]">Proceed To Checkout</button>
     </div>
 </div>
 
 <!-- WISHLIST MODAL -->
 <div id="wishlistModal" class="cart-modal">
     <div class="cart-content">
-        <button type="button" class="close-btn" onclick="closeWishlistPage()">✕</button>
+        <button type="button" class="close-btn" data-act="[[&quot;closeWishlistPage&quot;,[]]]">✕</button>
         <h2>My Wishlist</h2>
         <div id="wishlistItems"></div>
-        <button type="button" class="checkout-btn" onclick="closeWishlistPage()">Continue Shopping</button>
+        <button type="button" class="checkout-btn" data-act="[[&quot;closeWishlistPage&quot;,[]]]">Continue Shopping</button>
     </div>
 </div>
 

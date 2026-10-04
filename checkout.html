@@ -19,12 +19,12 @@
     <div class="logo">🥬 FreshMart</div>
 
     <div class="header-actions">
-        <button class="secondary-btn" onclick="window.location.href='orders.html'">
+        <button class="secondary-btn" data-act="[[&quot;$nav&quot;,&quot;orders.html&quot;]]">
             My Orders
         </button>
         <div class="auth-area" id="authArea"></div>
-        <button type="button" class="dark-mode-toggle" id="darkModeToggle" onclick="toggleDarkMode()" title="Toggle Dark Mode" aria-label="Toggle dark mode">🌙</button>
-        <button class="cart-btn" onclick="window.location.href='index.html'">
+        <button type="button" class="dark-mode-toggle" id="darkModeToggle" data-act="[[&quot;toggleDarkMode&quot;,[]]]" title="Toggle Dark Mode" aria-label="Toggle dark mode">🌙</button>
+        <button class="cart-btn" data-act="[[&quot;$nav&quot;,&quot;index.html&quot;]]">
             ← Continue Shopping
         </button>
     </div>
@@ -112,17 +112,17 @@
                     maxlength="6"
                     pattern="[0-9]{6}"
                     autocomplete="postal-code"
-                    onblur="detectPincodeInfo()"
+                    data-act="[[&quot;detectPincodeInfo&quot;,[]]]"
                 />
 
                 <div id="pincodeHint" class="pincode-hint" style="display:none;"></div>
 
                 <div class="loc-row">
-                    <button type="button" class="loc-action-btn" id="useLocBtn" onclick="captureCheckoutLocation()">📍 Share My Exact Location</button>
-                    <button type="button" class="loc-action-btn" id="pickMapBtn" onclick="openCheckoutMapPicker()">🗺️ Pick on Map</button>
+                    <button type="button" class="loc-action-btn" id="useLocBtn" data-act="[[&quot;captureCheckoutLocation&quot;,[]]]">📍 Share My Exact Location</button>
+                    <button type="button" class="loc-action-btn" id="pickMapBtn" data-act="[[&quot;openCheckoutMapPicker&quot;,[]]]">🗺️ Pick on Map</button>
                     <span class="loc-captured" id="locCaptured"></span>
-                    <button type="button" class="loc-secondary-btn" id="updateLocBtn" style="display:none;" onclick="captureCheckoutLocation()">🔄 Update Location</button>
-                    <button type="button" class="loc-secondary-btn" id="clearLocBtn" style="display:none;" onclick="clearCheckoutLocation()">✕ Clear</button>
+                    <button type="button" class="loc-secondary-btn" id="updateLocBtn" style="display:none;" data-act="[[&quot;captureCheckoutLocation&quot;,[]]]">🔄 Update Location</button>
+                    <button type="button" class="loc-secondary-btn" id="clearLocBtn" style="display:none;" data-act="[[&quot;clearCheckoutLocation&quot;,[]]]">✕ Clear</button>
                 </div>
                 <div class="loc-err" id="locErr"></div>
                 <div id="locMapPreview" class="loc-map-preview" style="display:none;"></div>
@@ -181,7 +181,7 @@
             <button
                 class="place-order-btn"
                 id="placeOrderBtn"
-                onclick="placeOrder()"
+                data-act="[[&quot;placeOrder&quot;,[]]]"
             >
                 🛍️ PLACE ORDER
             </button>
@@ -199,8 +199,8 @@
 
             <div class="coupon-box" id="couponBox">
                 <input type="text" id="couponInput" placeholder="Coupon code" maxlength="20" autocomplete="off">
-                <button type="button" id="applyCouponBtn" onclick="applyCoupon()">Apply</button>
-                <button type="button" id="removeCouponBtn" onclick="removeCoupon()" style="display:none;">✕</button>
+                <button type="button" id="applyCouponBtn" data-act="[[&quot;applyCoupon&quot;,[]]]">Apply</button>
+                <button type="button" id="removeCouponBtn" data-act="[[&quot;removeCoupon&quot;,[]]]" style="display:none;">✕</button>
             </div>
             <div id="couponStatus" class="coupon-status" style="display:none;"></div>
 
@@ -282,7 +282,7 @@
         <p id="successReceipt"></p>
 
         <div class="next-actions">
-            <button onclick="window.location.href='index.html'">
+            <button data-act="[[&quot;$nav&quot;,&quot;index.html&quot;]]">
                 Continue Shopping
             </button>
             <a href="orders.html" style="display:inline-block;margin-left:12px;vertical-align:middle;">

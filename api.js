@@ -1948,6 +1948,313 @@ function apiAdminStockAlertsWaiting() {
         });
 }
 
+// ---------- CSP-SAFE DELEGATED ACTION DISPATCHER ----------
+// Replaces every inline on* attribute (both static markup and innerHTML
+// templates) with data-act / data-arg hooks. It lives in api.js because that is
+// the first script on every page, so script.js / admin.js / features.js /
+// delivery-ops.js / notifications.js / subscription.js / help.js handlers are
+// all resolvable by name at event time - the same global lookup an inline
+// handler performed, minus the CSP violation.
+//
+// data-act accepts either form:
+//   data-act="fnName" data-arg='["a",1]'                  (shorthand)
+//   data-act='[["someHandler",["a",1]],["$stop",[]]]'        (compound)
+//
+// Argument tokens resolved against the element / event:
+//   "$el" -> element   "$val" -> element.value   "$checked" -> element.checked
+//   "$src" -> element.src   "$e" -> event
+//
+// Builtin pseudo-actions. Invoked as fn.call(element, event, ...args), so the
+// owning element is always `this` and the event is always the first parameter.
+// Argument shapes come from the migrated call sites:
+//   $stop()  $prevent()  $nav(href)
+//   $hideSelf()  $hideSelfShow(selector)  $closeModal()  $imgMissing()
+(function (global) {
+    var BUILTIN = {
+        $stop: function (ev) {
+            if (ev && ev.stopPropagation) ev.stopPropagation();
+        },
+        $prevent: function (ev) {
+            if (ev && ev.preventDefault) ev.preventDefault();
+        },
+        $nav: function (ev, href) {
+            if (href == null || href === "") return;
+            global.location.href = href;
+        },
+        $hideSelf: function () {
+            if (this) this.style.display = "none";
+        },
+        $hideSelfShow: function (ev, selector) {
+            if (this) this.style.display = "none";
+            var target = selector ? global.document.querySelector(selector) : null;
+            if (target) target.style.display = "block";
+        },
+        $closeModal: function () {
+            var m = this && this.closest ? this.closest(".qr-modal") : null;
+            if (m) m.remove();
+        },
+        $imgMissing: function () {
+            var el = this;
+            // Capture the parent first: clearing it detaches the <img>, so
+            // re-reading el.parentNode afterwards would be null.
+            var parent = el && el.parentNode;
+            if (!parent) return;
+            var span = global.document.createElement("span");
+            span.className = "admin-img-missing";
+            span.textContent = "Image not found: " + (el.getAttribute("data-fb-text") || "");
+            parent.textContent = "";
+            parent.appendChild(span);
+        }
+    };
+
+    function argValue(v, el, ev) {
+        if (typeof v === "string") {
+            if (v === "$el") return el;
+            if (v === "$val") return el.value;
+            if (v === "$checked") return el.checked;
+            if (v === "$src") return el.src;
+            if (v === "$e") return ev;
+        }
+        return v;
+    }
+
+    function parsePlan(el, type) {
+        var raw = el.getAttribute("data-act-" + type) || el.getAttribute("data-act");
+        if (!raw) return null;
+        raw = raw.trim();
+        if (raw.charAt(0) === "[") {
+            try {
+                var parsed = JSON.parse(raw);
+                return Array.isArray(parsed) ? parsed : null;
+            } catch (err) {
+                if (global.console) console.warn("[data-act] unparseable plan", raw);
+                return null;
+            }
+        }
+        // Declared-spec form, e.g.  data-act="updateOrderStatus(id, this.value)".
+        // Parsed by the allow-listed tokenizer below - never eval / Function.
+        var spec = parseSpec(raw);
+        if (spec) return spec;
+        // Bare-name form: data-act="fnName" + data-arg='["a",1]'
+        var bare = raw.trim();
+        if (/^[A-Za-z_$][\w$]*$/.test(bare)) {
+            var args = [];
+            try {
+                args = JSON.parse(el.getAttribute("data-arg") || "[]");
+            } catch (err2) {
+                args = [];
+            }
+            if (!Array.isArray(args)) args = [];
+            return [[bare, args]];
+        }
+        if (global.console) console.warn("[data-act] unsupported spec", raw);
+        return null;
+    }
+
+    // ---- strict tokenizer for declared specs -------------------------------
+    // Deliberately tiny: only the exact shapes the migrated call sites used.
+    // Anything unexpected returns null so the call is skipped and logged,
+    // rather than being evaluated.
+    var SIMPLE = {
+        "this": "$el",
+        "event": "$e",
+        "true": true,
+        "false": false,
+        "null": null
+    };
+
+    function scan(src, i, stopChars) {
+        // returns { value, end } for one token, or null
+        while (i < src.length && /\s/.test(src[i])) i++;
+        if (i >= src.length) return null;
+        var c = src[i];
+        if (c === "'" || c === '"') {
+            var buf = c;
+            i++;
+            while (i < src.length) {
+                if (src[i] === "\\") { buf += src[i] + (src[i + 1] || ""); i += 2; continue; }
+                buf += src[i];
+                if (src[i] === c) { i++; break; }
+                i++;
+            }
+            var inner = buf.slice(1, -1).replace(/\\'/g, "'").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+            return { value: inner, end: i, quoted: true };
+        }
+        var start = i;
+        while (i < src.length && stopChars.indexOf(src[i]) === -1) i++;
+        var word = src.slice(start, i);
+        if (!word) return null;
+        if (/^-?\d+(?:\.\d+)?$/.test(word)) return { value: Number(word), end: i };
+        return { value: word, end: i, word: true };
+    }
+
+    function parseSpec(src) {
+        if (!src || src.length > 400) return null;
+        var steps = [];
+        var i = 0;
+        var guard = 0;
+        while (i < src.length) {
+            if (guard++ > 40) return null;
+            while (i < src.length && (/\s/.test(src[i]) || src[i] === ";")) i++;
+            if (i >= src.length) break;
+
+            // window.location.href = 'x'
+            var navm = src.slice(i).match(/^window\.location\.href\s*=\s*/);
+            if (navm) {
+                i += navm[0].length;
+                var nt = scan(src, i, "");
+                if (!nt || !nt.quoted) return null;
+                steps.push(["$nav", [nt.value]]);
+                i = nt.end;
+                continue;
+            }
+
+            // event.preventDefault() / event.stopPropagation() must be matched
+            // before the generic call path, which would choke on the dot.
+            var evtM = src.slice(i).match(/^event\s*\.\s*(preventDefault|stopPropagation)\s*\(\s*\)/);
+            if (evtM) {
+                steps.push([evtM[1] === "preventDefault" ? "$prevent" : "$stop", []]);
+                i += evtM[0].length;
+                continue;
+            }
+
+            var nameTok = scan(src, i, "(");
+            if (!nameTok || !nameTok.word) return null;
+            i = nameTok.end;
+            while (i < src.length && /\s/.test(src[i])) i++;
+            if (src[i] !== "(") return null;
+            i++;
+            var args = [];
+            for (;;) {
+                while (i < src.length && /\s/.test(src[i])) i++;
+                if (src[i] === ")") { i++; break; }
+                if (i >= src.length) return null;
+                var t = scan(src, i, ",)");
+                if (!t) return null;
+                i = t.end;
+                var key = t.word ? t.word : null;
+                if (key && Object.prototype.hasOwnProperty.call(SIMPLE, key)) {
+                    args.push(SIMPLE[key]);
+                } else if (key && key.indexOf("this.") === 0) {
+                    var prop = key.slice(5);
+                    if (prop !== "value" && prop !== "checked" && prop !== "src") return null;
+                    args.push(prop === "value" ? "$val" : (prop === "checked" ? "$checked" : "$src"));
+                } else if (t.quoted) {
+                    args.push(t.value);
+                } else if (typeof t.value === "number") {
+                    args.push(t.value);
+                } else {
+                    return null; // bare identifier / unsupported expression
+                }
+                while (i < src.length && /\s/.test(src[i])) i++;
+                if (src[i] === ",") { i++; continue; }
+                if (src[i] === ")") { i++; break; }
+                return null;
+            }
+
+            var fname = nameTok.value;
+            if (fname.indexOf(".") !== -1) return null; // no arbitrary member calls
+            steps.push([fname, args]);
+        }
+        return steps.length ? steps : null;
+    }
+
+    function runPlan(el, ev, type) {
+        var steps = parsePlan(el, type);
+        if (!steps) return;
+        for (var i = 0; i < steps.length; i++) {
+            var step = steps[i];
+            var name = step[0];
+            var isBuiltin = Object.prototype.hasOwnProperty.call(BUILTIN, name);
+            var fn = isBuiltin ? BUILTIN[name] : global[name];
+            if (typeof fn !== "function") {
+                if (global.console) console.warn("[data-act] no such function:", name);
+                continue;
+            }
+            // A step's payload may be an argument array or a single scalar
+            // (e.g. ["$nav","index.html"]). Scalars must not be iterated, or a
+            // string would be split into individual characters.
+            var rawArgs = step[1];
+            if (rawArgs === undefined || rawArgs === null) rawArgs = [];
+            else if (!Array.isArray(rawArgs)) rawArgs = [rawArgs];
+            var args = [];
+            for (var j = 0; j < rawArgs.length; j++) args.push(argValue(rawArgs[j], el, ev));
+            try {
+                // Builtins get the event first and the element as `this`;
+                // page handlers keep the original inline-handler call shape.
+                if (isBuiltin) fn.apply(el, [ev].concat(args));
+                else fn.apply(el, args);
+            } catch (err3) {
+                if (global.console) console.error("[data-act] " + name + " threw", err3);
+            }
+        }
+    }
+
+    function owner(el, type) {
+        var n = el;
+        var specific = "data-act-" + type;
+        while (n && n.nodeType === 1) {
+            if (n.hasAttribute && (n.hasAttribute(specific) || n.hasAttribute("data-act"))) return n;
+            n = n.parentElement;
+        }
+        return null;
+    }
+
+    function delegate(type) {
+        document.addEventListener(type, function (ev) {
+            var t = ev.target;
+            if (!t || t.nodeType !== 1) return;
+            var el = owner(t, type);
+            if (el) runPlan(el, ev, type);
+        });
+    }
+
+    ["click", "change", "input", "keydown", "submit", "blur", "focus"].forEach(delegate);
+
+    // Resource errors (img onerror) do not bubble - listen in capture phase.
+    document.addEventListener("error", function (ev) {
+        var t = ev.target;
+        if (!t || t.nodeType !== 1) return;
+        var el = owner(t, "error");
+        if (el) runPlan(el, ev, "error");
+    }, true);
+
+    // Exposed so innerHTML templates can emit escaped plans safely.
+    global.fmActionAttr = function (name, args) {
+        return escAttr(JSON.stringify([[name, args || []]]));
+    };
+    global.escAttr = function (s) {
+        return String(s == null ? "" : s)
+            .replace(/&/g, "&amp;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+    };
+
+    // Fallback dark-mode toggle for the pages that load neither script.js nor
+    // features.js (subscription.html, delivery.html). Pages that ship their own
+    // copy load it later and win, because global function declarations are
+    // applied in load order.
+    if (typeof global.toggleDarkMode !== "function") {
+        global.toggleDarkMode = function () {
+            if (!document.body) return;
+            document.body.classList.toggle("dark-mode");
+            var isDark = document.body.classList.contains("dark-mode");
+            try {
+                var KEY = "freshMartTheme";
+                if (typeof writeStorageValue === "function") writeStorageValue(KEY, isDark ? "dark" : "light");
+                else if (global.localStorage) global.localStorage.setItem(KEY, isDark ? "dark" : "light");
+            } catch (e) { }
+            if (typeof updateDarkModeIcon === "function") { updateDarkModeIcon(); return; }
+            var btn = document.getElementById("darkModeToggle");
+            if (!btn) return;
+            btn.innerHTML = isDark ? "☀️" : "🌙";
+            btn.title = isDark ? "Switch to Light Mode" : "Switch to Dark Mode";
+        };
+    }
+})(window);
+
 // Node-visible surface used ONLY by automated regression suites — harmless in
 // the browser (typeof module is undefined there).
 if (typeof module !== "undefined" && module.exports) {

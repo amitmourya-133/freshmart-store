@@ -20,21 +20,21 @@
         </div>
 
         <div class="admin-tabs">
-            <button class="admin-tab" id="tabDashboardBtn" onclick="switchTab('dashboard')">Dashboard</button>
-            <button class="admin-tab" id="tabOrdersBtn" onclick="switchTab('orders')">📦 Orders</button>
-            <button class="admin-tab" id="tabAnalyticsBtn" onclick="switchTab('analytics')">📊 Analytics</button>
-            <button class="admin-tab" id="tabProductsBtn" onclick="switchTab('products')">🥬 Products</button>
-            <button class="admin-tab" id="tabCustomersBtn" onclick="switchTab('customers')">👥 Customers</button>
-            <button class="admin-tab" id="tabReviewsBtn" onclick="switchTab('reviews')">⭐ Reviews</button>
-            <button class="admin-tab" id="tabCouponsBtn" onclick="switchTab('coupons')">🎟️ Coupons</button>
-            <button class="admin-tab" id="tabReturnsBtn" onclick="switchTab('returns')">📦 Returns</button>
-            <button class="admin-tab" id="tabDeliveryBtn" onclick="switchTab('delivery')">🚚 Delivery</button>
-            <button class="admin-tab" id="tabSettingsBtn" onclick="switchTab('settings')">⚙️ Settings</button>
+            <button class="admin-tab" id="tabDashboardBtn" data-act="[[&quot;switchTab&quot;,[&quot;dashboard&quot;]]]">Dashboard</button>
+            <button class="admin-tab" id="tabOrdersBtn" data-act="[[&quot;switchTab&quot;,[&quot;orders&quot;]]]">📦 Orders</button>
+            <button class="admin-tab" id="tabAnalyticsBtn" data-act="[[&quot;switchTab&quot;,[&quot;analytics&quot;]]]">📊 Analytics</button>
+            <button class="admin-tab" id="tabProductsBtn" data-act="[[&quot;switchTab&quot;,[&quot;products&quot;]]]">🥬 Products</button>
+            <button class="admin-tab" id="tabCustomersBtn" data-act="[[&quot;switchTab&quot;,[&quot;customers&quot;]]]">👥 Customers</button>
+            <button class="admin-tab" id="tabReviewsBtn" data-act="[[&quot;switchTab&quot;,[&quot;reviews&quot;]]]">⭐ Reviews</button>
+            <button class="admin-tab" id="tabCouponsBtn" data-act="[[&quot;switchTab&quot;,[&quot;coupons&quot;]]]">🎟️ Coupons</button>
+            <button class="admin-tab" id="tabReturnsBtn" data-act="[[&quot;switchTab&quot;,[&quot;returns&quot;]]]">📦 Returns</button>
+            <button class="admin-tab" id="tabDeliveryBtn" data-act="[[&quot;switchTab&quot;,[&quot;delivery&quot;]]]">🚚 Delivery</button>
+            <button class="admin-tab" id="tabSettingsBtn" data-act="[[&quot;switchTab&quot;,[&quot;settings&quot;]]]">⚙️ Settings</button>
 
             <div class="admin-tabs-actions">
-                <button type="button" class="secondary-btn" onclick="window.location.href='index.html'" title="Back to Store">← Store</button>
-                <button type="button" class="dark-mode-toggle" id="darkModeToggle" onclick="toggleDarkMode()" title="Toggle dark mode">🌙</button>
-                <button type="button" class="cart-btn logout-btn" onclick="adminLogout()" title="Log Out">Logout</button>
+                <button type="button" class="secondary-btn" data-act="[[&quot;$nav&quot;,&quot;index.html&quot;]]" title="Back to Store">← Store</button>
+                <button type="button" class="dark-mode-toggle" id="darkModeToggle" data-act="[[&quot;toggleDarkMode&quot;,[]]]" title="Toggle dark mode">🌙</button>
+                <button type="button" class="cart-btn logout-btn" data-act="[[&quot;adminLogout&quot;,[]]]" title="Log Out">Logout</button>
             </div>
         </div>
 
@@ -61,8 +61,8 @@
             </div>
 
             <div class="admin-filters">
-                <input type="text" id="adminOrderSearch" class="admin-search" placeholder="Search order no / tracking / customer / phone..." oninput="loadAdminOrders()">
-                <select id="adminOrderStatus" class="status-select" onchange="loadAdminOrders()">
+                <input type="text" id="adminOrderSearch" class="admin-search" placeholder="Search order no / tracking / customer / phone..." data-act="[[&quot;loadAdminOrders&quot;,[]]]">
+                <select id="adminOrderStatus" class="status-select" data-act="[[&quot;loadAdminOrders&quot;,[]]]">
                     <option value="">All statuses</option>
                     <option>Placed</option>
                     <option>Confirmed</option>
@@ -71,7 +71,7 @@
                     <option>Delivered</option>
                     <option>Cancelled</option>
                 </select>
-                <select id="adminOrderPayment" class="status-select" onchange="loadAdminOrders()">
+                <select id="adminOrderPayment" class="status-select" data-act="[[&quot;loadAdminOrders&quot;,[]]]">
                     <option value="">All payments</option>
                     <option value="PENDING">Payment Pending</option>
                     <option value="PAID">Paid</option>
@@ -93,21 +93,21 @@
 
             <div class="admin-section-head">
                 <h2>Products & Stock</h2>
-                <button class="add-product-btn" onclick="openAddProduct()">+ Add Product</button>
+                <button class="add-product-btn" data-act="[[&quot;openAddProduct&quot;,[]]]">+ Add Product</button>
             </div>
 
             <div class="admin-stats" id="adminStats"></div>
 
-            <input type="text" id="adminProductSearch" class="admin-search" placeholder="Search products..." oninput="renderProducts()">
+            <input type="text" id="adminProductSearch" class="admin-search" placeholder="Search products..." data-act="[[&quot;renderProducts&quot;,[]]]">
 
             <div class="admin-filters">
-                <select id="adminProductCategory" class="status-select" onchange="renderProducts()">
+                <select id="adminProductCategory" class="status-select" data-act="[[&quot;renderProducts&quot;,[]]]">
                     <option value="">All categories</option>
                     <option>Vegetables</option>
                     <option>Fruits</option>
                     <option>Grocery</option>
                 </select>
-                <select id="adminProductSort" class="status-select" onchange="renderProducts()">
+                <select id="adminProductSort" class="status-select" data-act="[[&quot;renderProducts&quot;,[]]]">
                     <option value="default">Default</option>
                     <option value="price-asc">Price: Low to High</option>
                     <option value="price-desc">Price: High to Low</option>
@@ -130,7 +130,7 @@
                 <h2>Registered Customers</h2>
             </div>
 
-            <input type="text" id="adminCustomerSearch" class="admin-search" placeholder="Search customers (name / email / phone)..." oninput="loadAdminCustomers()">
+            <input type="text" id="adminCustomerSearch" class="admin-search" placeholder="Search customers (name / email / phone)..." data-act="[[&quot;loadAdminCustomers&quot;,[]]]">
 
             <div id="adminCustomersList" class="admin-list">
                 <p style="text-align:center;color:var(--text-secondary);padding:40px;">Loading customers...</p>
@@ -143,13 +143,13 @@
             <div class="admin-section-head">
                 <h2>Growth & Analytics</h2>
                 <div class="admin-filters" style="justify-content:flex-end;">
-                    <select id="analyticsRange" class="status-select" onchange="loadAdminAnalytics()">
+                    <select id="analyticsRange" class="status-select" data-act="[[&quot;loadAdminAnalytics&quot;,[]]]">
                         <option value="today">Today</option>
                         <option value="7d" selected>Last 7 days</option>
                         <option value="30d">Last 30 days</option>
                         <option value="90d">Last 90 days</option>
                     </select>
-                    <button type="button" class="secondary-btn" onclick="loadAdminAnalytics()">Refresh</button>
+                    <button type="button" class="secondary-btn" data-act="[[&quot;loadAdminAnalytics&quot;,[]]]">Refresh</button>
                 </div>
             </div>
 
@@ -203,7 +203,7 @@
                 <h2>Ratings & Reviews</h2>
             </div>
 
-            <input type="text" id="adminReviewSearch" class="admin-search" placeholder="Search reviews (product / user)..." oninput="loadAdminReviews()">
+            <input type="text" id="adminReviewSearch" class="admin-search" placeholder="Search reviews (product / user)..." data-act="[[&quot;loadAdminReviews&quot;,[]]]">
 
             <div id="adminReviewsList" class="admin-list">
                 <p style="text-align:center;color:var(--text-secondary);padding:40px;">Loading reviews...</p>
@@ -217,7 +217,7 @@
                 <h2>Return Requests</h2>
             </div>
 
-            <input type="text" id="adminReturnSearch" class="admin-search" placeholder="Search returns (status / order / user)..." oninput="loadAdminReturns()">
+            <input type="text" id="adminReturnSearch" class="admin-search" placeholder="Search returns (status / order / user)..." data-act="[[&quot;loadAdminReturns&quot;,[]]]">
 
             <div id="adminReturnsList" class="admin-list">
                 <p style="text-align:center;color:var(--text-secondary);padding:40px;">Loading returns...</p>
@@ -241,7 +241,7 @@
 
             <div class="admin-section-head">
                 <h2>Coupons & Discounts</h2>
-                <button type="button" class="secondary-btn" onclick="openCouponModal()">+ New Coupon</button>
+                <button type="button" class="secondary-btn" data-act="[[&quot;openCouponModal&quot;,[]]]">+ New Coupon</button>
             </div>
 
             <div id="adminCouponsBody">
@@ -257,7 +257,7 @@
         <div class="admin-modal-box admin-modal-wide">
             <div class="admin-modal-head">
                 <h3 id="orderDetailTitle">Order Details</h3>
-                <button class="modal-close" onclick="closeOrderDetail()">✕</button>
+                <button class="modal-close" data-act="[[&quot;closeOrderDetail&quot;,[]]]">✕</button>
             </div>
             <div id="orderDetailBody"></div>
         </div>
@@ -269,10 +269,10 @@
         <div class="admin-modal-box">
             <div class="admin-modal-head">
                 <h3 id="productModalTitle">Add Product</h3>
-                <button class="modal-close" onclick="closeProductModal()">✕</button>
+                <button class="modal-close" data-act="[[&quot;closeProductModal&quot;,[]]]">✕</button>
             </div>
 
-            <form id="productForm" onsubmit="saveProduct(event)">
+            <form id="productForm" data-act="[[&quot;saveProduct&quot;,[&quot;$e&quot;]]]">
 
                 <input type="hidden" id="pfId">
 
@@ -306,7 +306,7 @@
 
                 <label>Variants (optional — e.g. 250g / 500g / 1kg)</label>
                 <div id="pfVariantsList" class="admin-variants-list"></div>
-                <button type="button" class="modal-cancel admin-variant-add" onclick="addVariantRow()" style="margin:6px 0 0 0;border:1px dashed var(--border-color);background:transparent;color:var(--green-primary);width:100%;">+ Add Variant</button>
+                <button type="button" class="modal-cancel admin-variant-add" data-act="[[&quot;addVariantRow&quot;,[]]]" style="margin:6px 0 0 0;border:1px dashed var(--border-color);background:transparent;color:var(--green-primary);width:100%;">+ Add Variant</button>
 
                 <label>Rating (0–5)</label>
                 <input type="number" id="pfRating" min="0" max="5" step="0.1" placeholder="e.g. 4.5">
@@ -320,7 +320,7 @@
 
                 <div class="admin-img-row">
                     <label class="admin-choose-img" id="pfChooseImgBtn" for="pfImageFile">📷 Upload Image / Take Photo</label>
-                    <input type="file" id="pfImageFile" accept="image/jpeg,image/png,image/webp" onchange="onProductImageSelected(event)" class="admin-file-input">
+                    <input type="file" id="pfImageFile" accept="image/jpeg,image/png,image/webp" data-act="[[&quot;onProductImageSelected&quot;,[&quot;$e&quot;]]]" class="admin-file-input">
                     <span class="admin-img-hint">JPG, PNG or WEBP · max 1.5 MB · stored securely online · mobile: choose gallery or camera</span>
                 </div>
                 <div id="pfImagePreview" class="admin-img-preview-wrap"></div>
@@ -329,7 +329,7 @@
                 <textarea id="pfDescription" rows="2"></textarea>
 
                 <div class="modal-actions">
-                    <button type="button" class="modal-cancel" onclick="closeProductModal()">Cancel</button>
+                    <button type="button" class="modal-cancel" data-act="[[&quot;closeProductModal&quot;,[]]]">Cancel</button>
                     <button type="submit" class="modal-save">Save Product</button>
                 </div>
 
@@ -344,10 +344,10 @@
         <div class="admin-modal-box">
             <div class="admin-modal-head">
                 <h3 id="couponModalTitle">New Coupon</h3>
-                <button class="modal-close" onclick="closeCouponModal()">✕</button>
+                <button class="modal-close" data-act="[[&quot;closeCouponModal&quot;,[]]]">✕</button>
             </div>
 
-            <form id="couponForm" onsubmit="saveCoupon(event)">
+            <form id="couponForm" data-act="[[&quot;saveCoupon&quot;,[&quot;$e&quot;]]]">
 
                 <input type="hidden" id="cfId">
 
@@ -379,7 +379,7 @@
                 <label><input type="checkbox" id="cfActive" checked> Active</label>
 
                 <div class="modal-actions">
-                    <button type="button" class="modal-cancel" onclick="closeCouponModal()">Cancel</button>
+                    <button type="button" class="modal-cancel" data-act="[[&quot;closeCouponModal&quot;,[]]]">Cancel</button>
                     <button type="submit" class="modal-save">Save Coupon</button>
                 </div>
 
@@ -517,7 +517,7 @@
         <div class="admin-modal-box admin-modal-wide">
             <div class="admin-modal-head">
                 <h3 id="customerOrdersTitle">Customer Orders</h3>
-                <button class="modal-close" onclick="closeCustomerOrders()">&times;</button>
+                <button class="modal-close" data-act="[[&quot;closeCustomerOrders&quot;,[]]]">&times;</button>
             </div>
             <div id="customerOrdersBody"></div>
         </div>

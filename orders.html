@@ -23,7 +23,7 @@
             <button
                 type="button"
                 class="secondary-btn hide-on-mobile-nav"
-                onclick="window.location.href='index.html'"
+                data-act="[[&quot;$nav&quot;,&quot;index.html&quot;]]"
             >
                 🏠 Home
             </button>
@@ -32,7 +32,7 @@
                 type="button"
                 class="dark-mode-toggle"
                 id="darkModeToggle"
-                onclick="toggleDarkMode()"
+                data-act="[[&quot;toggleDarkMode&quot;,[]]]"
                 title="Toggle Dark Mode" aria-label="Toggle dark mode"
             >
                 🌙
@@ -54,7 +54,7 @@
                     id="trackInput"
                     placeholder="Enter Order ID or Track ID (e.g. FM710001 / FM-20260912-1A2B3C)"
                 >
-                <button type="button" class="place-order-btn" onclick="trackOrder()">Track</button>
+                <button type="button" class="place-order-btn" data-act="[[&quot;trackOrder&quot;,[]]]">Track</button>
             </div>
             <div id="trackResult" style="margin-top:12px;"></div>
         </div>
@@ -68,7 +68,7 @@
         </div>
 
         <div style="margin-top:24px;text-align:center;">
-            <button type="button" class="place-order-btn" onclick="toggleMyReturns()">📋 My Returns & Replacements</button>
+            <button type="button" class="place-order-btn" data-act="[[&quot;toggleMyReturns&quot;,[]]]">📋 My Returns & Replacements</button>
         </div>
 
         <div id="myReturnsSection" style="display:none;margin-top:24px;">

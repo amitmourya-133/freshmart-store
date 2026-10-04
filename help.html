@@ -23,14 +23,14 @@
             <button
                 type="button"
                 class="secondary-btn hide-on-mobile-nav"
-                onclick="window.location.href='index.html'"
+                data-act="[[&quot;$nav&quot;,&quot;index.html&quot;]]"
             >
                 🏠 Home
             </button>
             <button
                 type="button"
                 class="secondary-btn"
-                onclick="window.location.href='orders.html'"
+                data-act="[[&quot;$nav&quot;,&quot;orders.html&quot;]]"
             >
                 📦 My Orders
             </button>
@@ -39,7 +39,7 @@
                 type="button"
                 class="dark-mode-toggle"
                 id="darkModeToggle"
-                onclick="toggleDarkMode()"
+                data-act="[[&quot;toggleDarkMode&quot;,[]]]"
                 title="Toggle Dark Mode" aria-label="Toggle dark mode"
             >
                 🌙

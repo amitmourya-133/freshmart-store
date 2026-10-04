@@ -461,23 +461,23 @@ function updateAuthHeader() {
         var auth = getAuthUser() || {};
         var isAdminUser = auth.role === "admin" || auth.isAdmin;
         var adminBtn = isAdminUser
-            ? '<button type="button" class="secondary-btn admin-shortcut-btn" onclick="window.location.href=\'admin.html\'">⚙️ Admin</button>'
+            ? '<button type="button" class="secondary-btn admin-shortcut-btn" data-act="window.location.href=\'admin.html\'">⚙️ Admin</button>'
             : "";
-        var nameBtnOnclick = isAdminUser ? "window.location.href='admin.html'" : "";
+        var nameBtnAct = isAdminUser ? ' data-act="[[&quot;$nav&quot;,[&quot;admin.html&quot;]]]"' : "";
         // Profile button for all users (customer or admin)
-        var profileBtn = '<button type="button" class="secondary-btn auth-name-btn" title="My Profile" onclick="window.location.href=\'profile.html\'">👤 Profile</button>';
+        var profileBtn = '<button type="button" class="secondary-btn auth-name-btn" title="My Profile" data-act="window.location.href=\'profile.html\'">👤 Profile</button>';
         // Notifications bell (R14)
-        var bellBtn = '<button type="button" class="secondary-btn auth-name-btn fm-notif-bell" title="Notifications" onclick="window.location.href=\'notifications.html\'">🔔<span class="fm-notif-badge" id="notifBadge" style="display:none;"></span></button>';
+        var bellBtn = '<button type="button" class="secondary-btn auth-name-btn fm-notif-bell" title="Notifications" data-act="window.location.href=\'notifications.html\'">🔔<span class="fm-notif-badge" id="notifBadge" style="display:none;"></span></button>';
         area.innerHTML = bellBtn +
             adminBtn +
             profileBtn +
-            '<button type="button" class="secondary-btn hide-on-mobile-nav" onclick="window.location.href=\'help.html\'" title="Contact FreshMart Support">🆘 Help Center</button>' +
-            '<button type="button" class="secondary-btn auth-name-btn" title="' + safeName + '"' + (nameBtnOnclick ? ' onclick="' + nameBtnOnclick + '"' : '') + '>👤 ' + safeName + '</button>' +
-            '<button type="button" class="secondary-btn hide-on-mobile-nav" onclick="handleLogout()">Logout</button>';
+            '<button type="button" class="secondary-btn hide-on-mobile-nav" data-act="window.location.href=\'help.html\'" title="Contact FreshMart Support">🆘 Help Center</button>' +
+            '<button type="button" class="secondary-btn auth-name-btn" title="' + safeName + '"' + nameBtnAct + '>👤 ' + safeName + '</button>' +
+            '<button type="button" class="secondary-btn hide-on-mobile-nav" data-act="handleLogout()">Logout</button>';
         updateNotifBadge();
     } else {
-        area.innerHTML = '<button type="button" class="secondary-btn" onclick="window.location.href=\'signup.html\'">Create Account</button>' +
-            '<button type="button" class="secondary-btn" onclick="window.location.href=\'login.html\'">' + (typeof i18n === "function" ? i18n("nav.login") : "Login") + '</button>';
+        area.innerHTML = '<button type="button" class="secondary-btn" data-act="window.location.href=\'signup.html\'">Create Account</button>' +
+            '<button type="button" class="secondary-btn" data-act="window.location.href=\'login.html\'">' + (typeof i18n === "function" ? i18n("nav.login") : "Login") + '</button>';
 }
 }
 
@@ -501,8 +501,8 @@ function updateNotifBadge() {
                 badge.textContent = n > 99 ? "99+" : String(n);
             } else {
                 badge.style.display = "none";
-            }
-        })
+}
+})
         .catch(function() { /* non-fatal */ });
 }
 
@@ -546,8 +546,8 @@ function loadNotifications() {
                 var idJson = JSON.stringify(String(n._id));
                 var urlJson = JSON.stringify(url);
                 var openBtn = n.read
-                    ? '<button type="button" class="notification-open" onclick="window.location.href=' + urlJson + '">Open</button>'
-                    : '<button type="button" class="notification-open" onclick="openNotification(' + idJson + ', ' + urlJson + ')">Open</button>';
+                    ? '<button type="button" class="notification-open" data-act="window.location.href=' + urlJson + '">Open</button>'
+                    : '<button type="button" class="notification-open" data-act="openNotification(' + idJson + ', ' + urlJson + ')">Open</button>';
                 return '<div class="notification-item' + (n.read ? " is-read" : "") + '">' +
                     '<span class="notification-icon">' + notifTypeIcon(n.type) + '</span>' +
                     '<div class="notification-item-body">' +
@@ -822,7 +822,7 @@ function updateCart() {
                     stockInfo = '<div class="cart-stock-info low">Only ' + stock + ' left</div>';
                 }
             }
-            cartItems.innerHTML += '<div class="cart-item"><div class="cart-item-info"><strong>' + itemLabel + '</strong><br><span class="cart-item-price">₹' + item.price + ' × ' + item.quantity + ' = ₹' + (item.price * item.quantity) + '</span>' + stockInfo + '</div><div class="cart-item-actions"><button type="button" aria-label="Decrease quantity" onclick="decreaseQuantity(' + index + ')">−</button><strong class="cart-item-qty">' + item.quantity + '</strong><button type="button" aria-label="Increase quantity" onclick="increaseQuantity(' + index + ')"' + plusDisabled + '>+</button><button type="button" class="cart-item-remove" aria-label="Remove item" onclick="removeItem(' + index + ')">✕</button></div></div>';
+            cartItems.innerHTML += '<div class="cart-item"><div class="cart-item-info"><strong>' + itemLabel + '</strong><br><span class="cart-item-price">₹' + item.price + ' × ' + item.quantity + ' = ₹' + (item.price * item.quantity) + '</span>' + stockInfo + '</div><div class="cart-item-actions"><button type="button" aria-label="Decrease quantity" data-act="decreaseQuantity(' + index + ')">−</button><strong class="cart-item-qty">' + item.quantity + '</strong><button type="button" aria-label="Increase quantity" data-act="increaseQuantity(' + index + ')"' + plusDisabled + '>+</button><button type="button" class="cart-item-remove" aria-label="Remove item" data-act="removeItem(' + index + ')">✕</button></div></div>';
         });
     }
 
@@ -1092,8 +1092,8 @@ function productCardHTML(index) {
         stockBadge = '<span class="stock-badge out">Out of Stock</span>';
     }
 
-    return '<div class="product" data-category="' + escHtml(product.category) + '" onclick="openProductDetail(' + index + ')">' +
-        '<button type="button" class="card-menu-btn" aria-label="More options" onclick="event.stopPropagation(); openCardActionsMenu(this,\'' + safeName + '\',' + product.price + ',\'' + jsStr(product.unit) + '\',' + index + ')">⋮</button>' +
+    return '<div class="product" data-category="' + escHtml(product.category) + '" data-act="openProductDetail(' + index + ')">' +
+        '<button type="button" class="card-menu-btn" aria-label="More options" data-act="event.stopPropagation(); openCardActionsMenu(this,\'' + safeName + '\',' + product.price + ',\'' + jsStr(product.unit) + '\',' + index + ')">⋮</button>' +
         '<div class="product-image" style="' + imageStyle(product.name, product.gradient) + '">' + productImgHTML(product.name) + '</div>' +
         stockBadge +
         '<h3>' + escHtml(product.name) + '</h3>' +
@@ -1101,7 +1101,7 @@ function productCardHTML(index) {
         '<span class="rating-count">(' + ratingCount + ')</span>' +
         '<p class="product-price">₹' + product.price + ' / ' + escHtml(product.unit) + (product.variants && product.variants.length > 0 ? '<br><small>Select variant</small>' : '') + '</p>' +
         '<span class="product-badge">' + escHtml(product.category) + '</span>' +
-        '<div class="card-controls">' + cartControlsHTML(safeName, product.price, qty, product.unit) + (product.variants && product.variants.length > 0 ? '<div class="variant-chips">' + (function() { var v = product.variants; var html = '<select onchange="setVariant(' + index + ', this.value)">'; html += '<option value="">-- Select Variant --</option>'; v.forEach(function(v, i) { html += '<option value="' + i + '">' + v.unit + ' - ₹' + v.price + '</option>'; }); html += '</select>'; return html; }()) + '</div>' : '') + '</div>' +
+        '<div class="card-controls">' + cartControlsHTML(safeName, product.price, qty, product.unit) + (product.variants && product.variants.length > 0 ? '<div class="variant-chips">' + (function() { var v = product.variants; var html = '<select data-act="setVariant(' + index + ', this.value)">'; html += '<option value="">-- Select Variant --</option>'; v.forEach(function(v, i) { html += '<option value="' + i + '">' + v.unit + ' - ₹' + v.price + '</option>'; }); html += '</select>'; return html; }()) + '</div>' : '') + '</div>' +
     '</div>';
 }
 
@@ -1542,7 +1542,7 @@ function toggleWishlistPage() {
             // Use real product rating from server database
             var ratingVal = product.rating !== undefined ? product.rating : 4.0;
             var countVal = product.ratingCount !== undefined && product.ratingCount > 0 ? product.ratingCount : 0;
-            html += '<div class="wishlist-item"><div class="product-image" style="' + imageStyle(product.name, product.gradient) + '" onclick="openProductDetail(' + id + ')">' + productImgHTML(product.name) + '</div><div class="wishlist-item-info"><h4>' + escHtml(product.name) + '</h4>' + starHTML(ratingVal) + (countVal > 0 ? '<span class="rating-count">(' + countVal + ')</span>' : '') + '<p class="product-price">₹' + product.price + ' / ' + escHtml(product.unit) + '</p><div class="wishlist-item-actions"><button type="button" class="product-add-btn" onclick="event.stopPropagation(); addToCart(\'' + safeName + '\', ' + product.price + '); toggleWishlist(\'' + safeName + '\'); renderWishlistItems();">Move to Cart</button><button type="button" class="wishlist-remove-btn" onclick="event.stopPropagation(); toggleWishlist(\'' + safeName + '\'); renderWishlistItems();">Remove</button></div></div></div>';
+            html += '<div class="wishlist-item"><div class="product-image" style="' + imageStyle(product.name, product.gradient) + '" data-act="openProductDetail(' + id + ')">' + productImgHTML(product.name) + '</div><div class="wishlist-item-info"><h4>' + escHtml(product.name) + '</h4>' + starHTML(ratingVal) + (countVal > 0 ? '<span class="rating-count">(' + countVal + ')</span>' : '') + '<p class="product-price">₹' + product.price + ' / ' + escHtml(product.unit) + '</p><div class="wishlist-item-actions"><button type="button" class="product-add-btn" data-act="event.stopPropagation(); addToCart(\'' + safeName + '\', ' + product.price + '); toggleWishlist(\'' + safeName + '\'); renderWishlistItems();">Move to Cart</button><button type="button" class="wishlist-remove-btn" data-act="event.stopPropagation(); toggleWishlist(\'' + safeName + '\'); renderWishlistItems();">Remove</button></div></div></div>';
         });
         items.innerHTML = html;
     }
@@ -1599,7 +1599,7 @@ function renderRecentlyViewed() {
         // Use real product rating from server database
         var ratingVal = product.rating !== undefined ? product.rating : 4.0;
         var countVal = product.ratingCount !== undefined && product.ratingCount > 0 ? product.ratingCount : 0;
-        html += '<div class="product recent-product" onclick="openProductDetail(' + id + ')"><div class="product-image recent-img" style="' + imageStyle(product.name, product.gradient) + '">' + productImgHTML(product.name) + '</div><h3>' + escHtml(product.name) + '</h3>' + starHTML(ratingVal) + (countVal > 0 ? '<span class="rating-count">(' + countVal + ')</span>' : '') + '<p class="product-price">₹' + product.price + ' / ' + escHtml(product.unit) + '</p><button type="button" class="product-add-btn" onclick="event.stopPropagation(); addToCart(\'' + jsStr(product.name) + '\', ' + product.price + ')">' + tCartAdd() + '</button></div>';
+        html += '<div class="product recent-product" data-act="openProductDetail(' + id + ')"><div class="product-image recent-img" style="' + imageStyle(product.name, product.gradient) + '">' + productImgHTML(product.name) + '</div><h3>' + escHtml(product.name) + '</h3>' + starHTML(ratingVal) + (countVal > 0 ? '<span class="rating-count">(' + countVal + ')</span>' : '') + '<p class="product-price">₹' + product.price + ' / ' + escHtml(product.unit) + '</p><button type="button" class="product-add-btn" data-act="event.stopPropagation(); addToCart(\'' + jsStr(product.name) + '\', ' + product.price + ')">' + tCartAdd() + '</button></div>';
     });
 
     container.innerHTML = html;
@@ -1832,7 +1832,7 @@ function renderCatalog() {
         if (info) {
             info.innerHTML = 'Showing ' + used + ' AI result' + (used === 1 ? "" : "s") +
                 ' for <strong>' + escHtml(searchAiOverride.query) + '</strong> (source: ' + escHtml(searchAiOverride.source) + ') · ' +
-                '<button type="button" class="clear-ai-btn" onclick="clearAiSearch()">Clear AI results</button>';
+                '<button type="button" class="clear-ai-btn" data-act="clearAiSearch()">Clear AI results</button>';
         }
         if (noResults) noResults.style.display = "none";
         updateWishlistUI();
@@ -1895,7 +1895,7 @@ function cartControlsHTML(name, price, qty, unit) {
     var chips = '<div class="qty-chips">';
     options.forEach(function(o) {
         var cls = (o.label === active.label) ? "qty-chip active" : "qty-chip";
-        chips += '<button type="button" class="' + cls + '" onclick="event.stopPropagation(); selectQtyOption(\'' + escName + '\',\'' + o.label + '\',' + o.mult + ',\'' + escUnit + '\')">' + o.label + '</button>';
+        chips += '<button type="button" class="' + cls + '" data-act="event.stopPropagation(); selectQtyOption(\'' + escName + '\',\'' + o.label + '\',' + o.mult + ',\'' + escUnit + '\')">' + o.label + '</button>';
     });
     chips += '</div>';
 
@@ -1903,7 +1903,7 @@ function cartControlsHTML(name, price, qty, unit) {
     var variantHTML = "";
     if (product && product.variants && product.variants.length > 0) {
         var curVariant = (typeof variantSelection[realName] === "number") ? variantSelection[realName] : -1;
-        variantHTML = '<div class="variant-chips"><select onchange="setVariantFromCart(\'' + escName + '\', this.value)">';
+        variantHTML = '<div class="variant-chips"><select data-act="setVariantFromCart(\'' + escName + '\', this.value)">';
         variantHTML += '<option value="">-- Select Variant --</option>';
         product.variants.forEach(function(v, i) {
             variantHTML += '<option value="' + i + '"' + (i === curVariant ? " selected" : "") + '>' + v.unit + ' - ₹' + v.price + '</option>';
@@ -1916,12 +1916,12 @@ function cartControlsHTML(name, price, qty, unit) {
         main = '<span class="out-of-stock-label">Out of Stock</span>';
     } else if (qty > 0) {
         var atMax = (typeof stock === "number" && qty >= stock);
-        main = '<div class="qty-selector"><button type="button" class="qty-btn qty-minus" onclick="event.stopPropagation(); changeCardQty(\'' + escName + '\', -1, ' + price + ')">−</button><span class="qty-value">' + qty + '</span>' +
-            '<button type="button" class="qty-btn qty-plus' + (atMax ? " qty-plus-muted" : "") + '" onclick="event.stopPropagation(); changeCardQty(\'' + escName + '\', 1, ' + price + ')"' + (atMax ? ' disabled' : '') + ' title="' + (atMax ? "Only " + stock + " available" : "") + '">+</button></div>';
+        main = '<div class="qty-selector"><button type="button" class="qty-btn qty-minus" data-act="event.stopPropagation(); changeCardQty(\'' + escName + '\', -1, ' + price + ')">−</button><span class="qty-value">' + qty + '</span>' +
+            '<button type="button" class="qty-btn qty-plus' + (atMax ? " qty-plus-muted" : "") + '" data-act="event.stopPropagation(); changeCardQty(\'' + escName + '\', 1, ' + price + ')"' + (atMax ? ' disabled' : '') + ' title="' + (atMax ? "Only " + stock + " available" : "") + '">+</button></div>';
     } else {
-        main = '<button type="button" class="product-add-btn" onclick="event.stopPropagation(); addToCart(\'' + escName + '\', ' + price + ',\'' + escUnit + '\')">' + tCartAdd() + '</button>';
+        main = '<button type="button" class="product-add-btn" data-act="event.stopPropagation(); addToCart(\'' + escName + '\', ' + price + ',\'' + escUnit + '\')">' + tCartAdd() + '</button>';
     }
-    var buy = '<button type="button" class="buy-now-btn" onclick="event.stopPropagation(); buyNow(\'' + escName + '\', ' + price + ',\'' + escUnit + '\')"' + (out ? ' disabled' : '') + '>Buy Now</button>';
+    var buy = '<button type="button" class="buy-now-btn" data-act="event.stopPropagation(); buyNow(\'' + escName + '\', ' + price + ',\'' + escUnit + '\')"' + (out ? ' disabled' : '') + '>Buy Now</button>';
 
     return chips + '<div class="card-btn-row">' + main + buy + '</div>';
 }
@@ -2235,15 +2235,15 @@ function loadProductDetail() {
         var ratingVal = item.rating !== undefined ? item.rating : 4.0;
         var countVal = item.ratingCount !== undefined && item.ratingCount > 0 ? item.ratingCount : 0;
         var safeRelName = jsStr(item.name);
-        relatedHTML += '<div class="product" data-category="' + escHtml(item.category) + '" onclick="window.location.href=\'product-detail.html?id=' + origIndex + '\'"><div class="product-image" style="' + imageStyle(item.name, item.gradient) + '">' + productImgHTML(item.name) + '</div><h3>' + escHtml(item.name) + '</h3>' + starHTML(ratingVal) + (countVal > 0 ? '<span class="rating-count">(' + countVal + ')</span>' : '') + '<p class="product-price">₹' + item.price + ' / ' + escHtml(item.unit) + '</p><button type="button" class="product-add-btn" onclick="event.stopPropagation(); addToCart(\'' + safeRelName + '\', ' + item.price + ')">' + tCartAdd() + '</button></div>';
+        relatedHTML += '<div class="product" data-category="' + escHtml(item.category) + '" data-act="window.location.href=\'product-detail.html?id=' + origIndex + '\'"><div class="product-image" style="' + imageStyle(item.name, item.gradient) + '">' + productImgHTML(item.name) + '</div><h3>' + escHtml(item.name) + '</h3>' + starHTML(ratingVal) + (countVal > 0 ? '<span class="rating-count">(' + countVal + ')</span>' : '') + '<p class="product-price">₹' + item.price + ' / ' + escHtml(item.unit) + '</p><button type="button" class="product-add-btn" data-act="event.stopPropagation(); addToCart(\'' + safeRelName + '\', ' + item.price + ')">' + tCartAdd() + '</button></div>';
     });
 
     detailContainer.innerHTML = '' +
         '<div class="detail-hero" style="' + imageStyle(p.name, p.gradient) + '">' + productImgHTML(p.name) +
-            '<button type="button" class="wishlist-heart detail-wishlist ' + wishClass + '" data-name="' + escHtml(p.name) + '" onclick="toggleWishlist(\'' + safeName + '\')">♥</button>' +
+            '<button type="button" class="wishlist-heart detail-wishlist ' + wishClass + '" data-name="' + escHtml(p.name) + '" data-act="toggleWishlist(\'' + safeName + '\')">♥</button>' +
         '</div>' +
             '<div class="detail-info">' +
-            '<button type="button" class="whatsapp-share-btn detail-share" onclick="shareOnWhatsApp(\'' + safeName + '\',' + p.price + ',\'' + jsStr(p.unit) + '\',' + id + ')">WhatsApp Share</button>' +
+            '<button type="button" class="whatsapp-share-btn detail-share" data-act="shareOnWhatsApp(\'' + safeName + '\',' + p.price + ',\'' + jsStr(p.unit) + '\',' + id + ')">WhatsApp Share</button>' +
             '<span class="product-badge">' + escHtml(p.category) + '</span>' +
             '<h1>' + escHtml(p.name) + '</h1>' +
             '<div class="detail-rating">' + starHTML(ratingVal) + '<span class="rating-count">' + (countVal > 0 ? countVal.toFixed(1) + ' (' + countVal + ' ratings)' : 'No ratings') + '</span></div>' +
@@ -2377,11 +2377,11 @@ function reviewsHTMLFor(name, reviews) {
         '<textarea id="reviewComment" class="review-textarea" placeholder="Share your experience..."></textarea>' +
         '<div class="review-photo-picker">' +
             '<label for="reviewPhotoInput" class="review-photo-label">📷 Add photos (max 3)</label>' +
-            '<input type="file" id="reviewPhotoInput" accept="image/*" multiple hidden onchange="handleReviewPhotoSelect()">' +
+            '<input type="file" id="reviewPhotoInput" accept="image/*" multiple hidden data-act="handleReviewPhotoSelect()">' +
             '<div id="reviewPhotoPreviews" class="review-photo-previews"></div>' +
             '<input type="hidden" id="reviewPhotoUrls" value="">' +
         '</div>' +
-        '<button type="button" class="review-submit" onclick="submitReview()">Submit Review</button>' +
+        '<button type="button" class="review-submit" data-act="submitReview()">Submit Review</button>' +
     '</div>';
 
     html += '</div>';
@@ -2398,7 +2398,7 @@ function reviewItemHTML(rev) {
     var verified = rev.verifiedPurchase ? '<span class="review-verified">✓ Verified Purchase</span>' : "";
     var photosHTML = photos.length
         ? '<div class="review-photos">' + photos.map(function(ph) {
-              return '<img src="' + escHtml(ph) + '" alt="Review photo" loading="lazy" onclick="openReviewPhoto(this.src)">';
+              return '<img src="' + escHtml(ph) + '" alt="Review photo" loading="lazy" data-act="openReviewPhoto(this.src)">';
           }).join("") + '</div>'
         : "";
     return '<div class="review-item">' +
@@ -2421,7 +2421,7 @@ function openReviewPhoto(src) {
     modal.setAttribute("aria-modal", "true");
     modal.onclick = function() { modal.remove(); };
     modal.innerHTML = '<div class="qr-modal-box" style="max-width:520px;">' +
-        '<button type="button" class="qr-close" onclick="event.stopPropagation(); this.closest(\'.qr-modal\').remove()" aria-label="Close">✕</button>' +
+        '<button type="button" class="qr-close" data-act="[[&quot;$stop&quot;,[]],[&quot;$closeModal&quot;,[]]]" aria-label="Close">✕</button>' +
         '<img src="' + escHtml(src) + '" style="width:100%;border-radius:12px;" alt="Review photo">' +
     '</div>';
     document.body.appendChild(modal);
@@ -2487,7 +2487,7 @@ function renderReviewPhotoPreviews() {
     var urls = [];
     if (urlsEl && urlsEl.value) { try { urls = JSON.parse(urlsEl.value); } catch (e) { urls = []; } }
     previewsEl.innerHTML = urls.map(function(u) {
-        return '<div class="review-photo-thumb"><img src="' + escHtml(u) + '" alt="Review photo"><button type="button" onclick="removeReviewPhoto(this)" aria-label="Remove photo">✕</button></div>';
+        return '<div class="review-photo-thumb"><img src="' + escHtml(u) + '" alt="Review photo"><button type="button" data-act="removeReviewPhoto(this)" aria-label="Remove photo">✕</button></div>';
     }).join("");
 }
 
@@ -2546,19 +2546,19 @@ function detailControlsHTML(p) {
         return '<div class="detail-stock-unavailable">' +
             '<span class="stock-badge out">Out of Stock</span>' +
             '<p>This product is temporarily unavailable. Please check back soon.</p>' +
-            '<button type="button" class="detail-add-btn" onclick="notifyMeProduct(' + pidJs + ')">🔔 Notify Me when Back in Stock</button>' +
+            '<button type="button" class="detail-add-btn" data-act="notifyMeProduct(' + pidJs + ')">🔔 Notify Me when Back in Stock</button>' +
             '</div>';
     }
 
     var atMax = (typeof stock === "number" && stock >= 99);
     return '<div class="detail-qty">' +
-            '<button onclick="detailQtyChange(-1)">−</button>' +
+            '<button data-act="detailQtyChange(-1)">−</button>' +
             '<span id="detailQty">1</span>' +
-            '<button onclick="detailQtyChange(1)"' + (atMax ? ' disabled title="Limit reached"' : '') + '>+</button>' +
+            '<button data-act="detailQtyChange(1)"' + (atMax ? ' disabled title="Limit reached"' : '') + '>+</button>' +
         '</div>' +
         '<div class="detail-btn-row">' +
-            '<button class="detail-add-btn" onclick="addDetailToCart(\'' + jsStr(p.name) + '\', ' + p.price + ')">' + tCartAdd() + '</button>' +
-            '<button class="buy-now-btn" onclick="buyNowDetail(\'' + jsStr(p.name) + '\', ' + p.price + ', \'' + jsStr(p.unit) + '\')">⚡ Buy Now</button>' +
+            '<button class="detail-add-btn" data-act="addDetailToCart(\'' + jsStr(p.name) + '\', ' + p.price + ')">' + tCartAdd() + '</button>' +
+            '<button class="buy-now-btn" data-act="buyNowDetail(\'' + jsStr(p.name) + '\', ' + p.price + ', \'' + jsStr(p.unit) + '\')">⚡ Buy Now</button>' +
         '</div>';
 }
 
@@ -3139,7 +3139,7 @@ function loadSavedAddresses() {
                 .filter(function(v) { return v; })
                 .map(function(v) { return escHtml(v); })
                 .join(", ");
-            return '<div class="saved-addr-item" role="button" tabindex="0" data-idx="' + i + '" onclick="selectSavedAddress(' + i + ')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();selectSavedAddress(' + i + ');}">' +
+            return '<div class="saved-addr-item" role="button" tabindex="0" data-idx="' + i + '" data-act-click="selectSavedAddress" data-arg="[' + i + ']" data-act-key="selectSavedAddress">' +
                 '<div class="addr-tag">' + escHtml(a.name || ("Address " + (i + 1))) + '</div>' +
                 '<div class="addr-text">' + line + '</div>' +
                 '</div>';
@@ -3536,13 +3536,13 @@ function showQrPaymentModal(order, quote) {
 
     modal.innerHTML =
         '<div class="qr-modal-box">' +
-            '<button class="qr-close" onclick="closeQrModal()">✕</button>' +
+            '<button class="qr-close" data-act="closeQrModal()">✕</button>' +
             '<h3>' + (order.onlineMethod === "card" ? "💳" : order.onlineMethod === "netbanking" ? "🏛️" : order.onlineMethod === "wallet" ? "👛" : "📱") + ' ' + methodLabel + ' Payment</h3>' +
             '<p class="qr-amount">Amount to pay: <strong>₹' + amount + '</strong></p>' +
             '<a class="qr-pay-btn" href="' + upiLink + '" target="_blank" rel="noopener">📲 Pay ₹' + amount + ' via UPI</a>' +
             '<p class="qr-instruction">Amount ₹' + amount + ' is auto-filled in your UPI app. Tap "Pay via UPI" above, or scan this QR in any UPI app, then click "I have paid".</p>' +
             '<div class="qr-code-wrap">' +
-                '<img src="' + qrUrl + '" alt="QR Code" onerror="this.style.display=\'none\';document.getElementById(\'qrFallback\').style.display=\'block\';" />' +
+                '<img src="' + qrUrl + '" alt="QR Code" data-act="[[&quot;$hideSelfShow&quot;,[&quot;#qrFallback&quot;]]]" />' +
                 '<div id="qrFallback" style="display:none;">' +
                     '<p>Scan or pay using UPI ID:</p>' +
                     '<strong>' + upiId + '</strong>' +
@@ -3553,8 +3553,8 @@ function showQrPaymentModal(order, quote) {
                 '<label for="qrTxnRef">UPI / Txn Reference (optional — helps verify your payment faster)</label>' +
                 '<input type="text" id="qrTxnRef" maxlength="60" placeholder="e.g. 406814226889 or your UPI App Ref ID" />' +
             '</div>' +
-            '<button class="paid-btn" onclick="confirmPaidPayment()">✅ I have paid</button>' +
-            '<button class="pay-cancel-btn" onclick="closeQrModal()">Cancel Payment</button>' +
+            '<button class="paid-btn" data-act="confirmPaidPayment()">✅ I have paid</button>' +
+            '<button class="pay-cancel-btn" data-act="closeQrModal()">Cancel Payment</button>' +
         '</div>';
 
     document.body.appendChild(modal);
@@ -3702,7 +3702,7 @@ function showOrderConfirmModal(order) {
     modal.setAttribute("aria-labelledby", "orderConfirmTitle");
     modal.innerHTML =
         '<div class="qr-modal-box" style="text-align:left;">' +
-            '<button type="button" class="qr-close" onclick="closeOrderConfirmModal()" aria-label="Close">✕</button>' +
+            '<button type="button" class="qr-close" data-act="closeOrderConfirmModal()" aria-label="Close">✕</button>' +
             '<h3 id="orderConfirmTitle">📋 Confirm Your Order</h3>' +
             '<p class="qr-amount">Deliver to: <strong>' + escHtml(customer.name) + '</strong> · ' + escHtml(customer.phone) + '</p>' +
             '<p class="qr-amount" style="margin-top:0;">' + addressLine + '</p>' +
@@ -3713,8 +3713,8 @@ function showOrderConfirmModal(order) {
             discountHTML +
             '<hr>' +
             '<div style="display:flex;justify-content:space-between;font-weight:700;"><span>Total</span><strong>₹' + order.total + '</strong></div>' +
-            '<button class="paid-btn" id="confirmOrderBtn" onclick="confirmOrderClick()">✅ Confirm Order</button>' +
-            '<button class="pay-cancel-btn" onclick="closeOrderConfirmModal()">Go Back</button>' +
+            '<button class="paid-btn" id="confirmOrderBtn" data-act="confirmOrderClick()">✅ Confirm Order</button>' +
+            '<button class="pay-cancel-btn" data-act="closeOrderConfirmModal()">Go Back</button>' +
             '<p class="qr-instruction" style="margin-top:10px;">' + paymentNote + '</p>' +
         '</div>';
     document.body.appendChild(modal);
@@ -4654,7 +4654,7 @@ function loadOrders() {
     } catch (e) { localOrders = []; }
 
     if (typeof isLoggedIn !== "function" || !isLoggedIn()) {
-        var guestHTML = '<div class="empty-orders"><div class="empty-orders-icon">🔐</div><h2>Log in to see your orders</h2><p>Your account orders are synced from the server. Guest orders below are only saved on this device.</p><button type="button" onclick="window.location.href=\'login.html\'">Log In</button></div>';
+        var guestHTML = '<div class="empty-orders"><div class="empty-orders-icon">🔐</div><h2>Log in to see your orders</h2><p>Your account orders are synced from the server. Guest orders below are only saved on this device.</p><button type="button" data-act="window.location.href=\'login.html\'">Log In</button></div>';
         ordersContainer.innerHTML = guestHTML + renderOrdersListHTML(localOrders, true);
         return;
     }
@@ -4790,7 +4790,7 @@ function deliveryTrackerHTML(deliveryTrack) {
 
 function renderOrdersListHTML(orders, offline) {
     if (!orders || orders.length === 0) {
-        return '<div class="empty-orders"><div class="empty-orders-icon">📦</div><h2>No Orders Yet</h2><p>You haven\'t placed any orders yet.</p><button type="button" onclick="window.location.href=\'index.html\'">Start Shopping</button></div>';
+        return '<div class="empty-orders"><div class="empty-orders-icon">📦</div><h2>No Orders Yet</h2><p>You haven\'t placed any orders yet.</p><button type="button" data-act="window.location.href=\'index.html\'">Start Shopping</button></div>';
     }
 
     var ordersHTML = "";
@@ -4815,11 +4815,11 @@ function renderOrdersListHTML(orders, offline) {
         var cancellable = !offline && order._id && !order.isLocal &&
             (order.status === "Placed" || order.status === "Confirmed");
         var cancelBtn = cancellable
-            ? '<button type="button" class="cancel-order-btn" onclick="cancelOrderById(\'' + jsStr(order._id) + '\')">Cancel Order</button>'
+            ? '<button type="button" class="cancel-order-btn" data-act="cancelOrderById(\'' + jsStr(order._id) + '\')">Cancel Order</button>'
             : "";
 
         var returnBtn = (!offline && order._id && !order.isLocal && order.status === "Delivered")
-            ? '<button type="button" class="return-order-btn" onclick="openReturnModal(\'' + jsStr(order._id) + '\')">↩ Return / Replace items</button>'
+            ? '<button type="button" class="return-order-btn" data-act="openReturnModal(\'' + jsStr(order._id) + '\')">↩ Return / Replace items</button>'
             : "";
         var returnStatusLine = (order.returnInfo && order.returnInfo.returnNumber)
             ? '<div class="order-return-status"><strong>Return:</strong> ' + escHtml(order.returnInfo.returnNumber) +
@@ -4828,7 +4828,7 @@ function renderOrdersListHTML(orders, offline) {
 
         var helpOrderRef = order.orderNumber || order.trackingId || (order._id || "");
         var helpBtn = helpOrderRef
-            ? '<button type="button" class="help-order-btn" onclick="window.location.href=\'help.html?order=' + encodeURIComponent(helpOrderRef) + '\'" title="Get help for this order">🆘 Help</button>'
+            ? '<button type="button" class="help-order-btn" data-act="window.location.href=\'help.html?order=' + encodeURIComponent(helpOrderRef) + '\'" title="Get help for this order">🆘 Help</button>'
             : "";
 
         var trackLine = order.trackingId ? '<p><strong>Track ID:</strong> ' + escHtml(order.trackingId) + '</p>' : "";
@@ -4864,7 +4864,7 @@ function renderOrdersListHTML(orders, offline) {
             var savedLng = order.deliveryLocation.longitude;
             var savedHref = openInMapsHref(savedLat, savedLng);
             if (savedHref) {
-                locLine += '<p><strong>📍 Saved location:</strong> <a class="location-link" href="' + savedHref + '" target="_blank" rel="noopener noreferrer">Open in Maps</a> <button type="button" class="loc-secondary-btn" onclick="openMapView(' + Number(savedLat) + ',' + Number(savedLng) + ',\'My Delivery Location\')">View Map</button></p>';
+                locLine += '<p><strong>📍 Saved location:</strong> <a class="location-link" href="' + savedHref + '" target="_blank" rel="noopener noreferrer">Open in Maps</a> <button type="button" class="loc-secondary-btn" data-act="openMapView(' + Number(savedLat) + ',' + Number(savedLng) + ',\'My Delivery Location\')">View Map</button></p>';
             } else {
                 locLine += '<p><strong>📍 Saved location:</strong> Customer location is unavailable.</p>';
             }
@@ -4883,7 +4883,7 @@ function renderOrdersListHTML(orders, offline) {
             '<div class="detail-section"><h3>Delivery Details</h3><p><strong>Name:</strong> ' + escHtml((order.customer && order.customer.name) || "N/A") + '</p><p><strong>Phone:</strong> ' + escHtml((order.customer && order.customer.phone) || "N/A") + '</p><p><strong>Address:</strong> ' + escHtml((order.customer && order.customer.address) || "N/A") + '</p><p><strong>City:</strong> ' + escHtml((order.customer && order.customer.city) || "N/A") + '</p>' + locLine + '<p><strong>Pincode:</strong> ' + escHtml((order.customer && order.customer.pincode) || "N/A") + '</p></div>' +
             partnerLine +
             '<p><strong>Payment:</strong> ' + escHtml(order.payment || "Cash On Delivery") + '</p>' + helpBtn + cancelBtn + returnBtn +
-            '<button type="button" class="place-order-btn" style="margin-top:20px;" onclick="window.location.href=\'index.html\'">Continue Shopping</button></div>';
+            '<button type="button" class="place-order-btn" style="margin-top:20px;" data-act="window.location.href=\'index.html\'">Continue Shopping</button></div>';
     });
     return ordersHTML;
 }
@@ -4952,7 +4952,7 @@ function openReturnModal(orderId) {
     modal.setAttribute("aria-labelledby", "returnModalTitle");
     modal.innerHTML =
         '<div class="qr-modal-box" style="text-align:left;">' +
-            '<button type="button" class="qr-close" onclick="closeReturnModal()" aria-label="Close">✕</button>' +
+            '<button type="button" class="qr-close" data-act="closeReturnModal()" aria-label="Close">✕</button>' +
             '<h3 id="returnModalTitle">📦 Request Return / Replacement</h3>' +
             '<div id="returnModalBody" style="color:var(--text-secondary);padding:10px 0;">Loading order...</div>' +
         '</div>';
@@ -5005,8 +5005,8 @@ function renderReturnForm(modal, order) {
         '</select>' +
         '<label style="display:block;margin-top:10px;">Description (optional)</label>' +
         '<textarea id="rfComments" rows="2" maxlength="1000" placeholder="Tell us what happened..." style="width:100%;padding:10px 12px;border:1px solid var(--border-color);border-radius:var(--radius-sm);font-family:inherit;"></textarea>' +
-        '<button type="button" class="paid-btn" id="rfSubmitBtn" onclick="submitReturnRequest(\'' + escJs(order._id) + '\')">Submit Return Request</button>' +
-        '<button type="button" class="pay-cancel-btn" onclick="closeReturnModal()">Cancel</button>';
+        '<button type="button" class="paid-btn" id="rfSubmitBtn" data-act="submitReturnRequest(\'' + escJs(order._id) + '\')">Submit Return Request</button>' +
+        '<button type="button" class="pay-cancel-btn" data-act="closeReturnModal()">Cancel</button>';
     trapModalFocus(modal);
 }
 
@@ -5101,7 +5101,7 @@ function renderMyReturns() {
             return escHtml(i.name + (i.variantUnit ? " (" + i.variantUnit + ")" : "") + " × " + i.quantity);
         }).join(", ");
         var cancelBtn = r.status === "SUBMITTED"
-            ? '<button type="button" class="cancel-order-btn" onclick="cancelMyReturn(\'' + escJs(r._id) + '\')">Cancel Request</button>'
+            ? '<button type="button" class="cancel-order-btn" data-act="cancelMyReturn(\'' + escJs(r._id) + '\')">Cancel Request</button>'
             : "";
         return '<div class="order-card"><div class="order-header"><div><div class="order-id">' + escHtml(r.returnNumber || "Return") +
             '</div><small>' + escHtml(formatOrderDate(r.createdAt)) + '</small></div>' +
@@ -5253,3 +5253,25 @@ window.addEventListener("appinstalled", function() {
 if (!window.matchMedia("(display-mode: standalone)").matches && /iPad|iPhone|iPod/.test(navigator.userAgent || "")) {
     schedulePwaBanner();
 }
+
+// Keyboard activation for role="button" controls that carry data-act-key
+// (Enter / Space), mirroring the behaviour the old inline onkeydown had.
+document.addEventListener("keydown", function (e) {
+    if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+    var t = e.target;
+    if (!t || t.nodeType !== 1 || !t.closest) return;
+    var el = t.closest("[data-act-key]");
+    if (!el) return;
+    var fn = window[el.getAttribute("data-act-key")];
+    if (typeof fn !== "function") return;
+    e.preventDefault();
+    var idxAttr = el.getAttribute("data-arg") || el.getAttribute("data-idx");
+    var args = [];
+    try {
+        var parsed = JSON.parse(idxAttr || "[]");
+        if (Array.isArray(parsed)) args = parsed;
+    } catch (err) {
+        if (idxAttr !== null && idxAttr !== undefined && idxAttr !== "") args = [Number(idxAttr)];
+    }
+    fn.apply(el, args);
+});

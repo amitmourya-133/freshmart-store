@@ -20,7 +20,7 @@
         <div class="auth-box" id="main-content">
 
             <div style="text-align:right; margin-bottom:10px;">
-                <button type="button" class="dark-mode-toggle" id="darkModeToggle" onclick="toggleDarkMode()" title="Toggle Dark Mode" aria-label="Toggle dark mode">🌙</button>
+                <button type="button" class="dark-mode-toggle" id="darkModeToggle" data-act="[[&quot;toggleDarkMode&quot;,[]]]" title="Toggle Dark Mode" aria-label="Toggle dark mode">🌙</button>
             </div>
 
             <div class="auth-logo">
@@ -66,7 +66,7 @@
                         href="#"
                         id="forgotPasswordLink"
                         class="auth-forgot-link"
-                        onclick="event.preventDefault(); showForgotPasswordStep();"
+                        data-act="[[&quot;$prevent&quot;,[]],[&quot;showForgotPasswordStep&quot;,[]]]"
                     >
                         Forgot Password?
                     </a>
@@ -89,7 +89,7 @@
                     type="button"
                     id="googleLoginBtn"
                     class="auth-btn google-btn"
-                    onclick="handleGoogleLogin()"
+                    data-act="[[&quot;handleGoogleLogin&quot;,[]]]"
                 >
                     Sign in with Google
                 </button>
@@ -140,7 +140,7 @@
                 <p class="auth-bottom">
                     Remembered your password?
 
-                    <a href="#" onclick="event.preventDefault(); showLoginStep1();">
+                    <a href="#" data-act="[[&quot;$prevent&quot;,[]],[&quot;showLoginStep1&quot;,[]]]">
                         Back to Login
                     </a>
                 </p>
@@ -185,7 +185,7 @@
                         type="button"
                         class="auth-btn otp-resend-btn"
                         id="forgotResendBtn"
-                        onclick="handleForgotResend()"
+                        data-act="[[&quot;handleForgotResend&quot;,[]]]"
                     >
                         Resend OTP
                     </button>
@@ -193,7 +193,7 @@
                 </form>
 
                 <p class="auth-bottom">
-                    <a href="#" onclick="event.preventDefault(); showForgotPasswordStep();">
+                    <a href="#" data-act="[[&quot;$prevent&quot;,[]],[&quot;showForgotPasswordStep&quot;,[]]]">
                         Back
                     </a>
                 </p>

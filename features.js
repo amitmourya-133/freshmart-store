@@ -427,8 +427,8 @@ function renderRecommendations() {
         var safeName = jsStr(product.name);
 
         html +=
-            '<div class="product" data-category="' + escHtml(product.category) + '" onclick="openProductDetail(' + index + ')">' +
-                '<button type="button" class="wishlist-heart ' + wishClass + '" data-name="' + escHtml(product.name) + '" onclick="event.stopPropagation(); toggleWishlist(\'' + safeName + '\')">♥</button>' +
+            '<div class="product" data-category="' + escHtml(product.category) + '" data-act="openProductDetail(' + index + ')">' +
+                '<button type="button" class="wishlist-heart ' + wishClass + '" data-name="' + escHtml(product.name) + '" data-act="event.stopPropagation(); toggleWishlist(\'' + safeName + '\')">♥</button>' +
                 '<div class="product-image" style="' + featuresImageStyle(product.name, product.gradient) + '">' + productImgHTML(product.name) + '</div>' +
                 '<h3>' + escHtml(product.name) + '</h3>' +
                 starHTML(ratingVal) +
@@ -484,9 +484,9 @@ function renderTrending() {
                     var safeName = jsStr(p.name);
                     shown++;
                     html +=
-                        '<div class="product" data-category="' + escHtml(p.category) + '" onclick="openProductDetail(' + idx + ')">' +
+                        '<div class="product" data-category="' + escHtml(p.category) + '" data-act="openProductDetail(' + idx + ')">' +
                             '<span class="product-badge trend-badge">Trending</span>' +
-                            '<button type="button" class="wishlist-heart ' + wishClass + '" data-name="' + escHtml(p.name) + '" onclick="event.stopPropagation(); toggleWishlist(\'' + safeName + '\')">♥</button>' +
+                            '<button type="button" class="wishlist-heart ' + wishClass + '" data-name="' + escHtml(p.name) + '" data-act="event.stopPropagation(); toggleWishlist(\'' + safeName + '\')">♥</button>' +
                             '<div class="product-image" style="' + featuresImageStyle(p.name, p.gradient) + '">' + productImgHTML(p.name) + '</div>' +
                             '<h3>' + escHtml(p.name) + '</h3>' +
                             starHTML(ratingVal) +

@@ -15,8 +15,8 @@
     <a class="skip-link" href="#main-content">Skip to content</a><header>
         <div class="logo">FreshMart</div>
         <div class="header-actions">
-            <button type="button" class="secondary-btn" onclick="window.location.href='index.html'">Store</button>
-            <button type="button" class="dark-mode-toggle" id="darkModeToggle" onclick="toggleDarkMode()" title="Dark Mode" aria-label="Toggle dark mode">🌙</button>
+            <button type="button" class="secondary-btn" data-act="[[&quot;$nav&quot;,&quot;index.html&quot;]]">Store</button>
+            <button type="button" class="dark-mode-toggle" id="darkModeToggle" data-act="[[&quot;toggleDarkMode&quot;,[]]]" title="Dark Mode" aria-label="Toggle dark mode">🌙</button>
         </div>
     </header>
 
@@ -62,7 +62,7 @@
             <div class="success-icon">✓</div>
             <h2>Subscription Confirmed!</h2>
             <p id="subSuccessMsg">Your weekly veggie box subscription is active.</p>
-            <button class="sub-btn" onclick="window.location.href='index.html'">Continue Shopping</button>
+            <button class="sub-btn" data-act="[[&quot;$nav&quot;,&quot;index.html&quot;]]">Continue Shopping</button>
         </div>
 
         <!-- Current subscription info -->

@@ -281,7 +281,7 @@ function renderDashboardDetails(d) {
             '<div class="dash-range-controls">' +
                 '<label>From <input type="date" id="dashFrom" value="' + dashEsc(d.from || "") + '"></label>' +
                 '<label>To <input type="date" id="dashTo" value="' + dashEsc(d.to || "") + '"></label>' +
-                '<button type="button" class="secondary-btn" onclick="loadDashboardRange()">Apply</button>' +
+                '<button type="button" class="secondary-btn" data-act="loadDashboardRange()">Apply</button>' +
             '</div>' +
             '<table class="dash-table"><thead><tr><th>Date</th><th>Sales</th><th>Orders</th></tr></thead>' +
             '<tbody id="dashDateWiseBody">' + rows + '</tbody></table>' +
@@ -356,8 +356,8 @@ function renderOrders() {
         // Manual payment awaiting verification -> quick verify / reject buttons
         var payActions = "";
         if (order.paymentStatus === "PENDING" && order.paymentMode === "manual") {
-            payActions = '<button class="row-btn verify" onclick="setOrderPayment(\'' + order._id + '\', \'PAID\')" title="Verify payment">&#10003; Verify</button>' +
-                         '<button class="row-btn reject" onclick="setOrderPayment(\'' + order._id + '\', \'FAILED\', \'Rejected by admin\')" title="Reject payment">&#10005; Reject</button>';
+            payActions = '<button class="row-btn verify" data-act="setOrderPayment(\'' + order._id + '\', \'PAID\')" title="Verify payment">&#10003; Verify</button>' +
+                         '<button class="row-btn reject" data-act="setOrderPayment(\'' + order._id + '\', \'FAILED\', \'Rejected by admin\')" title="Reject payment">&#10005; Reject</button>';
         }
 
         html += '<div class="admin-order-card">' +
@@ -377,9 +377,9 @@ function renderOrders() {
             '<div class="admin-order-foot">' +
                 '<div class="admin-order-total">Total: <strong>&#8377;' + (order.total || 0) + '</strong></div>' +
                 '<div class="admin-order-actions">' +
-                    '<button class="row-btn edit" onclick="openOrderDetail(\'' + order._id + '\')" title="View details"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-info-circle"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 0 0 8 0a8 8 0 0 0 0 16zM15 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/></svg></button>' +
+                    '<button class="row-btn edit" data-act="openOrderDetail(\'' + order._id + '\')" title="View details"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-info-circle"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 0 0 8 0a8 8 0 0 0 0 16zM15 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/></svg></button>' +
                     payActions +
-                    '<select class="status-select" onchange="changeOrderStatus(\'' + order._id + '\', this.value)">' +
+                    '<select class="status-select" data-act="changeOrderStatus(\'' + order._id + '\', this.value)">' +
                         ORDER_STATUSES.map(function(s) {
                             return '<option value="' + s + '" ' + (s === order.status ? "selected" : "") + '>' + s + '</option>';
                         }).join("") +
@@ -466,7 +466,7 @@ function showOrderDetail(order, skipReload) {
     var items = (order.items || []).map(function(item) {
         var img = adminProductImage({ name: item.name || item.productName, image: item.image });
         var thumb = img
-            ? '<img class="order-item-thumb" src="' + esc(img) + '" alt="" onerror="this.style.display=\'none\'">'
+            ? '<img class="order-item-thumb" src="' + esc(img) + '" alt="" data-act="[[&quot;$hideSelf&quot;,[]]]">'
             : '<span class="order-item-emoji">' + esc(item.emoji || "🥬") + '</span>';
         return '<tr><td>' + thumb + esc(item.name || item.productName || "Item") + '</td><td>' + (item.quantity || 1) + '</td><td>&#8377;' + (item.price || 0) + '</td><td><strong>&#8377' + ((item.price || 0) * (item.quantity || 1)) + '</strong></td></tr>';
     }).join("");
@@ -478,8 +478,8 @@ function showOrderDetail(order, skipReload) {
     var refund = order.refund || {};
     var payActions = "";
     if (order.paymentStatus === "PENDING" && order.paymentMode === "manual") {
-        payActions = '<div><button class="row-btn verify" onclick="setOrderPayment(\'' + order._id + '\', \'PAID\')">&#10003; Verify Payment</button> ' +
-            '<button class="row-btn reject" onclick="setOrderPayment(\'' + order._id + '\', \'FAILED\', \'Rejected by admin\')">&#10005; Reject Payment</button></div>';
+        payActions = '<div><button class="row-btn verify" data-act="setOrderPayment(\'' + order._id + '\', \'PAID\')">&#10003; Verify Payment</button> ' +
+            '<button class="row-btn reject" data-act="setOrderPayment(\'' + order._id + '\', \'FAILED\', \'Rejected by admin\')">&#10005; Reject Payment</button></div>';
     }
 
 var timeline = (order.statusHistory || []).map(function(h) {
@@ -517,7 +517,7 @@ var timeline = (order.statusHistory || []).map(function(h) {
         '</div>' +
         '<div class="order-detail-block">' +
             '<h4>Status</h4>' +
-            '<select class="status-select" onchange="changeOrderStatus(\'' + order._id + '\', this.value)">' + statusOptions + '</select>' +
+            '<select class="status-select" data-act="changeOrderStatus(\'' + order._id + '\', this.value)">' + statusOptions + '</select>' +
             (timeline ? '<ul class="order-timeline">' + timeline + '</ul>' : "") +
         '</div>';
 
@@ -575,7 +575,7 @@ function adminLocationBlock(order) {
         '<p>Coordinates: <strong>' + la.toFixed(6) + ', ' + ln.toFixed(6) + '</strong></p>' +
         accLine + capLine +
         '<p>' +
-        '<button type="button" class="row-btn" onclick="showAdminMap(' + la + ',' + ln + ',\'Customer Delivery Location\')">🗺️ View on Map</button> ' +
+        '<button type="button" class="row-btn" data-act="showAdminMap(' + la + ',' + ln + ',\'Customer Delivery Location\')">🗺️ View on Map</button> ' +
         '<a class="row-btn" style="text-decoration:none;" href="' + href + '" target="_blank" rel="noopener noreferrer">📍 Open in Google Maps</a></p>' +
         '</div>';
 }
@@ -598,7 +598,7 @@ function adminDeliveryBlock(order) {
                 pupdate = '<p>🚚 Delivery partner has not shared a live location yet.</p>';
             } else {
                 pupdate = '<p>🚚 Partner live location: ' + pla.toFixed(5) + ', ' + pln.toFixed(5) + ' (' + age + ') ' +
-                    '<button type="button" class="row-btn" onclick="showAdminMap(' + pla + ',' + pln + ',\'Partner Live Location\')">View Map</button> ' +
+                    '<button type="button" class="row-btn" data-act="showAdminMap(' + pla + ',' + pln + ',\'Partner Live Location\')">View Map</button> ' +
                     '<a class="row-btn" style="text-decoration:none;" href="' + plHref + '" target="_blank" rel="noopener noreferrer">Open in Maps</a></p>';
             }
         }
@@ -621,7 +621,7 @@ function adminDeliveryBlock(order) {
         '<p>No active delivery partner.</p>' +
         '<div class="delivery-assign-row">' +
         '<select id="assignPartnerSelect" class="status-select"><option value="">Select delivery partner…</option></select> ' +
-        '<button type="button" class="row-btn verify" onclick="adminAssignDelivery(\'' + order._id + '\')">Assign</button>' +
+        '<button type="button" class="row-btn verify" data-act="adminAssignDelivery(\'' + order._id + '\')">Assign</button>' +
         '</div>' +
         '<div id="assignPartnerStatus"></div>' +
         '</div>';
@@ -749,7 +749,7 @@ function renderProducts() {
         var img = adminProductImage(p);
         var safeGradient = String(p.gradient || "linear-gradient(135deg,#56ab2f,#a8e063)").replace(/[;"{}<>]|url\(|expression|javascript:/gi, "").slice(0, 200);
         var imgHtml = img
-            ? '<img class="admin-product-img" src="' + esc(img) + '" alt="' + esc(p.name || "") + '" onerror="this.style.display=\'none\'">'
+            ? '<img class="admin-product-img" src="' + esc(img) + '" alt="' + esc(p.name || "") + '" data-act="[[&quot;$hideSelf&quot;,[]]]">'
             : '';
         var stockTag = out ? '<span class="stock-tag out">Out of Stock</span>'
             : low ? '<span class="stock-tag low" title="Below configured threshold (' + lowThreshold + ')">Low Stock</span>'
@@ -769,23 +769,23 @@ function renderProducts() {
                 '<div class="admin-product-meta">⭐ ' + (p.rating || 0).toFixed(1) + ' (' + (p.ratingCount || 0) + ' ratings)</div>' +
                 '<div class="price-row">' +
                     '<span class="stock-label">Price: &#8377;<span id="priceVal_' + p._id + '">' + (p.price || 0) + '</span></span>' +
-                    '<button class="row-btn edit" onclick="beginPriceEdit(\'' + p._id + '\')" title="Quick edit price">✏️ Price</button>' +
+                    '<button class="row-btn edit" data-act="beginPriceEdit(\'' + p._id + '\')" title="Quick edit price">✏️ Price</button>' +
                 '</div>' +
                 '<div id="priceEdit_' + p._id + '" style="display:none;" class="price-edit-row">' +
                     '<input type="number" id="priceInput_' + p._id + '" class="stock-input" min="0" step="0.01" value="' + (p.price || 0) + '">' +
-                    '<button class="row-btn verify" onclick="savePriceEdit(\'' + p._id + '\')">Save</button>' +
-                    '<button class="row-btn" onclick="cancelPriceEdit(\'' + p._id + '\')">Cancel</button>' +
+                    '<button class="row-btn verify" data-act="savePriceEdit(\'' + p._id + '\')">Save</button>' +
+                    '<button class="row-btn" data-act="cancelPriceEdit(\'' + p._id + '\')">Cancel</button>' +
                 '</div>' +
                 '<div class="stock-row">' +
                     '<span class="stock-label' + (low || out ? " low" : "") + '">Stock: ' + (p.stock || 0) + '</span>' +
-                    '<input type="number" class="stock-input" min="0" value="' + (p.stock || 0) + '" onchange="quickStock(\'' + p._id + '\', this.value)" title="Update stock">' +
+                    '<input type="number" class="stock-input" min="0" value="' + (p.stock || 0) + '" data-act="quickStock(\'' + p._id + '\', this.value)" title="Update stock">' +
                 '</div>' +
             '</div>' +
             '<div class="admin-product-actions">' +
-                '<button class="row-btn edit" onclick="openEditProduct(\'' + p._id + '\')" title="Edit">✏️</button>' +
+                '<button class="row-btn edit" data-act="openEditProduct(\'' + p._id + '\')" title="Edit">✏️</button>' +
                 (inactive
-                    ? '<button class="row-btn restore" onclick="restoreProduct(\'' + p._id + '\')" title="Restore">↩️</button>'
-                    : '<button class="row-btn remove" onclick="removeProduct(\'' + p._id + '\')" title="Remove">🗑️</button>'
+                    ? '<button class="row-btn restore" data-act="restoreProduct(\'' + p._id + '\')" title="Restore">↩️</button>'
+                    : '<button class="row-btn remove" data-act="removeProduct(\'' + p._id + '\')" title="Remove">🗑️</button>'
                 ) +
             '</div>' +
         '</div>';
@@ -875,8 +875,9 @@ function updateImagePreview() {
     if (val) url = val.indexOf("images/") === 0 ? val : "images/" + val;
     else if (name) url = adminProductImage({ name: name });
     var safeUrl = String(url || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    void safeUrl;
     wrap.innerHTML = url
-        ? '<img class="admin-img-preview" src="' + esc(url) + '" alt="preview" onerror="this.parentNode.innerHTML=\'<span class=admin-img-missing>Image not found: ' + safeUrl + '</span>\'">'
+        ? '<img class="admin-img-preview" src="' + esc(url) + '" alt="preview" data-fb-text="' + esc(url) + '" data-act="[[&quot;$imgMissing&quot;,[]]]">'
         : "";
 }
 
@@ -975,7 +976,7 @@ function addVariantRow(v) {
         '<input type="number" class="pfv-price" placeholder="Price (₹)" min="0" step="0.01" value="' + esc(String(price)) + '">' +
         '<input type="number" class="pfv-stock" placeholder="Stock" min="0" step="1" value="' + esc(String(stock)) + '">' +
         '<label class="pfv-active">Active <input type="checkbox" class="pfv-active-chk" ' + (active ? "checked" : "") + '></label>' +
-        '<button type="button" class="row-btn remove" onclick="removeVariantRow(this)" title="Remove variant">🗑</button>';
+        '<button type="button" class="row-btn remove" data-act="removeVariantRow(this)" title="Remove variant">🗑</button>';
     box.appendChild(row);
 }
 
@@ -1179,7 +1180,7 @@ function renderCustomers() {
             ? '<span class="role-badge admin">Admin</span>'
             : '<span class="role-badge">Customer</span>';
         var orderCount = (u.orderCount !== undefined) ? u.orderCount : "N/A";
-        var viewBtn = '<button type="button" class="row-btn edit" onclick="openCustomerOrders(\'' + u._id + '\')" title="View customer order history">' + _icOrders + ' Orders</button>';
+        var viewBtn = '<button type="button" class="row-btn edit" data-act="openCustomerOrders(\'' + u._id + '\')" title="View customer order history">' + _icOrders + ' Orders</button>';
         return '<div class="admin-customer-row">' +
             '<div class="admin-customer-main">' +
                 '<div class="admin-customer-title"><strong>' + esc(u.name || "N/A") + '</strong>' + roleBadge + '</div>' +
@@ -1234,7 +1235,7 @@ function openCustomerOrders(userId) {
                     '<div class="admin-order-foot">' +
                         '<div class="admin-order-total">Total: <strong>&#8377;' + (o.total || 0) + '</strong></div>' +
                         '<div class="admin-order-actions">' +
-                            '<button type="button" class="row-btn edit" onclick="viewCustomerOrderDetails(\'' + o._id + '\')" title="View details">' + _icEye + ' View</button>' +
+                            '<button type="button" class="row-btn edit" data-act="viewCustomerOrderDetails(\'' + o._id + '\')" title="View details">' + _icEye + ' View</button>' +
                         '</div>' +
                     '</div>' +
                 '</div>';
@@ -1309,15 +1310,15 @@ function renderReviews() {
                 '<div class="admin-review-actions">' +
                     '<span class="admin-review-rating">' + (typeof starHTML === "function" ? starHTML(rev.rating) : ("★".repeat(rev.rating) + "★".repeat(5 - rev.rating))) + '</span>' +
                     returnStatusBadge(rev.moderationStatus || "PENDING") +
-                    '<button class="row-btn remove" onclick="deleteReview(\'' + rev._id + '\', \'' + String(rev.productName || "").replace(/[^a-zA-Z0-9 ]/g, "") + '\')" title="Delete review">🗑</button>' +
+                    '<button class="row-btn remove" data-act="deleteReview(\'' + rev._id + '\', \'' + String(rev.productName || "").replace(/[^a-zA-Z0-9 ]/g, "") + '\')" title="Delete review">🗑</button>' +
                 '</div>' +
             '</div>' +
             '<p class="admin-review-comment">' + esc(rev.comment || "") + '</p>' +
             '<div class="admin-review-date">' + date + '</div>' +
             '<div class="admin-review-actions" style="margin-top:8px;">' +
-                '<button class="row-btn edit" onclick="adminModerate(\'' + rev._id + '\', \'APPROVED\')" title="Approve">✓ Approve</button>' +
-                '<button class="row-btn reject" onclick="adminModerate(\'' + rev._id + '\', \'REJECTED\')" title="Reject">✕ Reject</button>' +
-                '<button class="row-btn edit" onclick="adminModerate(\'' + rev._id + '\', \'HIDDEN\')" title="Hide">🙈 Hide</button>' +
+                '<button class="row-btn edit" data-act="adminModerate(\'' + rev._id + '\', \'APPROVED\')" title="Approve">✓ Approve</button>' +
+                '<button class="row-btn reject" data-act="adminModerate(\'' + rev._id + '\', \'REJECTED\')" title="Reject">✕ Reject</button>' +
+                '<button class="row-btn edit" data-act="adminModerate(\'' + rev._id + '\', \'HIDDEN\')" title="Hide">🙈 Hide</button>' +
             '</div>' +
         '</div>';
     });
@@ -1432,7 +1433,7 @@ function renderAdminReturns() {
         }
         var actions = "";
         next.forEach(function(ns) {
-            actions += '<button class="row-btn edit" onclick="adminReturnNext(\'' + r._id + '\', \'' + ns + '\')" title="Move to ' + ns + '">' + esc(ns.replace(/_/g, " ")) + '</button>';
+            actions += '<button class="row-btn edit" data-act="adminReturnNext(\'' + r._id + '\', \'' + ns + '\')" title="Move to ' + ns + '">' + esc(ns.replace(/_/g, " ")) + '</button>';
         });
 
         var itemSummary = (r.items || []).map(function(i) {
@@ -1624,7 +1625,7 @@ function renderSettingsTab() {
                 (badRange ? '<p class="settings-hint warn">⚠️ The free-delivery threshold is below the minimum order value. With this combination every order becomes eligible for free delivery — make sure that is intentional.</p>' : '') +
                 '<p class="settings-hint">Customers automatically get FREE delivery on orders at or above the threshold. Setting the charge to 0 disables delivery fees; setting the threshold to 0 always charges. The minimum order value blocks below-threshold checkouts entirely (0 keeps the store fully open).</p>' +
                 '<p class="settings-hint">When the delivery radius is above 0, orders without a captured GPS location and destinations outside the radius are rejected with a clear message. Keep the radius at 0 until you have entered the store coordinates.</p>' +
-                '<button class="row-btn verify settings-save" onclick="saveAdminSettings()">💾 Save Settings</button>' +
+                '<button class="row-btn verify settings-save" data-act="saveAdminSettings()">💾 Save Settings</button>' +
                 '<div class="settings-status" id="settingsStatus" style="display:none;"></div>' +
             '</div>';
     }).catch(function() {
@@ -1906,9 +1907,9 @@ function renderAdminCoupons(list) {
                     : ('<span class="coupon-expired-badge">' + (expired ? "Expired" : "Inactive") + '</span>')) +
             '</div>' +
             '<div class="admin-coupon-actions">' +
-                '<button class="row-btn edit" onclick="toggleCoupon(\'' + c._id + '\', ' + (c.active ? 'false' : 'true') + ')" title="' + (c.active ? "Deactivate" : "Activate") + '">' + (c.active ? "⏸" : "▶") + '</button>' +
-                '<button class="row-btn edit" onclick="openCouponModal(' + "'" + c._id + "'" + ')" title="Edit">✏️</button>' +
-                '<button class="row-btn reject" onclick="deleteCoupon(\'' + c._id + '\')" title="Delete">🗑</button>' +
+                '<button class="row-btn edit" data-act="toggleCoupon(\'' + c._id + '\', ' + (c.active ? 'false' : 'true') + ')" title="' + (c.active ? "Deactivate" : "Activate") + '">' + (c.active ? "⏸" : "▶") + '</button>' +
+                '<button class="row-btn edit" data-act="openCouponModal(' + "'" + c._id + "'" + ')" title="Edit">✏️</button>' +
+                '<button class="row-btn reject" data-act="deleteCoupon(\'' + c._id + '\')" title="Delete">🗑</button>' +
             '</div>' +
         '</div>';
     }).join("");
