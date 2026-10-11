@@ -275,6 +275,64 @@ function syncCartToServer() {
     }, 400);
 }
 
+// Price refresh mechanism: periodically fetch latest product prices from the
+// server catalog so that admin-driven price updates become visible on the
+// customer website without a full page reload.  Cache-busting is handled by
+// appending a timestamp query parameter so browser/service-worker caches are
+// invalidated on each request.
+let priceRefreshInterval = null;
+
+function refreshProductCatalog() {
+    fetch("/api/products?" + Date.now())
+        .then(function (resp) {
+            if (!resp.ok) throw new Error("Network error");
+            return resp.json();
+        })
+        .then(function (data) {
+            // data = { success: true, count: N, data: [...] }
+            if (data && Array.isArray(data.data)) {
+                data.data.forEach(function (p) {
+                    var existing = products.find(function (q) { return q._id === p._id; });
+                    if (existing) {
+                        existing.price = p.price;
+                        existing.stock = p.stock;
+                    }
+                });
+                // Re‑populate the DOM price displays so the customer sees the
+                // updated values immediately.
+                updatePriceDisplays();
+                // Also re‑sync cart prices from the updated catalog.
+                refreshCartPrices();
+            }
+        })
+        .catch(function (err) {
+            console.error("Failed to refresh product catalog:", err);
+        });
+}
+
+// ---------------------------------------------------------------------------
+// Start a cheap periodic refresh (once per minute) so that admin price
+// changes propagate to open customer pages.  The interval is started the
+// first time this code runs and stays active for the lifetime of the page.
+// ---------------------------------------------------------------------------
+function startPriceRefresh() {
+    // Only start one interval ever.
+    if (!priceRefreshInterval) {
+        priceRefreshInterval = setInterval(refreshProductCatalog, 60000);
+        // Also run immediately so the page starts with fresh data.
+        refreshProductCatalog();
+    }
+}
+
+// Initialise the price‑refresh timer when the page first becomes interactive.
+// The health‑check interval (60 s) in script.js line ~4005 already uses a
+// similar pattern, so we piggy‑back on that infrastructure.
+if (typeof window !== "undefined" && document.readyState === "complete") {
+    startPriceRefresh();
+} else if (typeof window !== "undefined") {
+    window.addEventListener("load", startPriceRefresh);
+}
+
 function cartEntryFromServerItem(it) {
     var mult = getMultForWeight(it.weight, it.unit);
     return {
@@ -383,7 +441,12 @@ function redirectAfterLoginCheck(url) {
 // ===============================
 
 // Pages that a customer may only see after signing in.
-var AUTH_PROTECTED_PAGES = ["checkout", "orders", "help", "profile", "notifications"];
+// Pages that require a signed-in customer. "help" is deliberately NOT here:
+// the Help Center is public support content (no API calls, no stored data -
+// see help.js) and it is linked from the login page, the public footer and the
+// site structured data, so gating it sent anonymous visitors in a loop
+// login -> help -> login.
+var AUTH_PROTECTED_PAGES = ["checkout", "orders", "profile", "notifications"];
 
 function isProtectedPage(page) {
     return AUTH_PROTECTED_PAGES.indexOf(page) !== -1;
@@ -520,6 +583,18 @@ function notifPageUrl(n) {
     return "notifications.html";
 }
 
+// MED-4: notification deep links are server-authored same-site relative paths
+// ("orders.html", "admin.html", ...). Anything carrying an absolute URL scheme,
+// a protocol-relative "//host" or a backslash escape falls back to the inbox
+// instead of navigating away from (or executing inside) the app.
+function safeNotifUrl(link) {
+    var s = String(link == null ? "" : link).trim();
+    if (!s) return "notifications.html";
+    if (/^[a-z][a-z0-9+.\-]*:/i.test(s)) return "notifications.html";   // http:, https:, javascript:, data: ...
+    if (s.slice(0, 2) === "//" || s.slice(0, 2) === "\\") return "notifications.html";
+    return s;
+}
+
 function loadNotifications() {
     var box = document.getElementById("notificationsContainer");
     var summary = document.getElementById("notifSummary");
@@ -542,12 +617,17 @@ function loadNotifications() {
             box.innerHTML = items.map(function(n) {
                 var time = "";
                 try { if (n.createdAt) time = new Date(n.createdAt).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); } catch (e) {}
-                var url = notifPageUrl(n);
-                var idJson = JSON.stringify(String(n._id));
-                var urlJson = JSON.stringify(url);
-                var openBtn = n.read
-                    ? '<button type="button" class="notification-open" data-act="window.location.href=' + urlJson + '">Open</button>'
-                    : '<button type="button" class="notification-open" data-act="openNotification(' + idJson + ', ' + urlJson + ')">Open</button>';
+                var url = safeNotifUrl(notifPageUrl(n));
+                // MED-3: the Open button carries plain data-* attributes that a
+                // DOM listener consumes (bound in bindNotificationOpenButtons).
+                // Serialized JSON inside data-act used to collide with the
+                // attribute's own double quotes, truncating the spec and leaving
+                // every button inert under the strict CSP dispatcher.
+                var openBtn = '<button type="button" class="notification-open"' +
+                    ' data-notif-id="' + escHtml(String(n._id || "")) + '"' +
+                    ' data-notif-url="' + escHtml(url) + '"' +
+                    (n.read ? ' data-notif-read="1"' : '') +
+                    '>Open</button>';
                 return '<div class="notification-item' + (n.read ? " is-read" : "") + '">' +
                     '<span class="notification-icon">' + notifTypeIcon(n.type) + '</span>' +
                     '<div class="notification-item-body">' +
@@ -557,10 +637,29 @@ function loadNotifications() {
                     '</div>' + openBtn +
                 '</div>';
             }).join("");
+            bindNotificationOpenButtons(box);
         })
         .catch(function() {
             box.innerHTML = '<p style="text-align:center;">Could not load notifications.</p>';
         });
+}
+
+// MED-3: bind each Open button with a DOM listener (no inline handlers, no
+// JSON-in-attribute, strict CSP preserved). Read notifications navigate
+// directly; unread ones go through openNotification so they are marked read.
+function bindNotificationOpenButtons(box) {
+    var btns = (box || document).querySelectorAll(".notification-open[data-notif-id]");
+    Array.prototype.forEach.call(btns, function(btn) {
+        btn.addEventListener("click", function() {
+            var id = btn.getAttribute("data-notif-id") || "";
+            var url = safeNotifUrl(btn.getAttribute("data-notif-url"));
+            if (btn.getAttribute("data-notif-read") === "1") {
+                window.location.href = url;
+            } else {
+                openNotification(id, url);
+            }
+        });
+    });
 }
 
 // Open a notification: mark it read, track the click (reminder_clicked for
@@ -574,7 +673,7 @@ function openNotification(id, link) {
         metadata: { notificationId: String(id || ""), link: String(link || "").slice(0, 80) }
     });
     updateNotifBadge();
-    window.location.href = link || "notifications.html";
+    window.location.href = safeNotifUrl(link);
 }
 
 function markAllReadFromPage() {
@@ -1093,7 +1192,7 @@ function productCardHTML(index) {
     }
 
     return '<div class="product" data-category="' + escHtml(product.category) + '" data-act="openProductDetail(' + index + ')">' +
-        '<button type="button" class="card-menu-btn" aria-label="More options" data-act="event.stopPropagation(); openCardActionsMenu(this,\'' + safeName + '\',' + product.price + ',\'' + jsStr(product.unit) + '\',' + index + ')">⋮</button>' +
+        '<button type="button" class="card-menu-btn" aria-label="More options" data-act="event.stopPropagation(); openCardActionsMenu(this,\'' + safeName + '\',' + product.price + ',\'' + escHtml(jsStr(product.unit)) + '\',' + index + ')">⋮</button>' +
         '<div class="product-image" style="' + imageStyle(product.name, product.gradient) + '">' + productImgHTML(product.name) + '</div>' +
         stockBadge +
         '<h3>' + escHtml(product.name) + '</h3>' +
@@ -1599,7 +1698,7 @@ function renderRecentlyViewed() {
         // Use real product rating from server database
         var ratingVal = product.rating !== undefined ? product.rating : 4.0;
         var countVal = product.ratingCount !== undefined && product.ratingCount > 0 ? product.ratingCount : 0;
-        html += '<div class="product recent-product" data-act="openProductDetail(' + id + ')"><div class="product-image recent-img" style="' + imageStyle(product.name, product.gradient) + '">' + productImgHTML(product.name) + '</div><h3>' + escHtml(product.name) + '</h3>' + starHTML(ratingVal) + (countVal > 0 ? '<span class="rating-count">(' + countVal + ')</span>' : '') + '<p class="product-price">₹' + product.price + ' / ' + escHtml(product.unit) + '</p><button type="button" class="product-add-btn" data-act="event.stopPropagation(); addToCart(\'' + jsStr(product.name) + '\', ' + product.price + ')">' + tCartAdd() + '</button></div>';
+        html += '<div class="product recent-product" data-act="openProductDetail(' + id + ')"><div class="product-image recent-img" style="' + imageStyle(product.name, product.gradient) + '">' + productImgHTML(product.name) + '</div><h3>' + escHtml(product.name) + '</h3>' + starHTML(ratingVal) + (countVal > 0 ? '<span class="rating-count">(' + countVal + ')</span>' : '') + '<p class="product-price">₹' + product.price + ' / ' + escHtml(product.unit) + '</p><button type="button" class="product-add-btn" data-act="event.stopPropagation(); addToCart(\'' + escHtml(jsStr(product.name)) + '\', ' + product.price + ')">' + tCartAdd() + '</button></div>';
     });
 
     container.innerHTML = html;
@@ -2243,7 +2342,7 @@ function loadProductDetail() {
             '<button type="button" class="wishlist-heart detail-wishlist ' + wishClass + '" data-name="' + escHtml(p.name) + '" data-act="toggleWishlist(\'' + safeName + '\')">♥</button>' +
         '</div>' +
             '<div class="detail-info">' +
-            '<button type="button" class="whatsapp-share-btn detail-share" data-act="shareOnWhatsApp(\'' + safeName + '\',' + p.price + ',\'' + jsStr(p.unit) + '\',' + id + ')">WhatsApp Share</button>' +
+            '<button type="button" class="whatsapp-share-btn detail-share" data-act="shareOnWhatsApp(\'' + safeName + '\',' + p.price + ',\'' + escHtml(jsStr(p.unit)) + '\',' + id + ')">WhatsApp Share</button>' +
             '<span class="product-badge">' + escHtml(p.category) + '</span>' +
             '<h1>' + escHtml(p.name) + '</h1>' +
             '<div class="detail-rating">' + starHTML(ratingVal) + '<span class="rating-count">' + (countVal > 0 ? countVal.toFixed(1) + ' (' + countVal + ' ratings)' : 'No ratings') + '</span></div>' +
@@ -2557,8 +2656,8 @@ function detailControlsHTML(p) {
             '<button data-act="detailQtyChange(1)"' + (atMax ? ' disabled title="Limit reached"' : '') + '>+</button>' +
         '</div>' +
         '<div class="detail-btn-row">' +
-            '<button class="detail-add-btn" data-act="addDetailToCart(\'' + jsStr(p.name) + '\', ' + p.price + ')">' + tCartAdd() + '</button>' +
-            '<button class="buy-now-btn" data-act="buyNowDetail(\'' + jsStr(p.name) + '\', ' + p.price + ', \'' + jsStr(p.unit) + '\')">⚡ Buy Now</button>' +
+            '<button class="detail-add-btn" data-act="addDetailToCart(\'' + escHtml(jsStr(p.name)) + '\', ' + p.price + ')">' + tCartAdd() + '</button>' +
+            '<button class="buy-now-btn" data-act="buyNowDetail(\'' + escHtml(jsStr(p.name)) + '\', ' + p.price + ', \'' + escHtml(jsStr(p.unit)) + '\')">⚡ Buy Now</button>' +
         '</div>';
 }
 
@@ -4810,7 +4909,7 @@ function renderOrdersListHTML(orders, offline) {
         });
 
         var delivery = order.delivery !== undefined ? Number(order.delivery) : estimatedDelivery(Number(order.subtotal) || 0);
-        var total = Number(order.total) || (Number(order.subtotal || subtotal) + delivery);
+        var total = order.total != null && order.total !== "" ? Number(order.total) : (Number(order.subtotal || subtotal) + delivery);
 
         var cancellable = !offline && order._id && !order.isLocal &&
             (order.status === "Placed" || order.status === "Confirmed");
@@ -4819,7 +4918,7 @@ function renderOrdersListHTML(orders, offline) {
             : "";
 
         var returnBtn = (!offline && order._id && !order.isLocal && order.status === "Delivered")
-            ? '<button type="button" class="return-order-btn" data-act="openReturnModal(\'' + jsStr(order._id) + '\')">↩ Return / Replace items</button>'
+            ? '<button type="button" class="return-order-btn" data-act="openReturnModal(\'' + escHtml(jsStr(order._id)) + '\')">↩ Return / Replace items</button>'
             : "";
         var returnStatusLine = (order.returnInfo && order.returnInfo.returnNumber)
             ? '<div class="order-return-status"><strong>Return:</strong> ' + escHtml(order.returnInfo.returnNumber) +
@@ -4877,6 +4976,7 @@ function renderOrdersListHTML(orders, offline) {
             '<div class="order-pay-row">' + paymentStatusBadge(order.paymentStatus, order.paid, order.paymentMode) + (order.paymentMode === "manual" && order.paymentReference ? '<span class="pay-ref">UPI Ref: ' + escHtml(order.paymentReference) + '</span>' : "") + '</div>' +
             '<h3>Products</h3><div style="margin-top:10px;">' + productsHTML + '</div>' +
             '<div class="summary-row"><span>Subtotal</span><strong>₹' + Number(order.subtotal) + '</strong></div>' +
+            '<div class="summary-row" style="display:' + (order.discount && order.discount > 0 ? 'block' : 'none') + '"><span>Discount</span><strong style="color:var(--green-primary);">-?' + order.discount + '</strong></div>' +
             '<div class="summary-row"><span>Delivery</span><strong>₹' + delivery + '</strong></div>' +
             '<div class="order-total">Total: ₹' + total + '</div>' +
             returnStatusLine +
@@ -5005,7 +5105,7 @@ function renderReturnForm(modal, order) {
         '</select>' +
         '<label style="display:block;margin-top:10px;">Description (optional)</label>' +
         '<textarea id="rfComments" rows="2" maxlength="1000" placeholder="Tell us what happened..." style="width:100%;padding:10px 12px;border:1px solid var(--border-color);border-radius:var(--radius-sm);font-family:inherit;"></textarea>' +
-        '<button type="button" class="paid-btn" id="rfSubmitBtn" data-act="submitReturnRequest(\'' + escJs(order._id) + '\')">Submit Return Request</button>' +
+        '<button type="button" class="paid-btn" id="rfSubmitBtn" data-act="submitReturnRequest(\'' + escHtml(jsStr(order._id)) + '\')">Submit Return Request</button>' +
         '<button type="button" class="pay-cancel-btn" data-act="closeReturnModal()">Cancel</button>';
     trapModalFocus(modal);
 }
@@ -5101,13 +5201,13 @@ function renderMyReturns() {
             return escHtml(i.name + (i.variantUnit ? " (" + i.variantUnit + ")" : "") + " × " + i.quantity);
         }).join(", ");
         var cancelBtn = r.status === "SUBMITTED"
-            ? '<button type="button" class="cancel-order-btn" data-act="cancelMyReturn(\'' + escJs(r._id) + '\')">Cancel Request</button>'
+            ? '<button type="button" class="cancel-order-btn" data-act="cancelMyReturn(\'' + escHtml(jsStr(r._id)) + '\')">Cancel Request</button>'
             : "";
         return '<div class="order-card"><div class="order-header"><div><div class="order-id">' + escHtml(r.returnNumber || "Return") +
             '</div><small>' + escHtml(formatOrderDate(r.createdAt)) + '</small></div>' +
             '<div class="order-status">' + returnStatusBadgeHTML(r.status || "") + '</div></div>' +
             '<div class="order-pay-row"><span style="font-size:13px;">' + escHtml(r.returnType === "replacement" ? "Replacement" : "Refund") + '</span></div>' +
-            '<p style="font-size:13px;color:var(--text-secondary);">' + escHtml(items) + '</p>' +
+            '<p style="font-size:13px;color:var(--text-secondary);">' + items + '</p>' +
             '<p style="font-size:13px;">' + escHtml(r.reason || "") + (r.comments ? " — " + escHtml(r.comments) : "") + '</p>' +
             (r.refund && r.refund.amount ? '<p style="font-size:13px;color:var(--green-primary);">Refund: ₹' + r.refund.amount + (r.refund.method ? " via " + escHtml(r.refund.method.replace(/_/g, " ")) : "") + '</p>' : "") +
             '<div style="margin-top:12px;">' + cancelBtn + '</div></div>';
