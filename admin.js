@@ -252,7 +252,7 @@ function renderDashboardDetails(d) {
     return '' +
         '<div class="dash-blocks">' +
             '<div class="dash-block dash-today">' +
-                '<h4>📅 Today (' + (d.today ? d.today.date : "") + ')</h4>' +
+                '<h4>📅 Today (' + dashEsc(d.today ? d.today.date : "") + ')</h4>' +
                 '<div class="dash-today-nums">' +
                     '<div class="dash-num"><strong>₹' + (d.today ? (d.today.sales || 0).toLocaleString("en-IN") : 0) + '</strong><span>Sales</span></div>' +
                     '<div class="dash-num"><strong>' + (d.today ? d.today.orders : 0) + '</strong><span>Orders</span></div>' +
@@ -692,6 +692,12 @@ function loadAdminProducts() {
             renderProducts();
         })
         .catch(function(err) {
+            // If the session expired (401), redirect to login cleanly
+            // without wiping local auth state — consistent with gateProtectedPage().
+            if (err && err.status === 401) {
+                window.location.replace(authLoginPage());
+                return;
+            }
             container.innerHTML = '<p style="text-align:center;color:#e74c3c;padding:40px;">' +
                 esc(err.message || "Failed to load products.") + '</p>';
         });
@@ -1804,7 +1810,7 @@ function renderAdminDeliveryPartners(partners) {
         var contact = p.phone ? esc(p.phone) : "";
         return '<div class="admin-coupon' + (((p.online !== undefined) ? p.online : p.isOnline) ? " active" : "") + '">' +
             '<div class="admin-coupon-main">' +
-                '<div class="admin-coupon-code">' + (p.name || "Partner " + p._id) + '</div>' +
+                '<div class="admin-coupon-code">' + esc(p.name || "Partner " + p._id) + '</div>' +
                 '<div class="admin-coupon-meta">' +
                 (contact ? '<span>Phone: ' + contact + '</span>' : '') +
                 '<span>Status: ' + (((p.online !== undefined) ? p.online : p.isOnline) ? "Online" : "Offline") + '</span>' +
@@ -1828,10 +1834,10 @@ function renderAdminDeliveryToday(assignments) {
     var html = assignments.map(function(a) {
         var statusLabel = a.status;
         var partnerName = a.deliveryUser && a.deliveryUser.name ? a.deliveryUser.name : "";
-        var orderInfo = a.order ? 'Order: ' + (a.order.orderNumber || "N/A") + ' - ₹' + (a.order.total || 0) : '';
-        var partnerInfo = partnerName ? ' &middot; Partner: ' + partnerName : '';
+        var orderInfo = a.order ? 'Order: ' + esc(a.order.orderNumber || "N/A") + ' - ₹' + esc(a.order.total || 0) : '';
+        var partnerInfo = partnerName ? ' &middot; Partner: ' + esc(partnerName) : '';
         return '<div style="padding: 8px; border-bottom: 1px solid #eee; margin-bottom: 8px;">' +
-            '<strong>' + (statusLabel || 'Unknown') + '</strong>' +
+            '<strong>' + esc(statusLabel || 'Unknown') + '</strong>' +
             (orderInfo ? '<div>' + orderInfo + '</div>' : '') +
             (partnerInfo ? '<div>' + partnerInfo + '</div>' : '') +
             '</div>';

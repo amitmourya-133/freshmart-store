@@ -43,10 +43,11 @@ const walletTxSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
-// One reward per (type, referenceId) - protects referral / cashback / refund
-// payments from double-application on retried requests.
+// One reward per (user, type, referenceId) - protects referral / cashback / refund
+// payments from double-application on retried requests WITHIN the same user.
+// Different users may safely share the same (type, referenceId).
 walletTxSchema.index(
-    { type: 1, referenceId: 1 },
+    { user: 1, type: 1, referenceId: 1 },
     { unique: true, partialFilterExpression: { referenceId: { $type: "string" } } }
 );
 

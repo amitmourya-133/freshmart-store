@@ -488,9 +488,11 @@ function gateProtectedPage() {
         if (document.body) document.body.style.visibility = "";
     }).catch(function(err) {
         var msg = err && err.message ? String(err.message) : "";
+        // If session is expired/invalid, redirect to login without wiping
+        // the entire local auth state immediately — let the login flow
+        // restore credentials from the httpOnly cookie cleanly.
         if (msg.indexOf("Not authorized") !== -1 || msg.indexOf("not authorized") !== -1 ||
             msg.indexOf("User not found") !== -1 || msg.indexOf("401") !== -1) {
-            clearAuthState();
             window.location.replace(authLoginPage());
             return;
         }

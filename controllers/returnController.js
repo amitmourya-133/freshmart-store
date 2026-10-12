@@ -16,6 +16,7 @@ const InventoryLog = require("../models/InventoryLog");
 const { parseImageDataUri } = require("../utils/productImage");
 const { uploadImageBytes } = require("../utils/cloudinary");
 const { assertVariantAvailable } = require("../utils/variants");
+const { creditStoreCredit } = require("../utils/refunds");
 
 function isBadObjectId(id) {
     return !mongoose.Types.ObjectId.isValid(String(id || ""));
@@ -53,38 +54,65 @@ function pushTimeline(rt, status, by, note) {
 }
 
 async function restockReturnedItems(rt, byLabel, note) {
-    if (!rt || rt.stockRestocked) return;
-    for (const item of rt.items || []) {
-        if (item.variantId) {
-            // Positional filtered operator: only increment the exact matching
-            // pack (plain $ would touch the wrong variant on multi-pack items).
-            const res = await Product.updateOne(
-                { _id: item.productId },
-                { $inc: { "variants.$[elem].stock": item.quantity } },
-                { arrayFilters: [{ "elem._id": item.variantId }] }
-            );
-            const variant = res && res.matchedCount === 1
-                ? ((await Product.findById(item.productId).lean()) || {}).variants.find(function (v) { return String(v._id) === String(item.variantId); })
-                : null;
-            await logInv({
-                product: item.productId, variantId: item.variantId, scope: "variant", change: item.quantity,
-                previousStock: variant ? Math.max(0, variant.stock - item.quantity) : 0, newStock: variant ? variant.stock : 0,
-                reason: "return_refund", changeRef: rt.returnNumber, note: note || (rt.returnType || "return")
-            });
-        } else {
-            const product = await Product.findOneAndUpdate(
-                { _id: item.productId },
-                { $inc: { stock: item.quantity } },
-                { new: true }
-            );
-            await logInv({
-                product: item.productId, variantId: null, scope: "stock", change: item.quantity,
-                previousStock: product ? Math.max(0, product.stock - item.quantity) : 0, newStock: product ? product.stock : 0,
-                reason: "return_refund", changeRef: rt.returnNumber, note: note || (rt.returnType || "return")
-            });
+    // Phase 3: atomic claim - prevent concurrent admins from restocking the same item twice.
+    // We atomically claim the restock by setting stockRestocked=true on the ReturnRequest.
+    // Only one process can succeed; the others get null back and skip restocking.
+    const claimed = await ReturnRequest.findOneAndUpdate(
+        { _id: rt.id, stockRestocked: false },
+        { $set: { stockRestocked: true } },
+        { new: true }
+    );
+    // If we didn't claim it (another admin already did), skip restocking.
+    if (!claimed) return;
+
+    // At this point stockRestocked is true on the document; proceed with stock increments.
+    // If any increment fails, we reset stockRestocked=false so the restock can be retried
+    // (the findOneAndUpdate filter will succeed on the next attempt).
+    let restockOk = false;
+    try {
+        for (const item of rt.items || []) {
+            if (item.variantId) {
+                // Positional filtered operator: only increment the exact matching pack
+                // (plain $ would touch the wrong variant on multi-pack items).
+                const res = await Product.updateOne(
+                    { _id: item.productId },
+                    { $inc: { "variants.$[elem].stock": item.quantity } },
+                    { arrayFilters: [{ "elem._id": item.variantId }] }
+                );
+                if (res && res.matchedCount === 1) {
+                    const variant = (await Product.findById(item.productId).lean()) || {};
+                    const v = variant.variants.find(function (v) { return String(v._id) === String(item.variantId); });
+                    await logInv({
+                        product: item.productId, variantId: item.variantId, scope: "variant", change: item.quantity,
+                        previousStock: v ? Math.max(0, v.stock - item.quantity) : 0, newStock: v ? v.stock : 0,
+                        reason: "return_refund", changeRef: rt.returnNumber, note: note || (rt.returnType || "return")
+                    });
+                }
+            } else {
+                const product = await Product.findOneAndUpdate(
+                    { _id: item.productId },
+                    { $inc: { stock: item.quantity } },
+                    { new: true }
+                );
+                await logInv({
+                    product: item.productId, variantId: null, scope: "stock", change: item.quantity,
+                    previousStock: product ? Math.max(0, product.stock - item.quantity) : 0, newStock: product ? product.stock : 0,
+                    reason: "return_refund", changeRef: rt.returnNumber, note: note || (rt.returnType || "return")
+                });
+            }
         }
+        restockOk = true;
+    } catch (err) {
+        // Stock increment failed — reset stockRestocked so it can be retried later.
+        await ReturnRequest.updateOne(
+            { _id: rt.id },
+            { $set: { stockRestocked: false } }
+        );
+        // Re-throw so the caller (adminUpdateReturnStatus) can log/retry as needed.
+        throw err;
     }
-    rt.stockRestocked = true;
+    // If we got here, all stock increments succeeded and stockRestocked stays true.
+    // No explicit return needed — the document already has stockRestocked=true from the claim.
 }
 
 async function logInv(entry) {
@@ -344,6 +372,45 @@ exports.adminUpdateReturnStatus = async function (req, res) {
                     message: "Refund amount (₹" + amount + ") cannot exceed the computed refundable ₹" + rt.refund.computedAmount
                 });
             }
+
+            // BIZ-01: "store credit" must actually reach the customer's wallet.
+            // Credited BEFORE the return state is persisted: the credit is
+            // idempotent (keyed on the return id), so a retry after a partial
+            // failure never double-pays, while a credit that never happened can
+            // never be recorded as processed.
+            if (method === "store_credit") {
+                if (!rt.user) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Store credit needs a customer account. This return belongs to a guest checkout - choose cash, UPI or bank transfer."
+                    });
+                }
+                try {
+                    const credited = await creditStoreCredit({
+                        userId: rt.user,
+                        amount: amount,
+                        referenceType: "return",
+                        referenceId: String(rt._id),
+                        description: "Store credit refund for return " + rt.returnNumber,
+                        createdBy: "admin:" + String(req.user._id),
+                    });
+                    if (!credited.ok) {
+                        return res.status(400).json({
+                            success: false,
+                            message: credited.reason === "invalid_amount"
+                                ? "Refund amount must be greater than 0"
+                                : "Store credit could not be issued for this return"
+                        });
+                    }
+                } catch (e) {
+                    // Ledger failure: nothing persisted, admin can retry safely.
+                    return res.status(500).json({
+                        success: false,
+                        message: "Store credit could not be issued. Please retry."
+                    });
+                }
+            }
+
             rt.refund.amount = amount;
             rt.refund.method = method;
             rt.refund.reference = refund.reference && String(refund.reference).trim() ? String(refund.reference).trim().slice(0, 120) : ("RR-" + rt.returnNumber);

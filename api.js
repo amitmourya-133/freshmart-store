@@ -486,10 +486,17 @@ function fetchAdminOverview() {
     return fetch(API.base + "/orders/admin/overview", {
         headers: getAuthHeaders()
     })
-        .then(function(res) { return res.json(); })
+        .then(function(res) {
+            if (res.status === 401) {
+                return res.json().then(function(json) {
+                    throw Object.assign(new Error(json.message || "Session expired"), { status: 401 });
+                });
+            }
+            return res.json();
+        })
         .then(function(data) {
             if (!data.success) throw new Error(data.message || "Failed");
-            return data.data;
+            return data;
         });
 }
 
@@ -548,7 +555,14 @@ function fetchAdminProducts() {
     return fetch(API.base + "/products/admin/all", {
         headers: getAuthHeaders()
     })
-        .then(function(res) { return res.json(); })
+        .then(function(res) {
+            if (res.status === 401) {
+                return res.json().then(function(json) {
+                    throw Object.assign(new Error(json.message || "Session expired"), { status: 401 });
+                });
+            }
+            return res.json();
+        })
         .then(function(data) {
             if (!data.success) throw new Error(data.message || "Failed");
             return data.data;
