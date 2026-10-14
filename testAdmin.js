@@ -1,6 +1,15 @@
 // ===============================
 // Admin Panel Enhancement Tests (TEST A–E)
-// Requires .env (MONGODB_URI, JWT_SECRET) and a running server on :5000
+//
+// Prefers `npm run test:admin`, which runs runTestAdmin.js: that wrapper
+// creates the isolated database, starts a local SMTP sink BEFORE the server
+// (the app builds its mail transport at startup), boots the server, runs this
+// file and then drops the database.
+//
+// Running this file directly still works, but TEST A then needs the server to
+// already be running and to deliver the OTP somewhere readable:
+//   TEST_BASE_URL   base URL of the server under test (default 127.0.0.1:5000)
+//   SMTP_SINK_DIR   directory the local SMTP sink writes captured mail into
 // ===============================
 
 require("dotenv").config();
@@ -10,8 +19,10 @@ require("./utils/dbGuard").assertSafeDbUri(process.env.MONGODB_URI, { purpose: "
 
 var http = require("http");
 var jwt = require("jsonwebtoken");
+var smtpSink = require("./smtpSink");
 
-var BASE = "http://127.0.0.1:5000";
+var BASE = process.env.TEST_BASE_URL || "http://127.0.0.1:5000";
+var SMTP_SINK_DIR = process.env.SMTP_SINK_DIR || "";
 var JWT_SECRET = process.env.JWT_SECRET;
 // The account under test must come from the environment: a hardcoded address
 // ends up in git history and in every clone of this repo.
@@ -100,7 +111,53 @@ function assert(cond, msg) {
             password: testPass
         });
         assert(signupRes.status === 201 && signupRes.body && signupRes.body.success,
-            "A1 - Signup creates customer: status " + signupRes.status);
+            "A1 - Signup creates customer: status " + signupRes.status + (signupRes.body ? " body=" + JSON.stringify(signupRes.body) : ""));
+
+        // ---- Real email-verification flow ----------------------------------
+        // signup alone does NOT grant a session: the account is created with
+        // emailVerified=false and login is refused until the emailed OTP is
+        // confirmed. The test drives the genuine endpoints; the OTP is read out
+        // of the mail the application actually sent to the local SMTP sink.
+        // Nothing is hashed, injected, mocked or bypassed here.
+
+        // A1b: the gate is real - an unverified account cannot log in yet.
+        var earlyLogin = await req("POST", "/api/users/login?token=1", {
+            email: testEmail,
+            password: testPass
+        });
+        assert(earlyLogin.status === 403 && earlyLogin.body && earlyLogin.body.needsVerification === true,
+            "A1b - Login before verification is refused: status=" + earlyLogin.status +
+            " needsVerification=" + (earlyLogin.body && earlyLogin.body.needsVerification));
+
+        // A1c: the sink must have captured a real OTP email for this customer.
+        assert(!!SMTP_SINK_DIR, "A1c - SMTP sink directory is configured (run via `npm run test:admin`)");
+        var realOtp = SMTP_SINK_DIR ? await smtpSink.waitForOtp(SMTP_SINK_DIR, testEmail, { timeoutMs: 20000 }) : null;
+        assert(!!realOtp, "A1c - Real OTP email was delivered to the local SMTP sink");
+
+        // A1d: a wrong code must be rejected.
+        var wrongOtpRes = await req("POST", "/api/users/signup/verify-otp", {
+            email: testEmail,
+            otp: realOtp === "000000" ? "111111" : "000000"
+        });
+        assert(wrongOtpRes.status === 400, "A1d - Wrong OTP is rejected: status " + wrongOtpRes.status);
+
+        // A1e: the genuine OTP is accepted and returns a session.
+        var verifyRes = await req("POST", "/api/users/signup/verify-otp?token=1", {
+            email: testEmail,
+            otp: realOtp
+        });
+        assert(verifyRes.status === 200 && verifyRes.body && verifyRes.body.success,
+            "A1e - Real OTP verifies the account: status " + verifyRes.status);
+        assert(verifyRes.status !== 200 ||
+            !JSON.stringify(verifyRes.body).match(/"otp(Hash)?"\s*:/),
+            "A1e2 - verify-otp response does not leak the OTP or its hash");
+
+        // A1f: a verified account cannot be re-verified.
+        var reverifyRes = await req("POST", "/api/users/signup/verify-otp", {
+            email: testEmail,
+            otp: realOtp
+        });
+        assert(reverifyRes.status === 400, "A1f - Verified account cannot re-verify: status " + reverifyRes.status);
 
         // A2: login (token explicitly requested for the API client)
         var loginRes = await req("POST", "/api/users/login?token=1", {
@@ -109,6 +166,8 @@ function assert(cond, msg) {
         });
         assert(loginRes.status === 200 && loginRes.body && loginRes.body.token,
             "A2 - Login returns token: status " + loginRes.status);
+        assert(loginRes.status !== 200 || !JSON.stringify(loginRes.body).match(/"password"\s*:/),
+            "A2b - Login response contains no password field");
         var custToken = loginRes.body && loginRes.body.token;
         var custUser = loginRes.body && loginRes.body.data;
 
@@ -143,6 +202,10 @@ function assert(cond, msg) {
         var myOrder = (myOrders2.body && myOrders2.body.data && myOrders2.body.data[0]) || testOrder;
         assert(myOrder && myOrder.items && myOrder.items.length > 0, "A6b - Order has items");
         assert(myOrder && myOrder.total > 0, "A6c - Order has total > 0: ₹" + (myOrder && myOrder.total));
+
+        // A6d: the same route must stay closed to anonymous callers.
+        var anonOrders = await req("GET", "/api/orders/my");
+        assert(anonOrders.status === 401, "A6d - Anonymous /orders/my is refused: status " + anonOrders.status);
 
         // ===================== TEST B: Admin order verification =====================
         console.log("\n------ TEST B: Admin Order View + Status Update ------");

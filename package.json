@@ -8,7 +8,8 @@
     "dev": "nodemon server.js",
     "seed": "node seed.js",
     "seed:admin": "node seedAdmin.js",
-    "verify:csp": "node verify_csp_hashes.js"
+    "verify:csp": "node verify_csp_hashes.js",
+    "test:admin": "node runTestAdmin.js"
   },
   "keywords": [
     "freshmart",

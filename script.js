@@ -462,6 +462,49 @@ function authLoginPage() {
     return "login.html";
 }
 
+// True only for an error the backend reported as an INVALID / EXPIRED session.
+// A transient network or server failure must never match: treating it as
+// "logged out" would log people out (and could start a redirect loop) merely
+// because the backend was briefly unreachable.
+function isInvalidSessionError(msg) {
+    var m = String(msg == null ? "" : msg).toLowerCase();
+    return m.indexOf("not authorized") !== -1 ||
+        m.indexOf("user not found") !== -1 ||
+        m.indexOf("session expired") !== -1 ||
+        m.indexOf("401") !== -1;
+}
+
+// Landing page for a session already CONFIRMED valid, chosen by role so a
+// signed-in admin returns to the admin panel (never the customer signup flow)
+// and a delivery partner returns to their console. Customers honour any pending
+// post-login destination, defaulting to the storefront.
+function authLandingPage(user) {
+    var role = user && user.role ? String(user.role) : "";
+    if (role === "admin") return "admin.html";
+    if (role === "delivery") return "delivery.html";
+    return safeRedirectDestination("index.html");
+}
+
+// Reconcile a POSSIBLY-STALE local session when landing on login / signup.
+// The local `freshMartLoggedIn` flag can outlive the httpOnly cookie (expired
+// or revoked). Blindly bouncing to index.html trapped the user in a
+// protected -> login -> index loop with an unreachable login form. This VERIFIES
+// first and redirects only when the session is real, clearing the stale flag
+// when the backend reports it invalid. A transient network failure is not proof
+// of an invalid session, so the state is kept and the form is shown for retry.
+// Returns true when a session exists (reconciliation is in flight).
+function reconcileAuthPageSession() {
+    if (!hasSession()) return false;
+    if (document.body) document.body.style.visibility = "hidden";
+    verifySession().then(function(user) {
+        window.location.replace(authLandingPage(user));
+    }).catch(function(err) {
+        if (isInvalidSessionError(err && err.message)) clearAuthState();
+        if (document.body) document.body.style.visibility = "";
+    });
+    return true;
+}
+
 // Verify the httpOnly session cookie against the backend. Rejects on
 // 401-equivalent replies (when no session exists at all).
 function verifySession() {
@@ -489,10 +532,10 @@ function gateProtectedPage() {
     }).catch(function(err) {
         var msg = err && err.message ? String(err.message) : "";
         // If session is expired/invalid, redirect to login without wiping
-        // the entire local auth state immediately — let the login flow
-        // restore credentials from the httpOnly cookie cleanly.
-        if (msg.indexOf("Not authorized") !== -1 || msg.indexOf("not authorized") !== -1 ||
-            msg.indexOf("User not found") !== -1 || msg.indexOf("401") !== -1) {
+        // the entire local auth state immediately — the login page now
+        // reconciles the stale flag (it verifies the cookie and only clears
+        // state when the backend confirms the session is invalid).
+        if (isInvalidSessionError(msg)) {
             window.location.replace(authLoginPage());
             return;
         }
@@ -4084,17 +4127,18 @@ function initializePage() {
         return;
     }
 
-    // Auth pages: an already-signed-in user should not see Login / Create Account.
+    // Auth pages: an already-signed-in user should not see Login / Create
+    // Account. The local flag can be stale, so reconcile (verify -> redirect if
+    // real, clear if the backend proves it invalid) instead of blindly bouncing
+    // to index.html. See reconcileAuthPageSession() for the full rationale.
     if (page === "login" || page === "signup") {
-        if (hasSession()) {
-            window.location.replace("index.html");
-            return;
-        }
+        reconcileAuthPageSession();
     }
 
     // From an unverified login attempt (login failure with needsVerification)
     // we land here with ?v=<email> -> jump straight into the signup OTP step.
-    if (page === "signup") {
+    // Skipped when a session already exists (we are verifying / redirecting).
+    if (page === "signup" && !hasSession()) {
         var verifyEmail = new URLSearchParams(window.location.search).get("v");
         if (verifyEmail) {
             pendingSignup = { email: String(verifyEmail).toLowerCase() };

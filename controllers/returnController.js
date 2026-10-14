@@ -54,65 +54,77 @@ function pushTimeline(rt, status, by, note) {
 }
 
 async function restockReturnedItems(rt, byLabel, note) {
-    // Phase 3: atomic claim - prevent concurrent admins from restocking the same item twice.
-    // We atomically claim the restock by setting stockRestocked=true on the ReturnRequest.
-    // Only one process can succeed; the others get null back and skip restocking.
-    const claimed = await ReturnRequest.findOneAndUpdate(
-        { _id: rt.id, stockRestocked: false },
-        { $set: { stockRestocked: true } },
-        { new: true }
-    );
-    // If we didn't claim it (another admin already did), skip restocking.
-    if (!claimed) return;
-
-    // At this point stockRestocked is true on the document; proceed with stock increments.
-    // If any increment fails, we reset stockRestocked=false so the restock can be retried
-    // (the findOneAndUpdate filter will succeed on the next attempt).
-    let restockOk = false;
+    // EXACTLY-ONCE restock (Phase 4). The old design claimed `stockRestocked`
+    // with an atomic findOneAndUpdate and then incremented stock item-by-item,
+    // resetting the flag in a catch. If the process died AFTER the claim but
+    // AFTER some increments had already landed, the retry re-ran the whole loop
+    // and DOUBLE-incremented the items that had succeeded.
+    //
+    // A multi-document transaction makes the claim and every increment atomic:
+    // either the whole restock commits (flag true + all items incremented) or
+    // nothing does. A crash or mid-loop error therefore leaves BOTH the flag and
+    // the stock untouched, so a retry re-runs from a clean state with no
+    // double-count. Concurrent admins conflict on the claim write; only one
+    // transaction commits and the others skip.
+    //
+    // Requires a replica set (MongoDB Atlas provides one). On a standalone
+    // deployment withTransaction() throws and NO stock is touched - the admin
+    // simply retries - which is strictly safer than silently double-counting.
+    const session = await mongoose.startSession();
+    let logs = [];
     try {
-        for (const item of rt.items || []) {
-            if (item.variantId) {
-                // Positional filtered operator: only increment the exact matching pack
-                // (plain $ would touch the wrong variant on multi-pack items).
-                const res = await Product.updateOne(
-                    { _id: item.productId },
-                    { $inc: { "variants.$[elem].stock": item.quantity } },
-                    { arrayFilters: [{ "elem._id": item.variantId }] }
-                );
-                if (res && res.matchedCount === 1) {
-                    const variant = (await Product.findById(item.productId).lean()) || {};
-                    const v = variant.variants.find(function (v) { return String(v._id) === String(item.variantId); });
-                    await logInv({
-                        product: item.productId, variantId: item.variantId, scope: "variant", change: item.quantity,
-                        previousStock: v ? Math.max(0, v.stock - item.quantity) : 0, newStock: v ? v.stock : 0,
+        await session.withTransaction(async function () {
+            logs = [];
+            const claimed = await ReturnRequest.findOneAndUpdate(
+                { _id: rt._id, stockRestocked: false },
+                { $set: { stockRestocked: true } },
+                { new: true, session: session }
+            );
+            // Another request already restocked this return: nothing to do.
+            if (!claimed) return;
+
+            for (const item of rt.items || []) {
+                if (item.variantId) {
+                    // Positional filtered operator: only increment the exact matching
+                    // pack (plain $ would touch the wrong variant on multi-pack items).
+                    const res = await Product.updateOne(
+                        { _id: item.productId },
+                        { $inc: { "variants.$[elem].stock": item.quantity } },
+                        { arrayFilters: [{ "elem._id": item.variantId }], session: session }
+                    );
+                    if (res && res.matchedCount === 1) {
+                        const product = (await Product.findById(item.productId).session(session).lean()) || {};
+                        const v = (product.variants || []).find(function (vv) { return String(vv._id) === String(item.variantId); });
+                        logs.push({
+                            product: item.productId, variantId: item.variantId, scope: "variant", change: item.quantity,
+                            previousStock: v ? Math.max(0, v.stock - item.quantity) : 0, newStock: v ? v.stock : 0,
+                            reason: "return_refund", changeRef: rt.returnNumber, note: note || (rt.returnType || "return")
+                        });
+                    }
+                } else {
+                    const product = await Product.findOneAndUpdate(
+                        { _id: item.productId },
+                        { $inc: { stock: item.quantity } },
+                        { new: true, session: session }
+                    );
+                    logs.push({
+                        product: item.productId, variantId: null, scope: "stock", change: item.quantity,
+                        previousStock: product ? Math.max(0, product.stock - item.quantity) : 0, newStock: product ? product.stock : 0,
                         reason: "return_refund", changeRef: rt.returnNumber, note: note || (rt.returnType || "return")
                     });
                 }
-            } else {
-                const product = await Product.findOneAndUpdate(
-                    { _id: item.productId },
-                    { $inc: { stock: item.quantity } },
-                    { new: true }
-                );
-                await logInv({
-                    product: item.productId, variantId: null, scope: "stock", change: item.quantity,
-                    previousStock: product ? Math.max(0, product.stock - item.quantity) : 0, newStock: product ? product.stock : 0,
-                    reason: "return_refund", changeRef: rt.returnNumber, note: note || (rt.returnType || "return")
-                });
             }
-        }
-        restockOk = true;
-    } catch (err) {
-        // Stock increment failed — reset stockRestocked so it can be retried later.
-        await ReturnRequest.updateOne(
-            { _id: rt.id },
-            { $set: { stockRestocked: false } }
-        );
-        // Re-throw so the caller (adminUpdateReturnStatus) can log/retry as needed.
-        throw err;
+        });
+    } finally {
+        await session.endSession();
     }
-    // If we got here, all stock increments succeeded and stockRestocked stays true.
-    // No explicit return needed — the document already has stockRestocked=true from the claim.
+    // Inventory logs are an audit aid, not part of the inventory invariant, and
+    // are written AFTER the atomic commit so a log failure can never roll back
+    // real stock. One log per committed increment (the array is rebuilt on each
+    // transaction attempt, so a retry cannot duplicate entries).
+    for (const entry of logs) {
+        await logInv(entry);
+    }
 }
 
 async function logInv(entry) {
@@ -431,6 +443,9 @@ exports.adminUpdateReturnStatus = async function (req, res) {
 
         if ((status === "REFUND_PROCESSED" || status === "REPLACEMENT_DELIVERED") && !rt.stockRestocked) {
             await restockReturnedItems(rt, "admin:" + String(req.user._id), "goods received back");
+            // The transaction committed stockRestocked=true in the database; mirror
+            // it in the in-memory document so this save() and the response agree.
+            rt.stockRestocked = true;
         }
 
         rt.status = status;

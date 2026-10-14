@@ -59,7 +59,7 @@ async function credit({ userId, type, amount, referenceType, referenceId, descri
     // Idempotency: when a reference exists, any already-recorded payment for
     // the same (type, referenceId) is the canonical outcome.
     if (referenceType && referenceId) {
-        const prior = await WalletTransaction.findOne({ type: type, referenceId: String(referenceId) });
+        const prior = await WalletTransaction.findOne({ user: userId, type: type, referenceId: String(referenceId) });
         if (prior) {
             return { created: false, tx: prior, wallet: await getOrCreateWallet(userId) };
         }
@@ -97,7 +97,7 @@ async function credit({ userId, type, amount, referenceType, referenceId, descri
                 { user: userId },
                 { $inc: { balance: -money, totalCredited: -money } }
             );
-            const prior = await WalletTransaction.findOne({ type: type, referenceId: String(referenceId) });
+            const prior = await WalletTransaction.findOne({ user: userId, type: type, referenceId: String(referenceId) });
             return { created: false, tx: prior || null, wallet: await getOrCreateWallet(userId) };
         }
         throw err;
@@ -114,7 +114,7 @@ async function debit({ userId, type, amount, referenceType, referenceId, descrip
     const money = Math.round(Number(amount) * 100) / 100;
 
     if (referenceType && referenceId) {
-        const prior = await WalletTransaction.findOne({ type: type, referenceId: String(referenceId) });
+        const prior = await WalletTransaction.findOne({ user: userId, type: type, referenceId: String(referenceId) });
         if (prior) {
             return { created: false, tx: prior, wallet: await getOrCreateWallet(userId) };
         }
@@ -150,7 +150,7 @@ async function debit({ userId, type, amount, referenceType, referenceId, descrip
                 { user: userId },
                 { $inc: { balance: money, totalDebited: -money } }
             );
-            const prior = await WalletTransaction.findOne({ type: type, referenceId: String(referenceId) });
+            const prior = await WalletTransaction.findOne({ user: userId, type: type, referenceId: String(referenceId) });
             return { created: false, tx: prior || null, wallet: await getOrCreateWallet(userId) };
         }
         throw err;
