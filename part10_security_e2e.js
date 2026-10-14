@@ -15,12 +15,19 @@ const User = require(path.join(REPO, 'models/User'));
 const Order = require(path.join(REPO, 'models/Order'));
 const Product = require(path.join(REPO, 'models/Product'));
 
-const envFile = fs.readFileSync(path.join(REPO, '.env'), 'utf8');
-const URI = (envFile.match(/^MONGODB_URI=(.+)$/m) || [])[1];
-if (!URI) { console.error('MONGODB_URI not found'); process.exit(1); }
-// AUD-01: refuse to open the production database from a test suite.
-const dbGuard = require(path.join(REPO, 'utils/dbGuard'));
-dbGuard.assertSafeDbUri(URI, { purpose: 'part10_security_e2e' });
+// AUD-01 / SEC-02: this suite used to feed the raw production MONGODB_URI
+// straight into mongoose.connect() and then insert real Users and Orders.
+// utils/dbGuard refused that URI, so in practice the suite aborted before it
+// ever ran — the security coverage it claims was never actually exercised —
+// but the moment anyone ran it with FM_DB_FORCE=1 it wrote test rows into the
+// production `freshmart` database.
+//
+// Instead, derive a dedicated throwaway database from the same credentials,
+// assert the server under test is attached to that same database, and drop the
+// database on exit. Nothing here can reach production.
+const testDb = require(path.join(REPO, 'tests/lib/testDb'));
+const { uri: URI, dbName: TEST_DB_NAME } = testDb.deriveTestUri('part10', process.env.FM_TEST_DB_NAME);
+const BASE_URL = process.env.FM_TEST_BASE_URL || 'http://localhost:5000';
 
 const TEST_TAG = '@freshmart.test';
 const testEmail = 'part10' + Date.now() + TEST_TAG;
@@ -33,9 +40,17 @@ function assert(condition, msg) {
     else { failed++; console.log('  [FAIL] ' + msg); }
 }
 
-function httpReq(options, body) {
+const BASE = new URL(BASE_URL);
+
+function httpReq({ path: reqPath, method, headers }, body) {
     return new Promise((resolve, reject) => {
-        const req = http.request(options, (res) => {
+        const req = http.request({
+            hostname: BASE.hostname,
+            port: BASE.port || 80,
+            path: reqPath,
+            method: method,
+            headers: headers
+        }, (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
@@ -57,17 +72,42 @@ async function cleanup() {
 
 async function main() {
     console.log('=== FRESHMART PART 10: Security E2E Tests ===');
+    console.log('isolated database: ' + TEST_DB_NAME);
 
     await mongoose.connect(URI);
+    // Verify against the driver's own view of the database, not just the URI.
+    testDb.assertConnectionIsTestDb(mongoose, TEST_DB_NAME);
+    console.log('connected database: ' + testDb.connectedDbName(mongoose));
+
+    // Prove the API server under test is attached to the SAME throwaway
+    // database. Without this the HTTP assertions below could pass vacuously
+    // against a server still using production data.
+    await testDb.assertServerOnTestDb(BASE_URL, TEST_DB_NAME);
+    console.log('server preflight ok: ' + BASE_URL + ' is on ' + TEST_DB_NAME);
+
+    // The throwaway database is empty, so Tests 4 and 8 need a product. Seed a
+    // minimal one — inside the isolated DB only.
+    if (!await Product.findOne()) {
+        const fixture = new Product({
+            name: 'P10 Fixture Tomato',
+            description: 'part10 isolated-test fixture',
+            price: 40,
+            mrp: 45,
+            unit: 'kg',
+            stock: 500,
+            category: 'Vegetables',
+            image: '/images/jacfruit.png',
+            active: true
+        });
+        await fixture.save();
+        console.log('seeded product fixture ' + fixture._id);
+    }
 
     // ==============================
     // Test 1: Login enumeration — both cases return identical message
     // ==============================
     console.log('\n--- Test 1: Login enumeration messages are identical ---');
-    const r1 = await httpReq({
-        hostname: 'localhost', port: 5000, path: '/api/users/login', method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-    }, { email: 'noexist' + TEST_TAG, password: 'anypass' });
+    const r1 = await httpReq({ path: '/api/users/login', method: 'POST', headers: { 'Content-Type': 'application/json' } }, { email: 'noexist' + TEST_TAG, password: 'anypass' });
 
     const testUser = new User({
         name: 'P10 Test',
@@ -77,10 +117,7 @@ async function main() {
     });
     await testUser.save();
 
-    const r2 = await httpReq({
-        hostname: 'localhost', port: 5000, path: '/api/users/login', method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-    }, { email: testEmail, password: 'wrongpassword' });
+    const r2 = await httpReq({ path: '/api/users/login', method: 'POST', headers: { 'Content-Type': 'application/json' } }, { email: testEmail, password: 'wrongpassword' });
 
     assert(r1.status === r2.status,
         `Enumeration: no-account status ${r1.status} === wrong-password status ${r2.status}`);
@@ -152,14 +189,10 @@ async function main() {
     // Test 5: Unauthorized APIs return 401
     // ==============================
     console.log('\n--- Test 5: Unauthorized API returns 401 ---');
-    const unauth = await httpReq({
-        hostname: 'localhost', port: 5000, path: '/api/orders', method: 'GET'
-    });
+    const unauth = await httpReq({ path: '/api/orders', method: 'GET' });
     assert(unauth.status === 401, `No token GET /api/orders => ${unauth.status} (expected 401)`);
 
-    const unauth2 = await httpReq({
-        hostname: 'localhost', port: 5000, path: '/api/users/me', method: 'GET'
-    });
+    const unauth2 = await httpReq({ path: '/api/users/me', method: 'GET' });
     assert(unauth2.status === 401, `No token GET /api/users/me => ${unauth2.status} (expected 401)`);
 
     // ==============================
@@ -198,16 +231,26 @@ async function main() {
     await Order.deleteOne({ _id: codOrder._id });
 
     // ==============================
-    // Cleanup test user
+    // Cleanup test user, then drop the
+    // whole throwaway database
     // ==============================
     await cleanup();
+    await mongoose.connection.db.dropDatabase();
     await mongoose.disconnect();
 
     console.log(`\n=== PART 10 RESULTS: ${passed} passed, ${failed} failed ===`);
+    console.log('dropped test database ' + TEST_DB_NAME);
     process.exit(failed === 0 ? 0 : 1);
 }
 
-main().catch(err => {
+main().catch(async (err) => {
     console.error('FATAL:', err.message);
-    mongoose.disconnect().then(() => process.exit(1));
+    // Still tear the isolated database down so a failed run leaves nothing.
+    try {
+        if (mongoose.connection.readyState === 1) {
+            await mongoose.connection.db.dropDatabase();
+            await mongoose.disconnect();
+        }
+    } catch (e) { /* nothing to clean up */ }
+    process.exit(1);
 });

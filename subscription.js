@@ -44,7 +44,14 @@ function subMoney(amount) {
 function subApi(url, opts) {
     opts = opts || {};
     opts.headers = Object.assign({}, getAuthHeaders(), opts.headers || {});
-    return fetch(API.base + url, opts).then(function (res) { return res.json(); });
+    return fetch(API.base + url, opts).then(function (res) {
+        if (!res.ok) {
+            return res.json().then(function (error) {
+                throw new Error(error && error.message || ("HTTP " + res.status));
+            });
+        }
+        return res.json();
+    });
 }
 
 function renderPlans(plans) {

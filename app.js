@@ -179,7 +179,7 @@ app.use(require("./utils/logger").requestLogger);
 // remaining executable inline script blocks are allow-listed by digest
 // (delivery.html, profile.html, signup.html). Kept as a literal so it stays
 // byte-identical to vercel.json and greppable during audits.
-const CSP = "default-src 'self'; script-src 'self' 'sha256-5E4kv0yJqsuBA5dWZXMVggBCcQSBYM5EKi0nWRuO2TE=' 'sha256-mkGHCh/CZhIcMe3N5brVBcW+qGcvpJr95hOI/Hzv9/Y=' 'sha256-AjxHWGLAep3r1KftZVXb0d1Iyjpek0SUDCCKmcdUsws='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.postalpincode.in https://nominatim.openstreetmap.org; font-src 'self'; frame-src 'self' https://www.openstreetmap.org; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; worker-src 'self'; manifest-src 'self'; upgrade-insecure-requests";
+const CSP = "default-src 'self'; script-src 'self' 'sha256-3fwArCxAJGFqkLuVs3Q1afnHiHB6zMqfpVj3ksQJhxA=' 'sha256-mkGHCh/CZhIcMe3N5brVBcW+qGcvpJr95hOI/Hzv9/Y=' 'sha256-AjxHWGLAep3r1KftZVXb0d1Iyjpek0SUDCCKmcdUsws='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.postalpincode.in https://nominatim.openstreetmap.org; font-src 'self'; frame-src 'self' https://www.openstreetmap.org; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; worker-src 'self'; manifest-src 'self'; upgrade-insecure-requests";
 app.use((req, res, next) => {
     res.setHeader("Content-Security-Policy", CSP);
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -273,8 +273,20 @@ app.get("/api/ops/cron/delivery-sweep", async (req, res) => {
 });
 
 // Health check
+//
+// `db` is reported ONLY when FM_TEST_MODE=1. That lets an E2E suite assert it
+// is talking to its own throwaway database instead of production, without ever
+// disclosing the production database name on a public endpoint.
 app.get("/api/health", (req, res) => {
-    res.json({ success: true, message: "FreshMart API is running" });
+    const body = { success: true, message: "FreshMart API is running" };
+    if (process.env.FM_TEST_MODE === "1") {
+        try {
+            body.db = require("mongoose").connection.name;
+        } catch (e) {
+            body.db = null;
+        }
+    }
+    res.json(body);
 });
 
 // ===============================

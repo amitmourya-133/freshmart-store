@@ -104,9 +104,19 @@ const UserSubscriptionSchema = new mongoose.Schema({
         type: String,
         trim: true,
     },
+    // CRN-02: non-null while a fulfillment run OWNS this subscription's due
+    // cycle. Claimed with a conditional update before any work, cleared when
+    // the run finishes; a crashed run's claim goes stale after the TTL and is
+    // reclaimable, so overlap can never double-fulfill and a crash can never
+    // wedge the schedule.
+    fulfillingAt: {
+        type: Date,
+    },
 }, { timestamps: true });
 
 // Index for quick user lookup
 UserSubscriptionSchema.index({ user: 1, status: 1 });
+// Cron hot path: "due" scans status=active with nextDeliveryDate <= now.
+UserSubscriptionSchema.index({ status: 1, nextDeliveryDate: 1 });
 
 module.exports = mongoose.model("UserSubscription", UserSubscriptionSchema);

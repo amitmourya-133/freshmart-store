@@ -74,6 +74,62 @@ async function reserveBoxLine(item) {
     return !!(res && res.modifiedCount === 1);
 }
 
+// ---------------- CRN-02: due-cycle claim + shared stock release -------------
+// Two overlapping runs (Vercel cron overlap, cron + manual admin trigger, two
+// admin tabs) would otherwise both see the same due subscription, both
+// decrement stock and BOTH place an order for the same cycle. The claim is one
+// atomic conditional update keyed on the exact nextDeliveryDate we read plus a
+// stale-or-empty fulfillingAt: exactly one runner wins, every other runner's
+// filter misses. A crashed runner's claim goes stale after CLAIM_TTL_MS and is
+// reclaimable, so a crash can neither wedge the schedule nor leave a permanent
+// lock. (A crash in the milliseconds between stock reservation and Order.create
+// still leaks that reservation - closing it would need a transaction; the
+// window is documented rather than papered over.)
+const CLAIM_TTL_MS = 10 * 60 * 1000;
+
+async function claimCycle(sub) {
+    const token = new Date();
+    const res = await UserSubscription.updateOne(
+        {
+            _id: sub._id,
+            status: "active",
+            nextDeliveryDate: sub.nextDeliveryDate,
+            $or: [
+                { fulfillingAt: null },
+                { fulfillingAt: { $lt: new Date(token.getTime() - CLAIM_TTL_MS) } },
+            ],
+        },
+        { $set: { fulfillingAt: token } }
+    );
+    return res && res.matchedCount === 1 ? token : null;
+}
+
+// Clear only OUR claim (token-filtered), so we can never release a claim a
+// newer run has since taken. Failure self-heals through the stale TTL.
+async function releaseCycleClaim(subId, token) {
+    try {
+        await UserSubscription.updateOne(
+            { _id: subId, fulfillingAt: token },
+            { $set: { fulfillingAt: null } }
+        );
+    } catch (e) { /* stale claim self-heals via CLAIM_TTL_MS */ }
+}
+
+// Give reserved lines back (shortfall, no-address, or any failure before the
+// box exists). Every exit path uses this helper so release behaviour is
+// identical everywhere.
+async function restoreReserved(lines) {
+    for (const line of lines) {
+        await Product.updateOne({ _id: line.productId }, { $inc: { stock: Number(line.quantity) || 1 } }).catch(() => {});
+    }
+}
+
+function intervalDays(plan) {
+    return (plan && Number(plan.deliveryEveryDays))
+        || (plan && plan.pricing && FREQ_DAYS[plan.pricing.frequency])
+        || 7;
+}
+
 // Fulfill every due active subscription up to `limit` orders per run.
 // Returns a summary; never throws past the batch (each sub is isolated).
 async function fulfillDueSubscriptions(limit) {
@@ -89,9 +145,17 @@ async function fulfillDueSubscriptions(limit) {
     const summary = { scanned: due.length, fulfilled: 0, skipped: 0, stockShortfalls: 0, failed: 0, orders: [] };
 
     for (const sub of due) {
+        const claim = await claimCycle(sub);
+        if (!claim) continue; // another run owns this cycle (or it changed)
+
+        let plan = null;
+        let reserved = []; // stock lines held by THIS run
+        let order = null;  // set once the box is placed
         try {
-            const plan = await SubscriptionPlan.findById(sub.plan).lean();
+            plan = await SubscriptionPlan.findById(sub.plan).lean();
+            if (!plan) throw new Error("subscription plan missing");
             const user = await User.findById(sub.user).lean();
+            if (!user) throw new Error("subscriber missing");
 
             // Snapshot agreed at subscribe time; fall back to the live plan.
             let snapshot = Array.isArray(sub.boxSnapshot) && sub.boxSnapshot.length
@@ -123,7 +187,6 @@ async function fulfillDueSubscriptions(limit) {
 
             // Atomic stock availability + reservation for the whole box.
             let stockOk = true;
-            const reserved = [];
             for (const line of lines) {
                 if (!line.productId) continue;
                 if (!(await reserveBoxLine(line))) { stockOk = false; break; }
@@ -131,10 +194,9 @@ async function fulfillDueSubscriptions(limit) {
             }
             if (!stockOk) {
                 // Release anything reserved so the next cycle can retry fresh.
-                for (const line of reserved) {
-                    await Product.updateOne({ _id: line.productId }, { $inc: { stock: Number(line.quantity) || 1 } }).catch(() => {});
-                }
-                const adv = advanceDays(new Date(sub.nextDeliveryDate), Number(plan.deliveryEveryDays) || FREQ_DAYS[plan.pricing.frequency] || 7);
+                await restoreReserved(reserved);
+                reserved = [];
+                const adv = advanceDays(new Date(sub.nextDeliveryDate), intervalDays(plan));
                 await UserSubscription.updateOne({ _id: sub._id }, {
                     nextDeliveryDate: adv,
                     lastAttemptStatus: "stock_shortfall",
@@ -155,7 +217,8 @@ async function fulfillDueSubscriptions(limit) {
             // Customer block from the account's default address (never invented).
             const address = (user.addresses || []).find((a) => a.isDefault) || (user.addresses || [])[0] || null;
             if (!address) {
-                for (const line of reserved) await Product.updateOne({ _id: line.productId }, { $inc: { stock: Number(line.quantity) || 1 } }).catch(() => {});
+                await restoreReserved(reserved);
+                reserved = [];
                 await UserSubscription.updateOne({ _id: sub._id }, {
                     lastAttemptStatus: "failed",
                     lastAttemptAt: new Date(),
@@ -169,7 +232,7 @@ async function fulfillDueSubscriptions(limit) {
             const total = round2(subtotal + 0); // boxes ship free; policy charges only surcharges
 
             const paymentMode = plan.paymentMode || "cod";
-            const order = await Order.create({
+            order = await Order.create({
                 orderNumber: orderNumberFor(String(sub._id)),
                 customer: {
                     name: user.name || address.name || "Subscriber",
@@ -195,8 +258,11 @@ async function fulfillDueSubscriptions(limit) {
                 statusHistory: [{ status: "Placed", by: "system:subscription-box", at: new Date() }],
             });
 
-            const adv = advanceDays(new Date(sub.nextDeliveryDate), Number(plan.deliveryEveryDays) || FREQ_DAYS[plan.pricing.frequency] || 7);
-            await UserSubscription.updateOne({ _id: sub._id }, {
+            // Schedule-critical advance: the box exists, so the cycle MUST move
+            // forward or the next run would duplicate it. Keyed on the
+            // nextDeliveryDate we read, so it can ever apply only once.
+            const adv = advanceDays(new Date(sub.nextDeliveryDate), intervalDays(plan));
+            const advanceDoc = {
                 nextDeliveryDate: adv,
                 fulfilledCount: (Number(sub.fulfilledCount) || 0) + 1,
                 lastFulfilledAt: new Date(),
@@ -204,31 +270,99 @@ async function fulfillDueSubscriptions(limit) {
                 lastAttemptAt: new Date(),
                 lastAttemptMessage: null,
                 $push: { paymentHistory: { amount: round2(total), date: new Date(), status: "pending", transactionId: String(order._id) } },
-            });
+            };
+            let advanced = false;
+            try {
+                const r1 = await UserSubscription.updateOne(
+                    { _id: sub._id, nextDeliveryDate: sub.nextDeliveryDate },
+                    advanceDoc
+                );
+                advanced = !!(r1 && r1.matchedCount === 1);
+            } catch (e) {
+                advanced = false;
+            }
+            if (!advanced) {
+                // Transient failure: one retry from the same base. The date
+                // filter keeps the retry from ever applying twice.
+                await UserSubscription.updateOne(
+                    { _id: sub._id, nextDeliveryDate: sub.nextDeliveryDate },
+                    advanceDoc
+                );
+            }
 
-            analytics.track({
-                eventName: "subscription_renewal",
-                userId: sub.user,
-                orderId: String(order._id),
-                metadata: {
-                    plan: (plan && plan.name) || null,
-                    amount: total,
-                    cycleIndex: (Number(sub.fulfilledCount) || 0) + 1,
-                },
-            });
-
-            notificationController.notifyBase(sub.user, {
-                type: "subscription",
-                title: "Your box is packed",
-                message: "Cycle " + ((Number(sub.fulfilledCount) || 0) + 1) + " of " + (plan.name || "your box") + " (₹" + total + ") is placed. Next: " + adv.toISOString().slice(0, 10) + ".",
-                dedupeKey: "subbox:" + String(sub._id) + ":" + String(order._id),
-                data: { link: "orders.html", orderId: String(order._id) },
-            });
+            // Analytics + notification are observability, not the cycle: they
+            // must never bubble into the catch below (which would see an
+            // existing order and treat a finished cycle as a failure).
+            try {
+                analytics.track({
+                    eventName: "subscription_renewal",
+                    userId: sub.user,
+                    orderId: String(order._id),
+                    metadata: {
+                        plan: (plan && plan.name) || null,
+                        amount: total,
+                        cycleIndex: (Number(sub.fulfilledCount) || 0) + 1,
+                    },
+                });
+            } catch (e) { /* non-fatal */ }
+            try {
+                notificationController.notifyBase(sub.user, {
+                    type: "subscription",
+                    title: "Your box is packed",
+                    message: "Cycle " + ((Number(sub.fulfilledCount) || 0) + 1) + " of " + (plan.name || "your box") + " (₹" + total + ") is placed. Next: " + adv.toISOString().slice(0, 10) + ".",
+                    dedupeKey: "subbox:" + String(sub._id) + ":" + String(order._id),
+                    data: { link: "orders.html", orderId: String(order._id) },
+                });
+            } catch (e) { /* non-fatal */ }
 
             summary.fulfilled++;
             summary.orders.push({ orderId: String(order._id), orderNumber: order.orderNumber, total });
         } catch (err) {
-            summary.failed++;
+            if (order) {
+                // The box exists and its stock is correctly consumed. The only
+                // thing that matters is advancing the schedule - never mark the
+                // cycle failed when a real order is already out the door.
+                try {
+                    const adv2 = advanceDays(new Date(sub.nextDeliveryDate), intervalDays(plan));
+                    await UserSubscription.updateOne(
+                        { _id: sub._id, nextDeliveryDate: sub.nextDeliveryDate },
+                        {
+                            nextDeliveryDate: adv2,
+                            fulfilledCount: (Number(sub.fulfilledCount) || 0) + 1,
+                            lastFulfilledAt: new Date(),
+                            lastAttemptStatus: "ok",
+                            lastAttemptAt: new Date(),
+                            lastAttemptMessage: null,
+                            $push: { paymentHistory: { amount: round2(order.total), date: new Date(), status: "pending", transactionId: String(order._id) } },
+                        }
+                    );
+                } catch (e2) {
+                    console.warn("[subscription] schedule advance failed for sub " + sub._id + ": " + (e2 && e2.message ? e2.message : "unknown"));
+                }
+                summary.fulfilled++;
+                summary.orders.push({ orderId: String(order._id), orderNumber: order.orderNumber, total: order.total });
+                console.warn("[subscription] post-create error (order kept, schedule retried): " + (err && err.message ? err.message : "unknown") + " (sub " + sub._id + ")");
+            } else {
+                // Nothing was placed: give every held line back. The old code
+                // released only on its two explicit exits, so an Order.create
+                // failure (duplicate orderNumber, validation) silently leaked
+                // every reservation in `reserved`.
+                await restoreReserved(reserved);
+                reserved = [];
+                if (plan) {
+                    try {
+                        await UserSubscription.updateOne({ _id: sub._id }, {
+                            lastAttemptStatus: "failed",
+                            lastAttemptAt: new Date(),
+                            lastAttemptMessage: (err && err.message) || "fulfillment error",
+                        });
+                    } catch (e2) { /* non-fatal */ }
+                }
+                console.warn("[subscription] cycle failed: " + (err && err.message ? err.message : "unknown") + " (sub " + sub._id + ")");
+                summary.failed++;
+            }
+        } finally {
+            await releaseCycleClaim(sub._id, claim);
         }
     }
     return summary;

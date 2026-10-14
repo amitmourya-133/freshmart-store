@@ -210,6 +210,20 @@
             setTimeout(attachActionHandlers, 100);
         }
 
+        // HTML-escape helper (same coverage as the project's other esc()
+        // utilities: & < > " '). Every value that reaches an innerHTML sink
+        // from the API - customer name/phone/address, item names, slot,
+        // order number, statuses, URLs - must pass through this first
+        // (HIGH-1: stored HTML injection via checkout fields).
+        function esc(value) {
+            return String(value === undefined || value === null ? "" : value)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#39;");
+        }
+
         function createAssignmentCard(assignment, order, rank) {
             const orderNumber = order.orderNumber || assignment.orderId || 'N/A';
             const customer = order.customer && typeof order.customer === 'object' ? order.customer : {};
@@ -237,10 +251,10 @@
             switch(status) {
                 case "ASSIGNED":
                     actionsHtml = `
-                        <button class="action-btn accept" title="Accept Assignment" ${disabledAttr(isStatus("ASSIGNED"))} data-id="${assignment._id}">
+                        <button class="action-btn accept" title="Accept Assignment" ${disabledAttr(isStatus("ASSIGNED"))} data-id="${esc(assignment._id)}">
                             Accept
                         </button>
-                        <button class="action-btn reject" title="Reject Assignment" ${disabledAttr(isStatus("ASSIGNED"))} data-id="${assignment._id}">
+                        <button class="action-btn reject" title="Reject Assignment" ${disabledAttr(isStatus("ASSIGNED"))} data-id="${esc(assignment._id)}">
                             Reject
                         </button>
                     `;
@@ -248,7 +262,7 @@
 
                 case "ACCEPTED":
                     actionsHtml = `
-                        <button class="action-btn pickup" title="Mark Picked Up" ${disabledAttr(isStatus("ACCEPTED"))} data-id="${assignment._id}">
+                        <button class="action-btn pickup" title="Mark Picked Up" ${disabledAttr(isStatus("ACCEPTED"))} data-id="${esc(assignment._id)}">
                             Pickup
                         </button>
                     `;
@@ -256,7 +270,7 @@
 
                 case "PICKED_UP":
                     actionsHtml = `
-                        <button class="action-btn start" title="Start Delivery" ${disabledAttr(isStatus("PICKED_UP"))} data-id="${assignment._id}">
+                        <button class="action-btn start" title="Start Delivery" ${disabledAttr(isStatus("PICKED_UP"))} data-id="${esc(assignment._id)}">
                             Start Delivery
                         </button>
                     `;
@@ -264,10 +278,10 @@
 
                 case "EN_ROUTE":
                     actionsHtml = `
-                        <button class="action-btn proof" title="Upload Delivery Proof Photo" data-id="${assignment._id}">
+                        <button class="action-btn proof" title="Upload Delivery Proof Photo" data-id="${esc(assignment._id)}">
                             Upload Proof
                         </button>
-                        <button class="action-btn deliver" title="Mark Delivered" data-id="${assignment._id}">
+                        <button class="action-btn deliver" title="Mark Delivered" data-id="${esc(assignment._id)}">
                             Deliver
                         </button>
                     `;
@@ -299,7 +313,7 @@
                     <div class="detail-row">
                         <strong>Location:</strong>
                         <button type="button" class="loc-secondary-btn" data-act="[[&quot;viewDeliveryMap&quot;,[${JSON.stringify(dLat)},${JSON.stringify(dLng)},&quot;Customer Delivery Location&quot;]]]">View Map</button>
-                        <a class="loc-secondary-btn" style="text-decoration:none;display:inline-block;" href="${dnHref}" target="_blank" rel="noopener noreferrer">Open in Maps</a>
+                        <a class="loc-secondary-btn" style="text-decoration:none;display:inline-block;" href="${esc(dnHref)}" target="_blank" rel="noopener noreferrer">Open in Maps</a>
                     </div>`
                     : `
                     <div class="detail-row">
@@ -311,47 +325,51 @@
             // Live-location sharing bar (available while an assignment is active).
             const isTerminal = status === "DELIVERED" || status === "REJECTED" || status === "CANCELLED";
             const shareBar = isTerminal ? '' : `
-                <div class="loc-share-bar" data-id="${assignment._id}">
-                    <button type="button" class="loc-action-btn share-live-btn" data-id="${assignment._id}" data-act="[[&quot;toggleLiveShare&quot;,[&quot;$el&quot;]]]">📡 Share My Live Location</button>
+                <div class="loc-share-bar" data-id="${esc(assignment._id)}">
+                    <button type="button" class="loc-action-btn share-live-btn" data-id="${esc(assignment._id)}" data-act="[[&quot;toggleLiveShare&quot;,[&quot;$el&quot;]]]">📡 Share My Live Location</button>
                     <span class="loc-share-pill">Live location sharing…</span>
                 </div>`;
 
+            // Proof image: only a real https URL is ever placed in src, and the
+            // attribute value is escaped (partner-uploaded / stored string).
+            const proofSrc = /^https:\/\//i.test(String(proofImage)) ? String(proofImage) : "";
+
             return `
-                <div class="delivery-card ${cardClass}" data-assignment-id="${assignment._id}">
-                    ${proofImage ? `
+                <div class="delivery-card ${cardClass}" data-assignment-id="${esc(assignment._id)}">
+                    ${proofSrc ? `
                     <div class="delivery-proof">
-                        <img src="${proofImage}" alt="Delivery proof" title="Delivery proof photo">
+                        <img src="${esc(proofSrc)}" alt="Delivery proof" title="Delivery proof photo">
                     </div>` : ''}
                     <div class="delivery-header">
                         <span class="status-badge" style="background:${getStatusColor(status)}">
-                            ${status}
+                            ${esc(status)}
                         </span>
-                        <span class="delivery-time">${dateString}</span>
+                        <span class="delivery-time">${esc(dateString)}</span>
                     </div>
                     <div class="delivery-details">
                         <div class="detail-row">
-                            <strong>Order:</strong> ${orderNumber}
+                            <strong>Order:</strong> ${esc(orderNumber)}
                         </div>
                         <div class="detail-row">
-                            <strong>Customer:</strong> ${customerName}
+                            <strong>Customer:</strong> ${esc(customerName)}
                         </div>
                         <div class="detail-row">
-                            <strong>Phone:</strong> ${customerPhone ? `<a href="tel:${customerPhone}">${customerPhone}</a>` : 'N/A'}
+                            <strong>Phone:</strong> ${customerPhone ? `<a href="tel:${esc(customerPhone)}">${esc(customerPhone)}</a>` : 'N/A'}
                         </div>
                         <div class="detail-row">
-                            <strong>Address:</strong> ${address}
+                            <strong>Address:</strong> ${esc(address)}
                         </div>
                         ${locActions}
                         <div class="detail-row">
-                            <strong>Slot:</strong> ${deliverySlot}
+                            <strong>Slot:</strong> ${esc(deliverySlot)}
                         </div>
                     </div>
                     <div class="delivery-items">
-                        <strong>Items:</strong> ${items}
+                        <strong>Items:</strong> ${esc(items)}
                     </div>
                     <div class="delivery-amount">
                         <strong>₹${Number(amount).toLocaleString('en-IN')}</strong>
-                        <span class="payment-method">${paymentMethod}</span>
+                        <span class="payment-method">${esc(paymentMethod)}</span>
                     </div>
                     ${shareBar}
                     <div class="delivery-actions">

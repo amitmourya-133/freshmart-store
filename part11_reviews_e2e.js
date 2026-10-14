@@ -17,11 +17,17 @@ const Product = require(path.join(REPO, 'models/Product'));
 const Review = require(path.join(REPO, 'models/Review'));
 
 const envFile = fs.readFileSync(path.join(REPO, '.env'), 'utf8');
-const URI = (envFile.match(/^MONGODB_URI=(.+)$/m) || [])[1];
-if (!URI) { console.error('MONGODB_URI not found'); process.exit(1); }
-// AUD-01: refuse to open the production database from a test suite.
-const dbGuard = require(path.join(REPO, 'utils/dbGuard'));
-dbGuard.assertSafeDbUri(URI, { purpose: 'part11_reviews_e2e' });
+if (!(envFile.match(/^MONGODB_URI=(.+)$/m) || [])[1]) { console.error('MONGODB_URI not found'); process.exit(1); }
+
+// AUD-01 / SEC-02: this suite used to connect straight to the production
+// MONGODB_URI from `.env` and then insert real Users/Orders/Reviews. dbGuard
+// refused that URI, so the suite had always aborted before doing any work —
+// but with FM_DB_FORCE=1 it would have written into the production database.
+// Derive a throwaway database from the same credentials instead, assert the
+// server under test is on it, and drop it on exit.
+const testDb = require(path.join(REPO, 'tests/lib/testDb'));
+const { uri: URI, dbName: TEST_DB_NAME } = testDb.deriveTestUri('part11_reviews', process.env.FM_TEST_DB_NAME);
+const BASE_URL = process.env.FM_TEST_BASE_URL || 'http://localhost:5000';
 // JWT_SECRET is read from .env for the admin-moderation sub-test (the previous
 // version relied on process.env being preloadable, which only worked under
 // dotenv runners). Parsing it here makes the whole suite self-contained.
@@ -40,9 +46,17 @@ function assert(condition, msg) {
     else { failed++; console.log('  [FAIL] ' + msg); }
 }
 
+const BASE = new URL(BASE_URL);
+
 function httpReq(options, body) {
+    // Force every request onto the suite's own server, ignoring whatever
+    // host/port the call sites were written with.
+    const opts = Object.assign({}, options, {
+        hostname: BASE.hostname,
+        port: BASE.port || 80
+    });
     return new Promise((resolve, reject) => {
-        const req = http.request(options, (res) => {
+        const req = http.request(opts, (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
@@ -59,8 +73,27 @@ function httpReq(options, body) {
 
 async function main() {
     console.log('=== FRESHMART PART 11: Reviews E2E Tests ===');
+    console.log('isolated database: ' + TEST_DB_NAME);
 
     await mongoose.connect(URI);
+    testDb.assertConnectionIsTestDb(mongoose, TEST_DB_NAME);
+    await testDb.assertServerOnTestDb(BASE_URL, TEST_DB_NAME);
+    console.log('server preflight ok: ' + BASE_URL + ' is on ' + TEST_DB_NAME);
+
+    // The throwaway database starts empty; seed a minimal product fixture.
+    if (!await Product.findOne()) {
+        await new Product({
+            name: 'P11 Fixture Apple',
+            description: 'part11 isolated-test fixture',
+            price: 120,
+            mrp: 130,
+            unit: 'kg',
+            stock: 500,
+            category: 'Fruits',
+            image: '/images/jacfruit.png',
+            active: true
+        }).save();
+    }
     const prod = await Product.findOne().lean();
     if (!prod) { console.error('No products found'); process.exit(1); }
 
@@ -261,7 +294,8 @@ async function main() {
     console.log('\n--- Cleanup ---');
     if (reviewId) await Review.deleteOne({ _id: reviewId });
     await User.deleteOne({ _id: testUser._id });
-    // Restore product rating
+    // Drop isolated test database
+    try { await mongoose.connection.db.dropDatabase(); } catch (e) { /* already dropped */ }
     await mongoose.disconnect();
 
     console.log(`\n=== PART 11 RESULTS: ${passed} passed, ${failed} failed ===`);

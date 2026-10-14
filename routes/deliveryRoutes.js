@@ -114,6 +114,23 @@ async function notifyCustomerAboutDelivery(orderId, title, message, dedupeKey) {
     }
 }
 
+// Strip sensitive OTP/verification fields from assignment before sending to partner
+function sanitizeAssignment(a) {
+    if (!a) return a;
+    const doc = a.toObject ? a.toObject() : a;
+    delete doc.otpHash;
+    delete doc.otpExpiry;
+    delete doc.otpAttempts;
+    delete doc.otpCode;
+    delete doc.otpVerified;
+    delete doc.otpIssuedAt;
+    delete doc.otpReissueCount;
+    delete doc.otpReissueLog;
+    delete doc.signature;
+    delete doc.signatureAt;
+    return doc;
+}
+
 // ===============================
 // ASSIGN (ADMIN ONLY)
 // ===============================
@@ -154,10 +171,18 @@ router.post("/assign", protect, admin, async (req, res) => {
         }
 
         const order = await Order.findById(orderId);
-        if (!order) {
+if (!order) {
             return res.status(404).json({
                 success: false,
                 message: "Order not found",
+            });
+        }
+
+        // D-3: reject assignment if the order is already in a terminal state
+        if (order.status === "Cancelled" || order.status === "Delivered") {
+            return res.status(400).json({
+                success: false,
+                message: "Cannot assign a delivery to a " + order.status.toLowerCase() + " order",
             });
         }
 
@@ -248,7 +273,7 @@ router.get("/today", protect, delivery, async (req, res) => {
             .populate("order", "orderNumber items total status paymentStatus paymentMethod deliverySlot customer customerEmail deliveryLocation")
             .sort({ assignedAt: -1 });
 
-        // Attach a real ETA per delivery (rider-GPS / pipeline / slot) so the
+// Attach a real ETA per delivery (rider-GPS / pipeline / slot) so the
         // partner sees expected drop pressure; uses only the partner's own data.
         const deliveryEta = require("../utils/eta").deliveryEta;
         for (const d of deliveries) {
@@ -261,7 +286,7 @@ router.get("/today", protect, delivery, async (req, res) => {
 
         return res.json({
             success: true,
-            deliveries,
+            deliveries: deliveries.map(sanitizeAssignment),
         });
     } catch (error) {
         return res.status(500).json({
@@ -302,7 +327,7 @@ router.put("/accept", protect, delivery, partnerWriteLimiter, async (req, res) =
             });
         }
 
-        assignment.status = "ACCEPTED";
+assignment.status = "ACCEPTED";
         assignment.acceptedAt = new Date();
         await assignment.save();
 
@@ -311,7 +336,7 @@ router.put("/accept", protect, delivery, partnerWriteLimiter, async (req, res) =
         return res.json({
             success: true,
             message: "Assignment accepted successfully",
-            assignment,
+            assignment: sanitizeAssignment(assignment),
         });
     } catch (error) {
         return res.status(500).json({
@@ -333,7 +358,7 @@ router.put("/reject", protect, delivery, partnerWriteLimiter, async (req, res) =
             });
         }
 
-        const assignment = await DeliveryAssignment.findOne({
+const assignment = await DeliveryAssignment.findOne({
             _id: assignmentId,
             deliveryUser: req.user.id,
         });
@@ -345,6 +370,15 @@ router.put("/reject", protect, delivery, partnerWriteLimiter, async (req, res) =
             });
         }
 
+        // D-2: state guard - only reject from active states (mirrors /status transitions)
+        const rejectable = ["ASSIGNED", "ACCEPTED", "PICKED_UP", "EN_ROUTE"];
+        if (!rejectable.includes(assignment.status)) {
+            return res.status(400).json({
+                success: false,
+                message: "Cannot reject assignment in status " + assignment.status,
+            });
+        }
+
         assignment.status = "REJECTED";
         await assignment.save();
 
@@ -353,7 +387,7 @@ router.put("/reject", protect, delivery, partnerWriteLimiter, async (req, res) =
         return res.json({
             success: true,
             message: "Assignment rejected successfully",
-            assignment,
+            assignment: sanitizeAssignment(assignment),
         });
     } catch (error) {
         return res.status(500).json({
@@ -535,10 +569,10 @@ router.put("/status", protect, delivery, otpGuessBudget, partnerWriteLimiter, as
             }
         }
 
-        return res.json({
+return res.json({
             success: true,
             message: "Delivery status updated successfully",
-            assignment,
+            assignment: sanitizeAssignment(assignment),
         });
     } catch (error) {
         // SEC-07: completeOrderDelivery raises a 409 for a cancelled order, so
@@ -566,12 +600,19 @@ router.get("/earnings", protect, delivery, async (req, res) => {
         const dayStart = new Date();
         dayStart.setHours(0, 0, 0, 0);
 
-        deliveries.forEach((delivery) => {
+deliveries.forEach((delivery) => {
             const amount = Number(delivery.earnings) || 0;
             totalEarnings += amount;
             completedCount++;
             if (delivery.deliveredAt && new Date(delivery.deliveredAt) >= dayStart) {
                 // today's component included in the running total breakdown below
+            }
+        });
+
+        let todayEarnings = 0;
+        deliveries.forEach((delivery) => {
+            if (delivery.deliveredAt && new Date(delivery.deliveredAt) >= dayStart) {
+                todayEarnings += Number(delivery.earnings) || 0;
             }
         });
 
@@ -586,9 +627,6 @@ router.get("/earnings", protect, delivery, async (req, res) => {
             const amt = Number(d.earnings) || 0;
             const at = d.deliveredAt ? new Date(d.deliveredAt) : null;
             if (at) {
-                if (at >= dayStart) {
-                    // today already counts fully; no separate bucket needed
-                }
                 if (at >= weekStart) week += amt;
                 if (at >= monthStart) month += amt;
             }
@@ -598,7 +636,7 @@ router.get("/earnings", protect, delivery, async (req, res) => {
             success: true,
             totalEarnings,
             completedCount,
-            today: totalEarnings,
+            today: todayEarnings,
             week,
             month,
             deliveries,

@@ -3,6 +3,7 @@
 // ===============================
 
 const crypto = require("crypto");
+const mongoose = require("mongoose");
 const { safeErrorMessage } = require("../utils/safeError");
 const Order = require("../models/Order");
 const Product = require("../models/Product");
@@ -19,6 +20,7 @@ const { assertVariantAvailable } = require("../utils/variants");
 const emailService = require("../utils/emailService");
 const { assertDeliveryWithinRadius } = require("../utils/geo");
 const { deliveryEta } = require("../utils/eta");
+const { creditStoreCredit } = require("../utils/refunds");
 
 // The single shared delivery-completion primitive (identical to the one the
 // delivery-partner OTP path uses), so "Delivered" can reach the parent Order and
@@ -133,13 +135,29 @@ async function deliveryTrackFor(orderId, includePartnerLocation) {
     }
 }
 
+// Hard cap on distinct lines in a single order. Bounds the per-item product
+// lookup in computeServerTotals so one request cannot force an unbounded
+// number of sequential MongoDB reads.
+const MAX_ORDER_LINES = 50;
+
 const ORDER_STATUSES = ["Placed", "Confirmed", "Preparing", "Out for Delivery", "Delivered", "Cancelled"];
 const STATUS_RANK = { Placed: 0, Confirmed: 1, Preparing: 2, "Out for Delivery": 3, Delivered: 4 };
 const PAYMENT_STATUSES = ["PENDING", "PAID", "FAILED", "CANCELLED", "REFUNDED", "PENDING_REFUND"];
+// Payment lifecycle (independent from delivery status):
+//   PENDING        -> awaiting payment (COD at door / manual UPI unverified)
+//   PAID           -> money collected (verified manual UPI, gateway, COD handover)
+//   FAILED         -> admin rejected a manual payment; may be re-verified (PAID)
+//                     or voided with the order (CANCELLED)
+//   PENDING_REFUND -> money owed back to the customer, settlement not finished
+//                     (cancelled-while-paid that could not auto-credit, or an
+//                     admin-started refund). Reaches REFUNDED only.
+//   REFUNDED       -> settled (store credit issued, or external settlement
+//                     recorded). Terminal.
+//   CANCELLED      -> never charged / charge voided. Terminal.
 const PAYMENT_TRANSITIONS = {
     PENDING: ["PAID", "CANCELLED", "FAILED"],
-    PAID: ["REFUNDED"],
-    FAILED: ["CANCELLED"],
+    PAID: ["REFUNDED", "PENDING_REFUND"],
+    FAILED: ["CANCELLED", "PAID"],
     CANCELLED: [],
     REFUNDED: [],
     PENDING_REFUND: ["REFUNDED"]
@@ -148,7 +166,11 @@ const PAYMENT_TRANSITIONS = {
 // ---------- helpers ----------
 
 function generateOrderNumber() {
-    return "FM" + Date.now().toString().slice(-6);
+    const d = new Date();
+    const ymd = d.getUTCFullYear().toString().slice(-2) +
+        String(d.getUTCMonth() + 1).padStart(2, "0") +
+        String(d.getUTCDate()).padStart(2, "0");
+    return "FM-" + ymd + "-" + crypto.randomBytes(3).toString("hex").toUpperCase();
 }
 
 // FM-YYYYMMDD-XXXXXX (human readable, safe for public tracking)
@@ -222,74 +244,85 @@ async function deliveryPolicy() {
     };
 }
 
-// Server-authoritative totals. Products are re-priced from MongoDB whenever a
-// productId is present; items without a productId use the client price but are
-// still clamped to a positive value and the whole subtotal must be >= 1.
+// Server-authoritative totals.
+//
+// SECURITY (money integrity): EVERY line item must reference a real catalogue
+// product by `productId`. The price, the product name and the stock are read
+// ONLY from MongoDB. `item.price`, `item.name`, `item.subtotal` and
+// `item.total` sent by the client are ignored entirely — there is deliberately
+// no "custom/free item" branch, because that branch let an unauthenticated
+// caller mint a real order for an arbitrary amount by simply omitting
+// `productId` (see SEC-01 in the hardening report). A missing/invalid
+// `productId` is a 400, never a free line.
+//
+// `active === false` is the single "not orderable" gate (the catalogue has no
+// separate `orderable` flag), so an unpublished product can never be bought.
+//
 // Coupon discounts are always recomputed from the Coupon document (the client
 // coupon value is never trusted). Throws { status, message } on failure.
 async function computeServerTotals(items, options) {
     if (!Array.isArray(items) || items.length === 0) {
         throw { status: 400, message: "Cart is empty" };
     }
+    if (items.length > MAX_ORDER_LINES) {
+        throw { status: 400, message: "An order can contain at most " + MAX_ORDER_LINES + " different items" };
+    }
     const normalized = [];
     let serverSubtotal = 0;
     for (const item of items) {
-        if (!item || typeof item !== "object") {
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
             throw { status: 400, message: "Invalid item in cart" };
         }
         const qty = parseInt(item.quantity, 10);
         if (!Number.isInteger(qty) || qty < 1) {
-            throw { status: 400, message: "Invalid quantity for " + (item.name || "item") };
+            throw { status: 400, message: "Invalid quantity for " + (String(item.name || "item").slice(0, 60)) };
         }
-        if (item.productId) {
-            const product = await Product.findById(item.productId);
-            if (!product || !product.active) {
-                throw { status: 400, message: (item.name || "Item") + " is no longer available" };
-            }
-            if (item.variantId) {
-                // Pack-size variant: price/stock come from the variant, never
-                // from the client. assertVariantAvailable also enforces stock.
-                const variant = assertVariantAvailable(product, item.variantId, qty);
-                serverSubtotal += round2(variant.price * qty);
-                normalized.push({
-                    name: product.name,
-                    price: round2(variant.price),
-                    quantity: qty,
-                    weight: item.weight || null,
-                    productId: product._id,
-                    variantId: variant._id,
-                    variantUnit: variant.unit
-                });
-                continue;
-            }
-            if (product.stock < qty) {
-                throw { status: 400, message: "Only " + product.stock + " units of " + product.name + " in stock" };
-            }
-            const mult = getMultFromWeight(item.weight, product.unit);
-            const itemPrice = round2(product.price * mult);
-            serverSubtotal += round2(itemPrice * qty);
+        // --- productId is MANDATORY -----------------------------------------
+        const rawId = item.productId === undefined || item.productId === null ? "" : String(item.productId).trim();
+        if (!rawId) {
+            throw { status: 400, message: "Cart contains an item that is not in the catalogue. Please rebuild your cart." };
+        }
+        if (!mongoose.Types.ObjectId.isValid(rawId)) {
+            throw { status: 400, message: "Cart contains an invalid product reference" };
+        }
+        const product = await Product.findById(rawId);
+        if (!product) {
+            throw { status: 400, message: "A product in your cart no longer exists. Please rebuild your cart." };
+        }
+        if (!product.active) {
+            throw { status: 400, message: product.name + " is no longer available" };
+        }
+        if (item.variantId) {
+            // Pack-size variant: price/stock come from the variant, never
+            // from the client. assertVariantAvailable also enforces stock.
+            const variant = assertVariantAvailable(product, item.variantId, qty);
+            serverSubtotal += round2(variant.price * qty);
             normalized.push({
                 name: product.name,
-                price: itemPrice,
+                price: round2(variant.price),
                 quantity: qty,
                 weight: item.weight || null,
                 productId: product._id,
-                variantId: null,
-                variantUnit: null
+                variantId: variant._id,
+                variantUnit: variant.unit
             });
-        } else {
-            const price = round2(Number(item.price) || 0);
-            serverSubtotal += round2(price * qty);
-            normalized.push({
-                name: String(item.name || "Item").slice(0, 120),
-                price: price,
-                quantity: qty,
-                weight: item.weight || null,
-                productId: undefined,
-                variantId: null,
-                variantUnit: null
-            });
+            continue;
         }
+        if (product.stock < qty) {
+            throw { status: 400, message: "Only " + product.stock + " units of " + product.name + " in stock" };
+        }
+        const mult = getMultFromWeight(item.weight, product.unit);
+        const itemPrice = round2(product.price * mult);
+        serverSubtotal += round2(itemPrice * qty);
+        normalized.push({
+            name: product.name,
+            price: itemPrice,
+            quantity: qty,
+            weight: item.weight || null,
+            productId: product._id,
+            variantId: null,
+            variantUnit: null
+        });
     }
     const subtotal = round2(serverSubtotal);
     if (subtotal < 1) {
@@ -443,34 +476,108 @@ async function applyCancellation(order, by) {
 
     // Give the coupon use back exactly once; the flag makes cancellation
     // idempotent even if it is attempted again later.
+    //
+    // BIZ-03: the GLOBAL Coupon.usageCount is claimed at checkout for guest
+    // and member orders alike (CAS at order creation), so the global release
+    // must run for guests too - otherwise every guest cancellation permanently
+    // burns one use of the code for ALL customers. The per-user CouponUsage
+    // row only exists for signed-in customers, so that release stays gated.
+    //
+    // Ordering: the couponReleased flag is CLAIMED first with a conditional
+    // update. Only the request that wins the claim performs the decrements, so
+    // concurrent/duplicate cancellations can never double-release, and the
+    // flag is never set for a release that did not happen (the old code set it
+    // unconditionally, even after a failed release, silently losing it).
     if (order.couponCode && !order.couponReleased) {
-        try {
-            if (order.user) {
+        const claimed = await Order.updateOne(
+            { _id: order._id, couponCode: order.couponCode, couponReleased: { $ne: true } },
+            { $set: { couponReleased: true } }
+        );
+        if (claimed && claimed.matchedCount === 1) {
+            order.couponReleased = true;
+            try {
                 const couponDoc = await Coupon.findOne({ code: order.couponCode });
                 if (couponDoc) {
                     await Coupon.updateOne(
                         { _id: couponDoc._id, usageCount: { $gt: 0 } },
                         { $inc: { usageCount: -1 } }
                     );
-                    await releaseCouponUsage(couponDoc._id, order.user);
+                    if (order.user) {
+                        await releaseCouponUsage(couponDoc._id, order.user);
+                    }
                 }
+            } catch (e) {
+                // The claim already happened, so this cannot double-release on
+                // a retry. Loud log: the freed use needs manual attention.
+                console.warn("[coupon] release failed after claim: " + (e && e.message ? e.message : "unknown"));
+                require("../utils/logger").error({
+                    ev: "coupon_release_failed_after_claim",
+                    code: order.couponCode,
+                    orderId: String(order._id),
+                    err: (e && e.message) || "unknown",
+                });
             }
-        } catch (e) {
-            console.warn("[coupon] release failed: " + (e && e.message ? e.message : "unknown"));
         }
-        await Order.updateOne({ _id: order._id }, { $set: { couponReleased: true } });
-        order.couponReleased = true;
     }
 
-    if (order.paid || order.paymentStatus === "PAID") {
-        // COD / UPI-manual payment was never settled through a gateway:
-        // there is no money to "return", so the payment is simply voided.
-        // No fake "REFUNDED" claim.
-        order.paymentStatus = "CANCELLED";
-        order.refund.reference = (order.refund && order.refund.reference) || "STORE-CREDIT";
-    } else {
+    // ----- payment settlement (BIZ-01 / BIZ-02) --------------------------
+    // The order is being cancelled, so its payment lifecycle has to land in a
+    // legal, truthful terminal (or refund-pending) state:
+    //
+    //   * never collected (PENDING/FAILED) -> CANCELLED ("not charged")
+    //   * already settled (REFUNDED/CANCELLED/PENDING_REFUND) -> untouched
+    //   * money collected (PAID):
+    //       - member order: issue store credit NOW (idempotent wallet credit,
+    //         keyed on the order id) -> REFUNDED. If the credit cannot be
+    //         delivered, the status stays PAID/PENDING_REFUND so the refund
+    //         remains owed and retryable - never recorded as done.
+    //       - guest order: no wallet exists to receive store credit, so the
+    //         refund is queued as PENDING_REFUND for manual/admin settlement.
+    if (order.paymentStatus === "PAID") {
+        const refundAmount = round2(
+            Number(order.refund && order.refund.amount) > 0 ? order.refund.amount : order.total
+        );
+        let credited = false;
+        if (order.user) {
+            try {
+                const c = await creditStoreCredit({
+                    userId: order.user,
+                    amount: refundAmount,
+                    referenceType: "order",
+                    referenceId: String(order._id),
+                    description: "Store credit refund - cancelled order " + (order.orderNumber || ""),
+                    createdBy: by || "system",
+                });
+                credited = c.ok;
+            } catch (e) {
+                // Delivery failed: keep the refund owed (PAID below) so a retry
+                // can complete it. Never fake a settled refund.
+                require("../utils/logger").error({
+                    ev: "cancel_store_credit_failed",
+                    orderId: String(order._id),
+                    err: (e && e.message) || "unknown",
+                });
+            }
+        }
+        if (credited) {
+            order.paymentStatus = "REFUNDED";
+            order.refund.status = "store_credit";
+            order.refund.amount = refundAmount;
+            order.refund.reference = (order.refund && order.refund.reference) || "STORE-CREDIT";
+            order.refund.initiatedAt = order.refund.initiatedAt || new Date();
+        } else {
+            // Guest (no wallet to credit) or credit delivery failed:
+            // queue the refund instead of voiding it.
+            order.paymentStatus = "PENDING_REFUND";
+            order.refund.amount = refundAmount;
+            order.refund.status = order.refund.status || "pending";
+            order.refund.initiatedAt = order.refund.initiatedAt || new Date();
+        }
+    } else if (order.paymentStatus === "PENDING" || order.paymentStatus === "FAILED") {
         order.paymentStatus = "CANCELLED";
     }
+    // REFUNDED / CANCELLED / PENDING_REFUND: already settled or already owed -
+    // never overwrite a refund state with CANCELLED (BIZ-02).
 
     order.status = "Cancelled";
     pushHistory(order, "Cancelled", by);
@@ -574,10 +681,10 @@ exports.createOrder = async (req, res) => {
         // when the admin has not set a radius, so address-only customers never break.
         await assertDeliveryWithinRadius(deliveryLocationData);
 
-        const totals = await computeServerTotals(items, { couponCode: couponCode, userId: req.user ? req.user._id : null });
+const totals = await computeServerTotals(items, { couponCode: couponCode, userId: req.user ? req.user._id : null });
 
-        const orderNumber = generateOrderNumber();
-        const trackingId = generateTrackingId();
+        let orderNumber = generateOrderNumber();
+        let trackingId = generateTrackingId();
         const finalPaymentMethod = paymentMethod === "online" ? "online" : "cod";
 
         // Customer email for notifications: prefer the verified account email,
@@ -715,20 +822,42 @@ exports.createOrder = async (req, res) => {
             reservedLines.push(Object.assign({}, item, { orderId: null }));
         }
 
-        let order;
-        try {
-            order = await Order.create(Object.assign(orderData, { statusHistory: [{ status: "Placed", by: req.user ? "customer:" + String(req.user._id) : "guest", at: new Date() }] }));
-        } catch (createError) {
-            // Compensate coupon usage + reserved stock so retries/aborts do not
-            // burn the coupon or the inventory.
-            if (reservedCoupon) {
-                try { await Coupon.updateOne({ _id: reservedCoupon._id }, { $inc: { usageCount: -1 } }); } catch (e) { /* non-fatal */ }
-                if (req.user) { try { await releaseCouponUsage(reservedCoupon._id, req.user._id); } catch (e) { /* non-fatal */ } }
+let order;
+        const MAX_RETRIES = 5;
+        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                order = await Order.create(Object.assign(orderData, { statusHistory: [{ status: "Placed", by: req.user ? "customer:" + String(req.user._id) : "guest", at: new Date() }] }));
+                break; // success — exit the retry loop
+            } catch (createError) {
+                // Compensate coupon usage + reserved stock so retries/aborts do not
+                // burn the coupon or the inventory (same compensation as before).
+                if (reservedCoupon) {
+                    try { await Coupon.updateOne({ _id: reservedCoupon._id }, { $inc: { usageCount: -1 } }); } catch (e) { /* non-fatal */ }
+                    if (req.user) { try { await releaseCouponUsage(reservedCoupon._id, req.user._id); } catch (e) { /* non-fatal */ } }
+                }
+                for (const prev of reservedLines) {
+                    if (restored.indexOf(prev) === -1) { await restoreLine(prev); restored.push(prev); }
+                }
+
+                // If this is a genuine duplicate-order-number collision (E11000) and we
+                // haven't exhausted retries, generate a fresh order number and try again.
+                // Non-11000 errors (validation, database unavailable, etc.) must NOT be
+                // retried blindly — they indicate a real problem that a retry wouldn't fix.
+                if (createError && createError.code === 11000 && attempt < MAX_RETRIES) {
+                    // Regenerate order number and tracking id for the retry
+                    orderNumber = generateOrderNumber();
+                    trackingId = generateTrackingId();
+                    // Update orderData with the new number before the next Iteration
+                    orderData.orderNumber = orderNumber;
+                    orderData.trackingId = trackingId;
+                    // Also push a fresh entry into statusHistory so the retry is
+                    // distinguishable from the original attempt.
+                    orderData.statusHistory = [{ status: "Placed", by: req.user ? "customer:" + String(req.user._id) : "guest", at: new Date() }];
+                    continue; // retry the loop
+                }
+                // Either a non-11000 error, or we've exhausted retries — re-throw.
+                throw createError;
             }
-            for (const prev of reservedLines) {
-                if (restored.indexOf(prev) === -1) { await restoreLine(prev); restored.push(prev); }
-            }
-            throw createError;
         }
 
         // Audit trail tied to the real order id (read-only Product lookups; the
@@ -1283,15 +1412,60 @@ exports.updatePaymentStatus = async (req, res) => {
             });
         }
 
+        // BIZ-01: a REFUNDED transition must actually move the money. For
+        // store-credit refunds the wallet credit is issued FIRST (idempotent,
+        // keyed on the order id) - if it cannot be delivered, the status stays
+        // untouched and the admin can retry; the refund is never recorded as
+        // done while the customer holds nothing.
+        if (paymentStatus === "REFUNDED") {
+            const refundAmount = round2(
+                Number(order.refund && order.refund.amount) > 0 ? order.refund.amount : order.total
+            );
+            if (order.user) {
+                let credited;
+                try {
+                    credited = await creditStoreCredit({
+                        userId: order.user,
+                        amount: refundAmount,
+                        referenceType: "order",
+                        referenceId: String(order._id),
+                        description: "Store credit refund - order " + (order.orderNumber || ""),
+                        createdBy: "admin:" + String(req.user._id),
+                    });
+                } catch (e) {
+                    return res.status(500).json({
+                        success: false,
+                        message: "Refund could not be issued to the customer's wallet. Please retry."
+                    });
+                }
+                if (!credited.ok) {
+                    return res.status(400).json({
+                        success: false,
+                        message: credited.reason === "no_account"
+                            ? "This order has no customer account to receive store credit"
+                            : "Refund amount must be greater than 0"
+                    });
+                }
+                order.refund.amount = refundAmount;
+            } else {
+                // Guest checkout: no wallet exists. Record the settlement only
+                // and say so in the log (admin settles guests out-of-band).
+                require("../utils/logger").warn({
+                    ev: "order_refund_recorded_without_wallet",
+                    orderId: String(order._id),
+                    reason: "guest_order",
+                });
+            }
+            order.refund.status = "store_credit";
+            order.refund.reference = (reference && String(reference).trim()) || order.refund.reference || "STORE-CREDIT";
+            order.refund.initiatedAt = order.refund.initiatedAt || new Date();
+        }
+
         order.paymentStatus = paymentStatus;
         if (paymentStatus === "PAID") {
             order.paid = true;
             order.paymentAt = new Date();
             if (reference && String(reference).trim()) order.paymentReference = String(reference).trim();
-        } else if (paymentStatus === "REFUNDED") {
-            order.refund.status = "store_credit";
-            order.refund.reference = (reference && String(reference).trim()) || order.refund.reference || "STORE-CREDIT";
-            order.refund.initiatedAt = order.refund.initiatedAt || new Date();
         }
         await order.save();
 

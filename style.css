@@ -5608,3 +5608,51 @@ footer .trust-line,
     font-size: 13px;
     opacity: 0.7;
 }
+/* ===== HOMEPAGE REDESIGN (appended) ===== */
+
+/* ---- Hero ---- */
+.hero { min-height: initial; margin-bottom: 40px; }
+.hero-content { max-width: 100%; padding: 0; }
+.hero h1 { font-size: 38px; margin-bottom: 12px; line-height: 1.2; }
+.hero p { font-size: 16px; margin-bottom: 20px; }
+.hero button { padding: 12px 30px; font-size: 15px; }
+
+/* ---- Categories ---- */
+.categories { padding: 40px 5%; }
+.categories h2 { font-size: 28px; margin-bottom: 20px; }
+.category-container { justify-content: flex-start; gap: 12px; }
+.category { width: auto; padding: 15px 20px; min-width: 140px; }
+.category img { width: 40px; height: 40px; }
+
+/* ---- Product grid - responsive ---- */
+@media (max-width: 1400px) { .product-container { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); } }
+@media (max-width: 1024px) { .product-container { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); } }
+@media (max-width: 768px) { .product-container { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); } }
+
+/* ---- Features ---- */
+.features { gap: 40px; padding: 40px 5%; }
+.features div { max-width: 200px; font-size: 28px; }
+.features div::before { content: ''; width: 40px; height: 40px; display: block; margin: 0 auto 10px; border-radius: 50%; background: var(--green-primary); }
+.features h3 { font-size: 18px; margin: 8px 0; }
+
+/* ---- Subscription banner ---- */
+.subscription-banner { padding: 30px 5%; background: var(--bg-tertiary); border-radius: var(--radius-md); }
+.subscription-banner h3 { font-size: 20px; margin-bottom: 8px; }
+.subscription-banner p { font-size: 14px; color: var(--text-secondary); }
+.subscription-banner button { margin-top: 12px; }
+
+/* ---- Footer ---- */
+footer { padding: 30px 5%; }
+footer h2 { font-size: 20px; margin-bottom: 15px; }
+footer p { font-size: 14px; line-height: 1.6; }
+.footer .trust-line { font-size: 13px; margin-top: 10px; }
+
+/* ---- Recently Viewed compact ---- */
+#recentlyViewedSection { display: block; }
+#recentlyViewedContainer { display: flex; overflow-x: auto; padding: 10px 0; }
+#recentlyViewedContainer .product { flex: 0 0 180px; margin-right: 12px; }
+#recentlyViewedContainer .product:last-child { margin-right: 0; }
+#recentlyViewedContainer .product-image { min-height: 100px; }
+
+/* ---- General spacing ---- */
+.section { padding: 40px 5% 40px 5%; }

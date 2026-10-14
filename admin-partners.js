@@ -165,7 +165,7 @@
                 "<td>" + esc(p.delivered) + "</td>" +
                 "<td>" + esc(p.deliveredToday) + "</td>" +
                 "<td>" + money(p.earnings) + "</td>" +
-                "<td>" + money(p.codExpected) + (p.cashMissing ? ' <span class="ops-flag-missing">' + p.cashMissing + " missing</span>" : "") + "</td>" +
+                "<td>" + money(p.codExpected) + (p.cashMissing ? ' <span class="ops-flag-missing">' + esc(p.cashMissing) + " missing</span>" : "") + "</td>" +
                 "<td>" + money(p.codCollected) + "</td>" +
                 '<td><button type="button" class="ops-btn ops-btn-accept" data-force-assign="' + esc(p._id) + '">Assign order</button> ' +
                 '<button type="button" class="ops-btn ops-btn-decline" data-review="revoke" data-id="' + esc(p._id) + '">Revoke</button></td>' +

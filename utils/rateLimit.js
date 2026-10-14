@@ -18,19 +18,16 @@ const buckets = new Map();
 //     literal URL. Otherwise an attacker evades the global limit simply by
 //     varying the path (`/api/products/a`, `/api/products/b`, ...), which is
 //     exactly what a "limit per endpoint" limit is supposed to prevent.
+//
+// RAT-01: the IPv4-mapped IPv6 form (`::ffff:203.0.113.5`) and the plain IPv4
+// form of the SAME address must land in the SAME bucket, otherwise one client
+// gets two independent budgets just because the socket family varied. (The old
+// replace pattern `^.*?:\*\*` matched nothing at all - it was a typo for the
+// `::ffff:` prefix.)
 function keyFrom(req) {
-    const ip = String(req.ip || (req.socket && req.socket.remoteAddress) || "unknown").replace(/^.*?:\*\*|\s/g, "");
-    const route = (req.route && req.route.path) ? String(req.route.path) : null;
-    const scope = route || (req.baseUrl ? String(req.baseUrl) : "global");
-    return ip + "|" + scope;
-}
-
-// Simple sliding-window limiter. Soft guard against brute-force / OTP spam.
-// (In-memory only: resets on process restart; on Vercel it is best-effort —
-// each serverless instance keeps its own bucket, so a determined attacker with
-// many real IPs can exceed the limit, but per-IP abuse is still bounded.)
-function keyFrom(req) {
-    const ip = String(req.ip || (req.socket && req.socket.remoteAddress) || "unknown").replace(/^.*?:\*\*|\s/g, "");
+    const ip = String(req.ip || (req.socket && req.socket.remoteAddress) || "unknown")
+        .replace(/^::ffff:/i, "")
+        .replace(/\s/g, "");
     const route = (req.route && req.route.path) ? String(req.route.path) : null;
     const scope = route || (req.baseUrl ? String(req.baseUrl) : "global");
     return ip + "|" + scope;
