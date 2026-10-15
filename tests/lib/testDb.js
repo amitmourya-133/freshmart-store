@@ -215,7 +215,11 @@ async function dropOrphanTestDbs(mongoose, sizeCeilingBytes) {
 async function connectTestDb(mongoose, suite) {
     const { uri, dbName } = deriveTestUri(suite);
     assertTestUri(uri);
-    await mongoose.connect(uri);
+    // Test databases must never gain collections as a side effect of another
+    // suite's models being registered on the shared mongoose instance: with the
+    // default autoIndex/autoCreate, connecting (re)builds indexes and creates
+    // collections, which raced dropTestDb and left a stray `orders` collection.
+    await mongoose.connect(uri, { autoIndex: false, autoCreate: false });
     // connection.name is a bare database name (not a URI), so compare the
     // authoritative connected name directly - dbNameOf() would return "" here.
     const actual = connectedDbName(mongoose) || mongoose.connection.name || "";

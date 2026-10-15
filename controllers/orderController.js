@@ -472,7 +472,35 @@ async function applyCancellation(order, by) {
 
     const byType = by && String(by).indexOf("admin:") === 0 ? "admin" : "customer";
     const byId = by ? String(by).split(":")[1] : null;
-    await restoreStockOnce(order, byType, byId && require("mongoose").Types.ObjectId.isValid(byId) ? byId : null);
+
+    // Claim the stock restoration exactly once, mirroring the couponReleased
+    // claim below. Cancellation reads the order first, so two concurrent cancels
+    // (a double-click, or the customer and an admin at the same moment) both see
+    // status !== "Cancelled" in memory and would EACH restore stock, silently
+    // inflating inventory. The conditional update lets exactly one request win.
+    // It also makes a retry after a partial failure safe: the winner's flag
+    // persists, so stock is never restored a second time.
+    if (!order.stockRestored) {
+        const stockClaim = await Order.updateOne(
+            { _id: order._id, stockRestored: { $ne: true } },
+            { $set: { stockRestored: true } }
+        );
+        if (stockClaim && stockClaim.matchedCount === 1) {
+            order.stockRestored = true;
+            try {
+                await restoreStockOnce(order, byType, byId && require("mongoose").Types.ObjectId.isValid(byId) ? byId : null);
+            } catch (e) {
+                // The claim already happened, so a retry cannot double-restore.
+                // Loud log: any line that did not increment needs manual attention.
+                console.warn("[stock] restore failed after claim: " + (e && e.message ? e.message : "unknown"));
+                require("../utils/logger").error({
+                    ev: "stock_restore_failed_after_claim",
+                    orderId: String(order._id),
+                    err: (e && e.message) || "unknown",
+                });
+            }
+        }
+    }
 
     // Give the coupon use back exactly once; the flag makes cancellation
     // idempotent even if it is attempted again later.

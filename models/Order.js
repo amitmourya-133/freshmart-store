@@ -65,6 +65,10 @@ const orderSchema = new mongoose.Schema(
         // Whether this order's coupon usage was already returned to the pool
         // (guards against double-release if cancellation runs more than once).
         couponReleased: { type: Boolean, default: false },
+        // Whether this order's stock was already returned on cancellation.
+        // Claimed atomically so concurrent/duplicate cancellations cannot
+        // double-increment inventory (the counterpart of couponReleased).
+        stockRestored: { type: Boolean, default: false },
         deliverySlot: { type: String, default: "Morning (8-11 AM)" },
         // Optional GPS coordinates captured at checkout (customer's current
         // location). Address remains the canonical destination; coordinates help

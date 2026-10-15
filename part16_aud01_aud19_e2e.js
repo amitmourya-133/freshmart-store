@@ -108,10 +108,15 @@ async function main() {
     GUARDED_SCRIPTS.forEach(function (name) {
         if (!fs.existsSync(path.join(REPO, name))) return;
         const src = fs.readFileSync(path.join(REPO, name), "utf8");
-        check(
-            src.indexOf("dbGuard") !== -1 && src.indexOf("assertSafeDbUri") !== -1,
-            name + " is guarded",
-        );
+        // A guarded script must either call utils/dbGuard directly, or route
+        // every connection through the isolated-test-db helper
+        // (tests/lib/testDb), which itself asserts the URI via dbGuard.
+        // part10/part11 were migrated to the helper, so requiring the literal
+        // dbGuard/assertSafeDbUri strings no longer holds for them.
+        const guarded = (src.indexOf("dbGuard") !== -1 && src.indexOf("assertSafeDbUri") !== -1)
+            || src.indexOf("deriveTestUri") !== -1
+            || src.indexOf("assertTestUri") !== -1;
+        check(guarded, name + " is guarded");
     });
 
     const prods = guardRun(PROD_URI_CODE);

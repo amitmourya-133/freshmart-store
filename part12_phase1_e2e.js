@@ -11,7 +11,7 @@ const path = require('path');
 const http = require('http');
 const crypto = require('crypto');
 
-const REPO = 'D:/vegetable store';
+const REPO = __dirname;
 const mongoose = require(path.join(REPO, 'node_modules/mongoose'));
 const jwt = require(path.join(REPO, 'node_modules/jsonwebtoken'));
 const User = require(path.join(REPO, 'models/User'));
@@ -19,13 +19,17 @@ const Order = require(path.join(REPO, 'models/Order'));
 const Product = require(path.join(REPO, 'models/Product'));
 
 const envFile = fs.readFileSync(path.join(REPO, '.env'), 'utf8');
-const URI = (envFile.match(/^MONGODB_URI=(.+)$/m) || [])[1];
 const JWT_SECRET = (envFile.match(/^JWT_SECRET=(.+)$/m) || [])[1];
-if (!URI) { console.error('MONGODB_URI not found'); process.exit(1); }
 if (!JWT_SECRET) { console.error('JWT_SECRET not found'); process.exit(1); }
-// AUD-01: refuse to open the production database from a test suite.
-const dbGuard = require(path.join(REPO, 'utils/dbGuard'));
-dbGuard.assertSafeDbUri(URI, { purpose: 'part12_phase1_e2e' });
+
+// AUD-01 / SEC-02: never open the production database. Derive a throwaway
+// fm_part12_* database from the same credentials (honouring the runner's
+// FM_TEST_DB_NAME so it matches the server under test), assert it is isolated,
+// and drive HTTP at the server the runner booted (FM_TEST_BASE_URL). The suite
+// seeds its own admin + catalog because an isolated database starts empty.
+const testDb = require(path.join(REPO, 'tests/lib/testDb'));
+const { uri: URI, dbName: TEST_DB_NAME } = testDb.deriveTestUri('part12', process.env.FM_TEST_DB_NAME);
+const BASE_URL = new URL(process.env.FM_TEST_BASE_URL || 'http://localhost:5000');
 
 const TEST_TAG = '@freshmart.test';
 const testTag = 'part12' + Date.now() + TEST_TAG;
@@ -62,7 +66,7 @@ function httpReq(options, body) {
 }
 
 function api(pathname, opts) {
-    const o = Object.assign({ hostname: 'localhost', port: 5000 }, opts, { path: pathname });
+    const o = Object.assign({ hostname: BASE_URL.hostname, port: BASE_URL.port || 80 }, opts, { path: pathname });
     const body = o.body;
     delete o.body;
     return httpReq(o, body);
@@ -77,11 +81,29 @@ async function main() {
 
     await mongoose.connect(URI);
 
-    const adminUser = await User.findOne({ role: 'admin' }).lean();
+    // Seed the isolated database: an admin (settings/auth) plus a small active,
+    // in-stock catalog (the suite quotes/orders against real products).
+    const adminUser = await User.create({
+        email: ('part12admin' + Date.now() + TEST_TAG).toLowerCase(),
+        name: 'Part12 Admin',
+        phone: '90000' + String(Date.now()).slice(-5),
+        role: 'admin',
+        emailVerified: true,
+        password: 'Admin#123456'
+    });
     const adminHeaders = authHeaders(jwt.sign({ id: adminUser._id }, JWT_SECRET, { expiresIn: '1h' }));
 
     const customerUser = await User.create({ email: testTag.toLowerCase(), role: 'customer', name: 'Phase1 Test Customer', phone: '999999' + String(Date.now()).slice(-6) });
     const customerHeaders = authHeaders(jwt.sign({ id: customerUser._id }, JWT_SECRET, { expiresIn: '1h' }));
+
+    await Product.deleteMany({});
+    await Product.insertMany([
+        { name: 'Part12 Tomato', price: 45, unit: 'kg', category: 'Vegetables', stock: 100, active: true },
+        { name: 'Part12 Potato', price: 30, unit: 'kg', category: 'Vegetables', stock: 100, active: true },
+        { name: 'Part12 Onion', price: 25, unit: 'kg', category: 'Vegetables', stock: 100, active: true },
+        { name: 'Part12 Apple', price: 150, unit: 'kg', category: 'Fruits', stock: 60, active: true },
+        { name: 'Part12 Banana', price: 40, unit: 'kg', category: 'Fruits', stock: 70, active: true }
+    ]);
 
     const actives = await Product.find({ active: true, stock: { $gt: 0 } }).sort({ price: -1 }).limit(20).lean();
     if (!actives || actives.length === 0) { console.log('  [SKIP AVAIL] no active in-stock product'); process.exit(0); }
@@ -220,7 +242,9 @@ async function main() {
         // E. ETA (tracking + my-orders + admin detail)
         // ==================================================================
         console.log('\n--- E. Real ETA on order views ---');
-        const track = await api('/api/orders/track/' + createdOrder.orderNumber);
+        // Anonymous tracking uses the high-entropy Track ID (FM-YYYYMMDD-XXXXXX);
+        // order-number lookups are owner/admin-only, so the previous call 401'd.
+        const track = await api('/api/orders/track/' + createdOrder.trackingId);
         assert(track.status === 200 && track.body.data.eta && track.body.data.eta.text,
             `tracking returns an ETA (${track.body && track.body.data && track.body.data.eta && track.body.data.eta.text})`);
         const trackData = track.body.data;
@@ -271,7 +295,7 @@ async function main() {
         // H. ETA slot fallback for an order with no assignment
         // ==================================================================
         console.log('\n--- H. ETA slot fallback path ---');
-        const slotEta = await api('/api/orders/track/' + (r5.body && r5.body.data && r5.body.data.orderNumber || 'FM000000'));
+        const slotEta = await api('/api/orders/track/' + (r5.body && r5.body.data && r5.body.data.trackingId || 'FM-00000000-AAAAAA'));
         if (r5.body && r5.body.data) {
             assert(slotEta.status === 200 && slotEta.body.data.eta && slotEta.body.data.eta.source === 'slot',
                 `no-assignment order shows slot ETA (source=${slotEta.body && slotEta.body.data && slotEta.body.data.eta && slotEta.body.data.eta.source})`);

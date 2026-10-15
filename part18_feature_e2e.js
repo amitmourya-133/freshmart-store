@@ -46,6 +46,11 @@ const Analytics = require(path.join(REPO, "utils/analytics"));
 const { rateLimit } = require(path.join(REPO, "utils/rateLimit"));
 
 let passed = 0, failed = 0;
+// Module-scope so the req() helper (defined below) can read the ephemeral
+// port the test server binds to inside main(). Previously PORT was declared
+// with `const` inside main(), so req() saw `typeof PORT === "undefined"`,
+// defaulted to port 0, and every request failed with ECONNREFUSED :80.
+let PORT = 0;
 const failures = [];
 function check(ok, label, extra) {
     if (ok) { passed++; console.log("  [PASS] " + label); }
@@ -111,6 +116,11 @@ async function makeB2BCustomer(over) {
         role: "b2b_customer",
         b2bApproved: true,
         b2bProfile: {
+            // `bool` is the admin-configured profile flag set by the approval
+            // flow (controllers/b2bController.js:353). middleware/auth.js:116
+            // requires it, alongside b2bApproved, for B2B supply access — so an
+            // "approved" B2B fixture must set it or every /api/b2b/* call 403s.
+            bool: true,
             businessName: "Test B2B",
             gstin: "07ABCDE1234F1Z5",
             purchaseOfficer: "Test Officer"
@@ -148,7 +158,7 @@ async function main() {
     const server = await new Promise((resolve) => {
         const s = app.listen(0, "127.0.0.1", () => resolve(s));
     });
-    const PORT = (server && server.address) ? server.address().port : 0;
+    PORT = (server && server.address) ? server.address().port : 0;
     console.log("test server on 127.0.0.1:" + PORT);
 
     // Seed deterministic catalog
@@ -214,8 +224,11 @@ async function main() {
     check(c1.status === 200 && c1.json.success, "forecast: admin GET /inventory/forecast works", c1.status);
 
     // 2. Forecast contains expected fields
-    if (c1.status === 200 && c1.json && c1.json.data) {
-        const data = c1.json.data;
+    if (c1.status === 200 && c1.json && Array.isArray(c1.json.data) && c1.json.data.length) {
+        // GET /inventory/forecast returns { summary, data: [ perProduct... ] }
+        // (utils/forecast.js:130). Inspect the first row; previously this
+        // treated the whole array as a single forecast object.
+        const data = c1.json.data[0];
         check(data.daysOfStockLeft !== undefined, "forecast: has daysOfStockLeft", data.daysOfStockLeft);
         check(data.velocity !== undefined, "forecast: has velocity", data.velocity);
         check(data.restock <= 7 || data.restock === undefined, "forecast: restock <= 7 days or undefined", data.restock);
@@ -236,7 +249,7 @@ async function main() {
         body: { consentAccepted: true, chargeAmount: 50, frequencyDays: 30 }
     });
     // Without provider configured, should report blocker, not fake success
-    check(c3.status === 201 || c3.status === 400, "autopay: mandate creation response", c3.status);
+    check(c3.status === 201 || c3.status === 400, "autopay: mandate creation response", { status: c3.status, body: c3.json });
     if (c3.status === 201 && c3.json && c3.json.data) {
         const m = c3.json.data;
         // Status should NOT be ACTIVE when provider is unconfigured
@@ -263,15 +276,15 @@ async function main() {
     // ---------------------------------------------------------------
     section("D. Hindi Search Normalization");
     // 1. Hindi search for टमाटर (tomato)
-    const d1 = await req("/api/products?search=टमाटर");
+    const d1 = await req("/api/products?search=" + encodeURIComponent("टमाटर"));
     check(d1.status === 200, "hindi search: /api/products?search=टमाटर works", d1.status);
 
     // 2. Hindi search for आलू (potato)
-    const d2 = await req("/api/products?search=आलू");
+    const d2 = await req("/api/products?search=" + encodeURIComponent("आलू"));
     check(d2.status === 200, "hindi search: /api/products?search=आलू works", d2.status);
 
-    // 3. Hindi search for सब्जी (sabzi/vegetables)
-    const d3 = await req("/api/products?search=सब्ज़ी");
+    // 3. Hindi search for सब्ज़ी (sabzi/vegetables)
+    const d3 = await req("/api/products?search=" + encodeURIComponent("सब्ज़ी"));
     check(d3.status === 200, "hindi search: /api/products?search=सब्ज़ी works", d3.status);
 
     // 4. English search still works (regression)
@@ -295,56 +308,53 @@ async function main() {
     // SECTION E: Group Ordering
     // ---------------------------------------------------------------
     section("E. Group Ordering");
-    // 1. Create group order
+    // 1. Create group order — `title` is required (>=3 chars) and the reward
+    // bounds are validated server-side (discount_percent must be 1..25).
     const e1 = await req("/api/groups", {
         method: "POST", headers: customerTok,
-        body: { minParticipants: 2, maxParticipants: 8, rewardType: "discount_percent", rewardPercent: 15 }
+        body: { title: "E2E Group", minParticipants: 2, maxParticipants: 8, rewardType: "discount_percent", rewardPercent: 15 }
     });
     check(e1.status === 201 || e1.status === 200, "group: create group order", e1.status);
 
-    // 2. Join group
-    if (e1.status === 201 || e1.status === 200) {
-        const groupId = e1.json && e1.json.data && e1.json.data._id ? e1.json.data._id : null;
-        if (groupId) {
-            const e2 = await req("/api/groups/join", {
-                method: "POST", headers: customerTok,
-                body: { groupId: groupId }
-            });
-            check(e2.status === 200 || e2.status === 201, "group: join group", e2.status);
-        }
-    }
+    // 2. Join group — the route is POST /api/groups/:id/join.
+    const e1group = e1.json && e1.json.data && e1.json.data._id ? e1.json.data._id : null;
+    if (e1group) {
+        const e2 = await req("/api/groups/" + e1group + "/join", {
+            method: "POST", headers: customerTok
+        });
+        check(e2.status === 200 || e2.status === 201, "group: join group", e2.status);
 
-    // 3. Leave group
-    const e3 = await req("/api/groups/leave", {
-        method: "POST", headers: customerTok
-    });
-    check(e3.status === 200 || e3.status === 204, "group: leave group", e3.status);
+        // 3. Leave group — the route is POST /api/groups/:id/leave.
+        const e3 = await req("/api/groups/" + e1group + "/leave", {
+            method: "POST", headers: customerTok
+        });
+        check(e3.status === 200 || e3.status === 204, "group: leave group", e3.status);
+    }
 
     // ---------------------------------------------------------------
     // SECTION F: Subscriptions
     // ---------------------------------------------------------------
     section("F. Subscriptions 2.0");
-    // 1. Create subscription plan
-    const f1 = await req("/api/subscriptions/plans", {
+    // 1. Create subscription plan — admin route is POST /api/subscriptions/admin
+    // and requires name + description + pricing.{amount,frequency}.
+    const f1 = await req("/api/subscriptions/admin", {
         method: "POST", headers: adminTok,
-        body: { boxItems: ["Potato", "Onion"], deliveryEveryDays: 7, deliveryDayOfWeek: 1, paymentMode: "cod" }
+        body: { name: "E2E Weekly Box", description: "E2E plan", pricing: { amount: 499, frequency: "weekly" } }
     });
     check((f1.status === 201 || f1.status === 200), "subscription: create plan", f1.status);
 
-    // 2. User subscribes
-    if (f1.status === 201 || f1.status === 200) {
-        const planId = f1.json && f1.json.data && f1.json.data._id ? f1.json.data._id : null;
-        if (planId) {
-            const f2 = await req("/api/subscriptions/subscribe", {
-                method: "POST", headers: customerTok,
-                body: { planId: planId }
-            });
-            check((f2.status === 201 || f2.status === 200), "subscription: user subscribes", f2.status);
-        }
+    // 2. User subscribes — route is POST /api/subscriptions/:planId and the
+    // created plan is returned as `plan` (not `data`).
+    const planId = f1.json && f1.json.plan && f1.json.plan._id ? f1.json.plan._id : null;
+    if ((f1.status === 201 || f1.status === 200) && planId) {
+        const f2 = await req("/api/subscriptions/" + planId, {
+            method: "POST", headers: customerTok, body: {}
+        });
+        check((f2.status === 201 || f2.status === 200), "subscription: user subscribes", f2.status);
     }
 
-    // 3. Admin can process due subscriptions
-    const f3 = await req("/api/admin/process-due", {
+    // 3. Admin can process due subscriptions — POST /api/subscriptions/admin/process-due
+    const f3 = await req("/api/subscriptions/admin/process-due", {
         method: "POST", headers: adminTok
     });
     check((f3.status === 200 || f3.status === 202), "subscription: admin process-due", f3.status);
@@ -353,8 +363,9 @@ async function main() {
     // SECTION G: Recommendations
     // ---------------------------------------------------------------
     section("G. Recommendations");
-    // 1. Get recommendations (requires optionalProtect)
-    const g1 = await req("/api/recommendations", { headers: customerTok });
+    // 1. Get recommendations — the route is POST /api/recommendations
+    // (optionalProtect); there is no GET handler, which previously 404'd here.
+    const g1 = await req("/api/recommendations", { method: "POST", headers: customerTok, body: {} });
     check(g1.status === 200 || g1.status === 401, "recs: recommendations endpoint accessible", g1.status);
 
     // 2. Analytics events for recommendations are valid
@@ -368,10 +379,20 @@ async function main() {
     // SECTION H: Coupons
     // ---------------------------------------------------------------
     section("H. Coupons");
-    // 1. Validate a coupon
+    // 1. Admin creates a coupon (requires code + discountType + discountValue +
+    // expiryDate), then the customer validates it against a cart subtotal.
+    const hc = await req("/api/coupons", {
+        method: "POST", headers: adminTok,
+        body: { code: "TEST10", discountType: "percentage", discountValue: 10, expiryDate: new Date(Date.now() + 7 * 86400000).toISOString() }
+    });
+    check(hc.status === 201 || hc.status === 200, "coupon: admin creates coupon", hc.status);
+
+    // 2. Validate the coupon. The validate route needs `subtotal`
+    // (POST /api/coupons/validate); a bare code was previously 400'd as
+    // "Invalid cart subtotal".
     const h1 = await req("/api/coupons/validate", {
         method: "POST", headers: customerTok,
-        body: { code: "TEST10", segment: null }
+        body: { code: "TEST10", subtotal: 500 }
     });
     check(h1.status === 200, "coupon: validate endpoint works", h1.status);
 
@@ -379,8 +400,8 @@ async function main() {
     const h2 = await req("/api/coupons/available", { headers: customerTok });
     check(h2.status === 200, "coupon: list available coupons", h2.status);
 
-    // 4. Admin segment summary
-    const h3 = await req("/api/admin/coupons/segments/summary", { headers: adminTok });
+    // 4. Admin segment summary — route is GET /api/coupons/segments/summary
+    const h3 = await req("/api/coupons/segments/summary", { headers: adminTok });
     check(h3.status === 200, "coupon admin: segment summary", h3.status);
 
     // ---------------------------------------------------------------
@@ -399,12 +420,13 @@ async function main() {
     // SECTION J: Authorization / Security
     // ---------------------------------------------------------------
     section("J. Authorization & Security");
-    // 1. Customer cannot access /api/admin/users
-    const j1 = await req("/api/admin/users", { headers: customerTok });
-    check(j1.status === 403, "security: customer blocked from /admin/users", j1.status);
+    // 1. Customer cannot access an admin-only listing route. There is no
+    //    /api/admin/users route; /api/subscriptions/admin/all is admin-gated.
+    const j1 = await req("/api/subscriptions/admin/all", { headers: customerTok });
+    check(j1.status === 403, "security: customer blocked from admin listing", j1.status);
 
-    // 2. Customer cannot access /api/delivery/assign
-    const j2 = await req("/api/delivery/assign", { headers: customerTok });
+    // 2. Customer cannot POST /api/delivery/assign (admin only; GET is unrouted)
+    const j2 = await req("/api/delivery/assign", { method: "POST", headers: customerTok, body: {} });
     check(j2.status === 403, "security: customer blocked from /delivery/assign", j2.status);
 
     // 3. Rate limiting on sensitive routes
@@ -415,8 +437,11 @@ async function main() {
     }
     check(rate429 >= 1, "security: rate limiter returns 429 after quota", { rateLimited: rate429 });
 
-    // 4. Malformed input rejected
-    const j4 = await req("/api/users/me", { method: "PUT", headers: customerTok, body: { name: "<script>alert(1)</script>" } });
+    // 4. Malformed/invalid input rejected. A name containing markup is a valid
+    // update (the app defends XSS by escaping on output, not by rejecting
+    // input), so exercise a genuinely invalid value instead: an unknown
+    // language must be refused with 400.
+    const j4 = await req("/api/users/me", { method: "PUT", headers: customerTok, body: { language: "xx" } });
     check(j4.status !== 200, "security: malformed input rejected", j4.status);
 
     // ---------------------------------------------------------------
