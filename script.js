@@ -161,7 +161,12 @@ function populateCatalog(list) {
             origin: p.origin,
             stock: p.stock,
             rating: p.rating,
-            ratingCount: p.ratingCount
+            ratingCount: p.ratingCount,
+            // Keep the API/DB image path. Without this the runtime catalog has
+            // no `image`, so getProductImage() can only use PRODUCT_IMAGE_FILES
+            // and newly added products (which are not in that legacy map) render
+            // no photo at all.
+            image: p.image
         });
     });
 }
