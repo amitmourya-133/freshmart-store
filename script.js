@@ -74,6 +74,9 @@ let products = [
 // ===============================
 
 let cart = [];
+// Guards against persisting an empty cart before loadCart() has read the
+// saved cart (the price refresh can resolve before page init on file pages).
+let cartInitialized = false;
 
 // ===============================
 // LOAD CART
@@ -89,6 +92,7 @@ function loadCart() {
             localStorage.removeItem("freshMartCart");
         }
     }
+    cartInitialized = true;
     updateCart();
 }
 
@@ -165,20 +169,34 @@ function populateCatalog(list) {
 // Ensures the catalog is loaded from the backend before page rendering.
 // Falls back to the local fallback list when the backend is unreachable,
 // so the store keeps working offline (same as before, still 56 products).
+function applyCatalog(list) {
+    populateCatalog(list);
+    var map = {};
+    (list || []).forEach(function(p) {
+        if (p._id && p.name) map[p.name] = p._id;
+    });
+    productIdMap = map;
+}
+
+// True when the in-memory catalog is the bundled offline snapshot rather than
+// a live /api/products response (fallback rows carry synthetic "local-*" ids).
+function isOfflineFallback(list) {
+    return !list || !list.length || String(list[0]._id || "").indexOf("local-") === 0;
+}
+
 function ensureCatalogReady(callback) {
     if (catalogReady) {
         if (callback) callback();
         return;
     }
     fetchProducts().then(function(list) {
-        populateCatalog(list);
-        var map = {};
-        (list || []).forEach(function(p) {
-            if (p._id && p.name) map[p.name] = p._id;
-        });
-        productIdMap = map;
+        applyCatalog(list);
         catalogReady = true;
         if (callback) callback();
+        // If the bundled offline catalog rendered because /api/products was
+        // unreachable, retry shortly so a transient failure self-heals rather
+        // than leaving a stale built-in price on screen for a full minute.
+        if (isOfflineFallback(list)) retryCatalogFetch(0);
     });
 }
 
@@ -283,31 +301,42 @@ function syncCartToServer() {
 let priceRefreshInterval = null;
 
 function refreshProductCatalog() {
-    fetch("/api/products?" + Date.now())
+    return fetch(API.base + "/products?" + Date.now())
         .then(function (resp) {
             if (!resp.ok) throw new Error("Network error");
             return resp.json();
         })
         .then(function (data) {
             // data = { success: true, count: N, data: [...] }
-            if (data && Array.isArray(data.data)) {
-                data.data.forEach(function (p) {
-                    var existing = products.find(function (q) { return q._id === p._id; });
-                    if (existing) {
-                        existing.price = p.price;
-                        existing.stock = p.stock;
-                    }
-                });
-                // Re‑populate the DOM price displays so the customer sees the
-                // updated values immediately.
-                updatePriceDisplays();
-                // Also re‑sync cart prices from the updated catalog.
-                refreshCartPrices();
-            }
+            if (!data || !Array.isArray(data.data) || !data.data.length) return false;
+            // Replace the whole in-memory catalog with the server's copy. This
+            // heals a page that previously rendered the offline fallback (e.g.
+            // a stale bundled price) instead of only patching ids that match.
+            applyCatalog(data.data);
+            catalogReady = true;
+            // Re-render the visible catalog so the customer sees the updated
+            // prices immediately, then re-sync cart prices from the catalog.
+            renderCatalog();
+            refreshCartPrices();
+            return true;
         })
         .catch(function (err) {
             console.error("Failed to refresh product catalog:", err);
+            return false;
         });
+}
+
+// Backoff retry used only after the offline fallback was shown, so a brief
+// /api/products hiccup recovers on its own. Gives up after a few attempts and
+// lets the steady 60s interval take over.
+function retryCatalogFetch(attempt) {
+    var delays = [3000, 10000, 30000];
+    if (attempt >= delays.length) return;
+    setTimeout(function () {
+        refreshProductCatalog().then(function (ok) {
+            if (!ok && isOfflineFallback(products)) retryCatalogFetch(attempt + 1);
+        });
+    }, delays[attempt]);
 }
 
 // ---------------------------------------------------------------------------
@@ -2919,7 +2948,9 @@ function refreshCartPrices() {
                 item.unit = product.unit;
             }
         });
-        saveCart();
+        // Only persist once the saved cart has been loaded, so an early price
+        // refresh cannot clobber the stored cart with an empty array.
+        if (cartInitialized) saveCart();
     });
 }
 
