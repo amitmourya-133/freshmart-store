@@ -9,6 +9,8 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
+const fs = require("fs");
+const { isWithinStaticRoot } = require("./utils/staticContainment");
 const cookieParser = require("cookie-parser");
 const { rateLimit } = require("./utils/rateLimit");
 const { safeErrorMessage, safeErrorStatus, errorLogEntry } = require("./utils/safeError");
@@ -298,17 +300,85 @@ app.get("/api/health", (req, res) => {
 // must NEVER be downloadable from the browser. This guard runs BEFORE
 // express.static and blocks any request that targets such files.
 const SERVED_ONLY_EXT = [".html", ".js", ".css", ".json", ".png", ".jpg", ".jpeg", ".jfif", ".webp", ".gif", ".svg", ".ico", ".txt", ".xml"];
+
+// Protected path prefixes (matched case-insensitively against the decoded
+// request path). Anything under these is never served statically.
 const NEVER_SERVE_PREFIX = [
-    "/.env", "/.git", "/node_modules", "/server.js", "/app.js", "/seed.js",
-    "/seedAdmin.js", "/package.json", "/package-lock.json", "/vercel.json",
+    "/.env", "/.git", "/.github", "/.vercel",
+    "/node_modules",
+    "/server.js", "/app.js",
+    "/seed", "/create_users", "/setup_users",
+    "/tests",
     "/controllers", "/models", "/routes", "/middleware", "/utils", "/api/",
-    "/.vercel", "/\.db"
+    "/package", "/vercel.json",
 ];
+
+// Protected root-level file stems (case-insensitive). Internal scripts, test
+// harnesses and artifacts that must never be downloadable.
+const PROTECTED_FILE_RE = /^(seed|create_users|setup_users|test_output|test_apis|testAdmin|test_smoke|db_counts_check|cleanup|runTestAdmin|verify|part\d|check_pos|check_positions|js_security_check|security_check|scan_corrupt|smoke_local|fix)/i;
+
+// Safely decode a request path for matching. Returns null when the path is
+// malformed or attempts traversal / alternate separators, in which case the
+// request is treated as protected (404). Decoding is bounded (max 3 passes)
+// so double-encoded input is handled without unbounded recursion.
+function safeDecodePath(raw) {
+    if (typeof raw !== "string" || raw === "") return null;
+    let cur = raw;
+    for (let i = 0; i < 3; i++) {
+        let next;
+        try { next = decodeURIComponent(cur); }
+        catch (e) { return null; }
+        if (next === cur) break;
+        if (next.indexOf("..") !== -1) return null;
+        if (next.indexOf("\\") !== -1) return null;
+        if (next.indexOf("\u0000") !== -1) return null;
+        cur = next;
+    }
+    if (cur.indexOf("..") !== -1) return null;
+    if (cur.indexOf("\\") !== -1) return null;
+    if (cur.indexOf("\u0000") !== -1) return null;
+    if (cur.charAt(0) !== "/") return null;
+    return cur;
+}
+
+function isProtectedStaticPath(decoded) {
+    const lower = decoded.toLowerCase();
+    if (NEVER_SERVE_PREFIX.some((prefix) => lower.startsWith(prefix.toLowerCase()))) return true;
+    const slash = lower.lastIndexOf("/");
+    const base = slash >= 0 ? lower.slice(slash + 1) : lower;
+    if (PROTECTED_FILE_RE.test(base)) return true;
+    if (base.endsWith(".py")) return true;
+    // Block dotfiles (no public dotfile assets exist).
+    if (base.length > 0 && base.charAt(0) === ".") return true;
+    return false;
+}
+
+// Filesystem containment check: resolve the candidate file's real path and ensure
+// it stays inside the static-serving root. This is the version-independent
+// backstop for symlink-based escapes (send/serve-static follow symlinks by
+// default and expose no followSymlinks option in the installed versions).
+// Implementation lives in utils/staticContainment.js so it can be exercised by
+// the DB-free regression suite against a temporary fixture root.
+// Trade-off: a synchronous realpathSync per request. Acceptable for this app's
+// traffic; the alternative (async) would race the static handler.
+const STATIC_ROOT = path.resolve(__dirname);
+
 app.use("/", (req, res, next) => {
     const p = req.path;
     if (p === "/" || p === "") return next();
-    const ext = path.extname(p).toLowerCase();
-    if (NEVER_SERVE_PREFIX.some((prefix) => p.startsWith(prefix)) || (ext && !SERVED_ONLY_EXT.includes(ext))) {
+    const decoded = safeDecodePath(p);
+    if (decoded === null) {
+        return res.status(404).json({ success: false, message: "Not found" });
+    }
+    if (isProtectedStaticPath(decoded)) {
+        return res.status(404).json({ success: false, message: "Not found" });
+    }
+    // Filesystem containment (symlink backstop).
+    if (!isWithinStaticRoot(STATIC_ROOT, decoded)) {
+        return res.status(404).json({ success: false, message: "Not found" });
+    }
+    const ext = path.extname(decoded).toLowerCase();
+    if (ext && !SERVED_ONLY_EXT.includes(ext)) {
         return res.status(404).json({ success: false, message: "Not found" });
     }
     next();

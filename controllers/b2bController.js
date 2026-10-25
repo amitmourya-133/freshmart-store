@@ -40,7 +40,7 @@ function invoiceNumberFor() {
 async function creditUsedFor(userId) {
     const rows = await Order.aggregate([
         { $match: { user: new (require("mongoose").Types.ObjectId)(String(userId)), orderType: "b2b", paymentMode: "credit", status: { $ne: "Cancelled" } } },
-        { $group: { _id: null, used: { $sum: { $ifNull: ["$total", 0] } }, open: { $sum: { $cond: [{ $in: ["$status", ["Delivered", "Completed", "Out for Delivery", "Confirmed", "Placed"]] }, { $ifNull: ["$total", 0] }, 0] } } } },
+        { $group: { _id: null, used: { $sum: { $ifNull: ["$total", 0] } }, open: { $sum: { $cond: [{ $in: ["$status", ["Delivered", "Out for Delivery", "Preparing", "Confirmed", "Placed"]] }, { $ifNull: ["$total", 0] }, 0] } } } },
     ]);
     return rows.length ? rows[0] : { used: 0, open: 0 };
 }

@@ -10,6 +10,8 @@
 // credit earnings, or fire the completion email twice.
 // ===============================
 
+const Order = require("../models/Order");
+
 // Append the Delivered history entry exactly once, whatever path completes the
 // order (partner OTP or admin override).
 function pushDeliveredEntry(order, by, reason) {
@@ -31,6 +33,15 @@ function pushDeliveredEntry(order, by, reason) {
 // `opts.by` follows the app's audit convention (e.g. "delivery:<userId>" or
 // "admin:<userId>"); `opts.reason` is the admin's manual-completion comment.
 // Returns { order, assignment, alreadyDelivered }.
+//
+// Crash safety: the terminal status is claimed atomically first (mutual
+// exclusion with cancellation), then every side effect is written idempotently
+// and the completion is marked with `deliveryFinalizedAt`. If the process dies
+// after the claim but before the effects, a retry re-enters this primitive on the
+// already-Delivered order and finishes the outstanding work instead of returning
+// a no-op: history is de-duplicated, COD payment is set only when missing, the
+// assignment is consumed only if still active, and the post-delivery hooks are
+// claimed exactly once with `deliveryHooksFiredAt`.
 async function completeOrderDelivery(order, assignment, opts) {
     opts = opts || {};
     if (!order) {
@@ -39,38 +50,62 @@ async function completeOrderDelivery(order, assignment, opts) {
         throw err;
     }
 
-    // Idempotency marker: a Delivered order is never completed twice.
-    if (order.status === "Delivered") {
-        return { order: order, assignment: assignment || null, alreadyDelivered: true };
-    }
-
-    // SEC-07: Cancelled is TERMINAL. This primitive only guarded against
-    // "Delivered", so a partner could still complete a cancelled order: the
-    // status flipped back to Delivered, a COD order was flipped to PAID with a
-    // paymentAt, the assignment was closed as DELIVERED and the partner earned
-    // the fee - all after the customer had already cancelled and had their stock
-    // restored. Refuse instead of silently resurrecting the order.
+    // SEC-07: Cancelled is TERMINAL.
     if (order.status === "Cancelled") {
         const err = new Error("This order was cancelled and cannot be marked delivered. Contact support to resolve the parcel.");
         err.status = 409;
         throw err;
     }
 
-    pushDeliveredEntry(order, opts.by, opts.reason);
-    order.status = "Delivered";
+    const wasDelivered = order.status === "Delivered";
+
+    // Atomic terminal-state claim: cancel and delivery completion are mutually
+    // exclusive. Only the request that wins this compare-and-set may perform the
+    // transition; a concurrent delivery (or a second completion) falls through to
+    // the idempotent finalize below.
+    if (!wasDelivered) {
+        const claim = await Order.updateOne(
+            { _id: order._id, status: { $nin: ["Cancelled", "Delivered"] } },
+            { $set: { status: "Delivered" } }
+        );
+        if (!claim || claim.matchedCount !== 1) {
+            const fresh = await Order.findById(order._id).lean();
+            if (fresh && fresh.status === "Cancelled") {
+                const err = new Error("This order was cancelled and cannot be marked delivered. Contact support to resolve the parcel.");
+                err.status = 409;
+                throw err;
+            }
+            if (!fresh || fresh.status !== "Delivered") {
+                const err = new Error("Order status changed");
+                err.status = 409;
+                throw err;
+            }
+            // Lost the claim to a concurrent completion; finish its effects.
+        }
+        order.status = "Delivered";
+    }
+
+    // ---- idempotent finalize -------------------------------------------
+    let changed = false;
+    if (pushDeliveredEntry(order, opts.by, opts.reason)) changed = true;
     // Payment source of truth is preserved: only COD (cash handed over at the
     // door) advances to PAID here; online/manual stays PENDING until an admin
     // verifies the transfer through the payment-status endpoint.
-    if (order.paymentMethod === "cod") {
+    if (order.paymentMethod === "cod" && order.paymentStatus !== "PAID") {
         order.paid = true;
         order.paymentStatus = "PAID";
         order.paymentAt = order.paymentAt || new Date();
+        changed = true;
     }
-    await order.save();
+    if (!order.deliveryFinalizedAt) {
+        order.deliveryFinalizedAt = new Date();
+        changed = true;
+    }
+    if (changed) await order.save();
 
     // Consume the assignment that carried the order so no contradictory active
     // assignment survives a manual completion, and the OTP becomes single-use
-    // under every completion path.
+    // under every completion path. Idempotent: a replay sees DELIVERED and skips.
     if (assignment && assignment.status !== "DELIVERED") {
         assignment.status = "DELIVERED";
         assignment.deliveredAt = assignment.deliveredAt || new Date();
@@ -81,16 +116,25 @@ async function completeOrderDelivery(order, assignment, opts) {
         await assignment.save();
     }
 
-    // Fire the post-delivery side-effects exactly once (analytics, referral
-    // reward, repeat-order reminder). Lazy require breaks the module cycle and
-    // keeps this primitive dependency-light; failures are already swallowed.
-    try {
-        const hooks = require("./orderDeliveredHooks");
-        const fired = await hooks.fireOrderDelivered(order);
-        void fired;
-    } catch (e) { /* non-fatal */ }
+    // Fire the post-delivery side-effects exactly once, resumably. The marker is
+    // claimed atomically before firing so a duplicate completion cannot double
+    // credit the referral reward or double-emit the delivered events.
+    if (!order.deliveryHooksFiredAt) {
+        const hookClaim = await Order.updateOne(
+            { _id: order._id, deliveryHooksFiredAt: null },
+            { $set: { deliveryHooksFiredAt: new Date() } }
+        );
+        if (hookClaim && hookClaim.matchedCount === 1) {
+            order.deliveryHooksFiredAt = new Date();
+            try {
+                const hooks = require("./orderDeliveredHooks");
+                const fired = await hooks.fireOrderDelivered(order);
+                void fired;
+            } catch (e) { /* non-fatal */ }
+        }
+    }
 
-    return { order: order, assignment: assignment || null, alreadyDelivered: false };
+    return { order: order, assignment: assignment || null, alreadyDelivered: wasDelivered };
 }
 
 module.exports = { completeOrderDelivery, pushDeliveredEntry };

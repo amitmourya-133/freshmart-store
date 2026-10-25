@@ -455,15 +455,23 @@ router.put("/status", protect, delivery, otpGuessBudget, partnerWriteLimiter, as
         };
 
         const allowed = allowedTransitions[assignment.status] || [];
-        if (allowed.indexOf(status) === -1) {
+        // A re-sent DELIVERED request for an already-DELIVERED assignment is the
+        // resume path for an interrupted completion (crash after the assignment
+        // was marked DELIVERED but before the order/earnings finalize). It falls
+        // through to the idempotent completion below instead of being rejected
+        // as an illegal transition, which would leave the finalize unfinished.
+        const isDeliveryResume = status === "DELIVERED" && assignment.status === "DELIVERED";
+        if (allowed.indexOf(status) === -1 && !isDeliveryResume) {
             return res.status(400).json({
                 success: false,
                 message: "Invalid status transition. Status can only move through the delivery lifecycle.",
             });
         }
 
-        // Delivery completion requires a valid OTP (secure, server-side).
-        if (status === "DELIVERED") {
+        // Delivery completion requires a valid OTP (secure, server-side). A
+        // resume of an already-verified delivery skips it: the OTP was consumed
+        // atomically with the DELIVERED claim and can never be replayed.
+        if (status === "DELIVERED" && !isDeliveryResume) {
             const storedHash = assignment.otpHash;
             const expiry = assignment.otpExpiry;
 
@@ -526,26 +534,31 @@ router.put("/status", protect, delivery, otpGuessBudget, partnerWriteLimiter, as
         }
 
         // On delivered: sync the parent Order via the shared completion
-        // primitive (idempotent), credit the delivery fee to the partner's
-        // earnings, and send the delivery-complete email.
+        // primitive (resumable/idempotent), credit the delivery fee to the
+        // partner's earnings exactly once, and send the delivery-complete email.
         if (status === "DELIVERED") {
             const orderDoc = await Order.findById(assignment.order);
             if (orderDoc) {
-                const done = await completeOrderDelivery(orderDoc, assignment, {
+                await completeOrderDelivery(orderDoc, assignment, {
                     by: "delivery:" + String(assignment.deliveryUser)
                 });
-                // Side effects are performed only when this call actually
-                // completed the order (a replayed/duplicate request is a no-op).
-                if (!done.alreadyDelivered) {
-                    // Earnings = the delivery fee the customer paid (real value,
-                    // never fabricated). Free-delivery orders pay ₹0.
-                    // The schema defaults `earnings` to 0, so a strict
-                    // undefined/null check would never fire and the partner would
-                    // never be credited: treat "still 0" as "not recorded yet".
-                    if (!Number(assignment.earnings)) {
-                        assignment.earnings = Number(orderDoc.delivery) || 0;
-                        await assignment.save();
+                // Credit the delivery fee exactly once. The atomic claim on
+                // `earningsCreditedAt` is the double-credit guard: a duplicate
+                // request (or a replay after a crash right here) cannot credit
+                // the partner twice, while an interrupted completion that never
+                // reached this claim can still finish it.
+                const creditClaim = await DeliveryAssignment.updateOne(
+                    { _id: assignment._id, earningsCreditedAt: null },
+                    {
+                        $set: {
+                            earningsCreditedAt: new Date(),
+                            earnings: Number(orderDoc.delivery) || 0,
+                        },
                     }
+                );
+                if (creditClaim && creditClaim.matchedCount === 1) {
+                    assignment.earnings = Number(orderDoc.delivery) || 0;
+                    assignment.earningsCreditedAt = new Date();
                     // Denormalised lifetime counter the partner profile and the
                     // admin roster read. Only ever incremented by a real, OTP
                     // verified delivery.

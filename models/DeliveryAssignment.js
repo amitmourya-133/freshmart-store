@@ -115,6 +115,14 @@ const DeliveryAssignmentSchema = new mongoose.Schema(
             type: Number,
             default: 0,
         },
+        // Set exactly once, atomically, when the partner's delivery earnings and
+        // lifetime deliveryCount have been credited. It lets a retried DELIVERED
+        // request finish an interrupted completion without double-crediting (and
+        // without relying on earnings being non-zero, which is not a safe marker).
+        earningsCreditedAt: {
+            type: Date,
+            default: null,
+        },
         tipAmount: {
             type: Number,
             default: 0,

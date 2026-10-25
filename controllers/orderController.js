@@ -20,6 +20,7 @@ const { assertVariantAvailable } = require("../utils/variants");
 const emailService = require("../utils/emailService");
 const { assertDeliveryWithinRadius } = require("../utils/geo");
 const { deliveryEta } = require("../utils/eta");
+const { escapeRegex } = require("../utils/search");
 const { creditStoreCredit } = require("../utils/refunds");
 
 // The single shared delivery-completion primitive (identical to the one the
@@ -231,6 +232,17 @@ function normalizeDeliveryLocation(loc) {
 function pushHistory(order, status, by) {
     if (!Array.isArray(order.statusHistory)) order.statusHistory = [];
     order.statusHistory.push({ status: status, by: by || null, at: new Date() });
+}
+
+// Append a status entry only if that status is not already present. Used by the
+// crash-recovery path: a retried cancellation must finish the missing side
+// effects without pushing a second "Cancelled" row into the timeline.
+function pushHistoryOnce(order, status, by) {
+    if (!Array.isArray(order.statusHistory)) order.statusHistory = [];
+    const already = order.statusHistory.some(function (h) { return h && h.status === status; });
+    if (already) return false;
+    order.statusHistory.push({ status: status, by: by || null, at: new Date() });
+    return true;
 }
 
 // Delivery + minimum-order policy from the DB-backed settings
@@ -466,12 +478,42 @@ async function restoreStockOnce(order, changedByType, changedBy) {
 }
 
 // Shared cancellation logic (admin + customer). Idempotent per order.
+//
+// Crash safety: the terminal status is claimed atomically first (mutual
+// exclusion with delivery completion), then each side effect is persisted
+// idempotently. `cancelFinalizedAt` is written only after EVERY effect
+// (including the group-reward reversal) has been attempted, so a retry on an
+// already-Cancelled order can detect an interrupted finalize and finish it
+// instead of returning "already cancelled" and leaving stock/coupon/refund
+// pending forever.
 async function applyCancellation(order, by) {
-    if (order.status === "Cancelled") return { ok: false, message: "Order is already cancelled" };
     if (order.status === "Delivered") return { ok: false, message: "Delivered orders cannot be cancelled" };
+
+    // Fully-finalized repeat: nothing left to do.
+    if (order.status === "Cancelled" && order.cancelFinalizedAt) {
+        return { ok: false, message: "Order is already cancelled" };
+    }
 
     const byType = by && String(by).indexOf("admin:") === 0 ? "admin" : "customer";
     const byId = by ? String(by).split(":")[1] : null;
+
+    // Atomic terminal-state claim: cancel and delivery completion are mutually
+    // exclusive. Only the request that wins this compare-and-set may perform the
+    // transition. An order that is already Cancelled (from an interrupted run)
+    // skips the claim and falls through to the resumable finalize.
+    if (order.status !== "Cancelled") {
+        const statusClaim = await Order.updateOne(
+            { _id: order._id, status: { $nin: ["Cancelled", "Delivered"] } },
+            { $set: { status: "Cancelled" } }
+        );
+        if (!statusClaim || statusClaim.matchedCount !== 1) {
+            const fresh = await Order.findById(order._id).lean();
+            if (fresh && fresh.status === "Cancelled") return { ok: false, message: "Order is already cancelled" };
+            if (fresh && fresh.status === "Delivered") return { ok: false, message: "Delivered orders cannot be cancelled" };
+            return { ok: false, message: "Order status changed" };
+        }
+        order.status = "Cancelled";
+    }
 
     // Claim the stock restoration exactly once, mirroring the couponReleased
     // claim below. Cancellation reads the order first, so two concurrent cancels
@@ -608,7 +650,7 @@ async function applyCancellation(order, by) {
     // never overwrite a refund state with CANCELLED (BIZ-02).
 
     order.status = "Cancelled";
-    pushHistory(order, "Cancelled", by);
+    pushHistoryOnce(order, "Cancelled", by);
     await order.save();
 
     // SEC-06: a colony reward that was already credited has to come back when
@@ -621,6 +663,21 @@ async function applyCancellation(order, by) {
     } catch (e) {
         require("../utils/logger").error({
             ev: "group_reward_reversal_on_cancel_failed",
+            orderId: String(order._id),
+            err: (e && e.message) || "unknown"
+        });
+    }
+
+    // Mark the cancellation fully finalized only AFTER every effect above has
+    // been attempted. A crash before this write leaves the marker unset, so the
+    // next cancel attempt (customer or admin) resumes from the persisted flags
+    // and completes the missing work.
+    order.cancelFinalizedAt = new Date();
+    try {
+        await Order.updateOne({ _id: order._id }, { $set: { cancelFinalizedAt: order.cancelFinalizedAt } });
+    } catch (e) {
+        require("../utils/logger").error({
+            ev: "cancel_finalize_marker_failed",
             orderId: String(order._id),
             err: (e && e.message) || "unknown"
         });
@@ -836,6 +893,14 @@ const totals = await computeServerTotals(items, { couponCode: couponCode, userId
                         restored.push(prev);
                     }
                 }
+                // Release the coupon acquired by this attempt (if any) so a stock
+                // failure does not leave coupon usage consumed with no order. The
+                // release happens at most once because reservedCoupon is cleared.
+                if (reservedCoupon) {
+                    try { await Coupon.updateOne({ _id: reservedCoupon._id }, { $inc: { usageCount: -1 } }); } catch (e) { /* non-fatal */ }
+                    if (req.user) { try { await releaseCouponUsage(reservedCoupon._id, req.user._id); } catch (e) { /* non-fatal */ } }
+                    reservedCoupon = null;
+                }
                 if (item.variantId) {
                     const prod = await Product.findById(item.productId).lean();
                     const variant = prod && prod.variants ? prod.variants.find(function (v) { return String(v._id) === String(item.variantId); }) : null;
@@ -857,31 +922,32 @@ let order;
                 order = await Order.create(Object.assign(orderData, { statusHistory: [{ status: "Placed", by: req.user ? "customer:" + String(req.user._id) : "guest", at: new Date() }] }));
                 break; // success — exit the retry loop
             } catch (createError) {
-                // Compensate coupon usage + reserved stock so retries/aborts do not
-                // burn the coupon or the inventory (same compensation as before).
+                // A retryable duplicate-order-number collision (E11000) does NOT
+                // consume the already-reserved stock/coupon, so the retry can reuse
+                // the same reservations. Do NOT compensate on a retryable attempt;
+                // otherwise the retried order would persist without stock decrement
+                // and with an under-counted coupon.
+                const retryable = createError && createError.code === 11000 && attempt < MAX_RETRIES;
+                if (retryable) {
+                    // Regenerate order number and tracking id for the retry
+                    orderNumber = generateOrderNumber();
+                    trackingId = generateTrackingId();
+                    // Update orderData with the new number before the next iteration
+                    orderData.orderNumber = orderNumber;
+                    orderData.trackingId = trackingId;
+                    // Also push a fresh entry into statusHistory so the retry is
+                    // distinguishable from the original attempt.
+                    orderData.statusHistory = [{ status: "Placed", by: req.user ? "customer:" + String(req.user._id) : "guest", at: new Date() }];
+                    continue; // retry the loop, reusing the existing reservations
+                }
+                // Terminal failure (non-11000, or retries exhausted): compensate
+                // the reservations acquired by THIS attempt exactly once.
                 if (reservedCoupon) {
                     try { await Coupon.updateOne({ _id: reservedCoupon._id }, { $inc: { usageCount: -1 } }); } catch (e) { /* non-fatal */ }
                     if (req.user) { try { await releaseCouponUsage(reservedCoupon._id, req.user._id); } catch (e) { /* non-fatal */ } }
                 }
                 for (const prev of reservedLines) {
                     if (restored.indexOf(prev) === -1) { await restoreLine(prev); restored.push(prev); }
-                }
-
-                // If this is a genuine duplicate-order-number collision (E11000) and we
-                // haven't exhausted retries, generate a fresh order number and try again.
-                // Non-11000 errors (validation, database unavailable, etc.) must NOT be
-                // retried blindly — they indicate a real problem that a retry wouldn't fix.
-                if (createError && createError.code === 11000 && attempt < MAX_RETRIES) {
-                    // Regenerate order number and tracking id for the retry
-                    orderNumber = generateOrderNumber();
-                    trackingId = generateTrackingId();
-                    // Update orderData with the new number before the next Iteration
-                    orderData.orderNumber = orderNumber;
-                    orderData.trackingId = trackingId;
-                    // Also push a fresh entry into statusHistory so the retry is
-                    // distinguishable from the original attempt.
-                    orderData.statusHistory = [{ status: "Placed", by: req.user ? "customer:" + String(req.user._id) : "guest", at: new Date() }];
-                    continue; // retry the loop
                 }
                 // Either a non-11000 error, or we've exhausted retries — re-throw.
                 throw createError;
@@ -1102,7 +1168,11 @@ exports.getOrders = async (req, res) => {
         if (status && ORDER_STATUSES.includes(status)) filter.status = status;
         if (paymentStatus && PAYMENT_STATUSES.includes(paymentStatus)) filter.paymentStatus = paymentStatus;
         if (search && String(search).trim()) {
-            const s = String(search).trim();
+            // Match the admin's search as a LITERAL substring: escape regex
+            // metacharacters so a crafted pattern cannot trigger catastrophic
+            // backtracking (ReDoS) or match unintended fields, and cap the
+            // length so the scan stays bounded.
+            const s = escapeRegex(String(search).trim().slice(0, 100));
             filter.$or = [
                 { orderNumber: { $regex: s, $options: "i" } },
                 { trackingId: { $regex: s, $options: "i" } },
@@ -1272,7 +1342,28 @@ exports.updateOrderStatus = async (req, res) => {
             return res.status(404).json({ success: false, message: "Order not found" });
         }
 
-        if (order.status === status) {
+        // A no-op transition is a plain success, EXCEPT for the two terminal
+        // transitions: an order already in that state may be an interrupted
+        // finalize, so it must fall through to the resumable finalize
+        // (applyCancellation / completeOrderDelivery) which finishes any missing
+        // side effects. A fully-finalized repeat is still a harmless no-op.
+        if (order.status === status && status !== "Cancelled" && status !== "Delivered") {
+            return res.json({ success: true, data: order });
+        }
+
+        // Resume an interrupted manual "Delivered": the status was claimed but
+        // the shared finalize may not have finished (assignment consumption, COD
+        // payment, post-delivery hooks). completeOrderDelivery is idempotent, so
+        // re-running it finishes the outstanding work without duplicating any.
+        if (order.status === "Delivered" && status === "Delivered") {
+            const leftover = await DeliveryAssignment.findOne({
+                order: order._id,
+                status: { $in: ["ASSIGNED", "ACCEPTED", "PICKED_UP", "EN_ROUTE"] },
+            });
+            await completeOrderDelivery(order, leftover, {
+                by: "admin:" + String(req.user._id),
+                reason: String(req.body.reason || "").trim() || undefined,
+            });
             return res.json({ success: true, data: order });
         }
 
@@ -1281,6 +1372,11 @@ exports.updateOrderStatus = async (req, res) => {
             const previousStatus = order.status;
             const result = await applyCancellation(order, "admin:" + String(req.user._id));
             if (!result.ok) {
+                // A repeat on a fully-finalized cancellation is a harmless no-op
+                // for an admin (the response was already 200 before recovery).
+                if (/already cancelled/i.test(String(result.message || ""))) {
+                    return res.json({ success: true, data: order });
+                }
                 return res.status(400).json({ success: false, message: result.message });
             }
             emailOnStatusChange(result.order, previousStatus);
@@ -1397,7 +1493,12 @@ exports.cancelOrder = async (req, res) => {
         if (!order.user || !req.user || String(order.user) !== String(req.user._id)) {
             return res.status(403).json({ success: false, message: "Not authorized to cancel this order" });
         }
-        if (order.status !== "Placed" && order.status !== "Confirmed") {
+        // Delivered is final. Placed/Confirmed are cancellable, and an already
+        // Cancelled order is allowed through so an interrupted finalize (crash
+        // between the terminal claim and the stock/coupon/refund effects) can be
+        // resumed; applyCancellation() returns "already cancelled" when there is
+        // genuinely nothing left to do.
+        if (order.status !== "Placed" && order.status !== "Confirmed" && order.status !== "Cancelled") {
             return res.status(400).json({ success: false, message: "Order can only be cancelled while placed or confirmed" });
         }
 

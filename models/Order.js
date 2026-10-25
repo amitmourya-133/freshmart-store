@@ -69,6 +69,20 @@ const orderSchema = new mongoose.Schema(
         // Claimed atomically so concurrent/duplicate cancellations cannot
         // double-increment inventory (the counterpart of couponReleased).
         stockRestored: { type: Boolean, default: false },
+        // Crash-recovery markers for the two terminal transitions.
+        //
+        // The status is claimed atomically FIRST (that is what makes cancel and
+        // delivery mutually exclusive), then the side effects run: stock,
+        // coupon, refund, history, assignment consumption and post-delivery
+        // hooks. If the process dies in between, the order is already terminal
+        // but some effects are missing. These timestamps are written only AFTER
+        // the corresponding effects have been persisted, so a retry (customer
+        // cancel, admin cancel, or a partner re-sending DELIVERED) can detect
+        // the incomplete finalize and finish it idempotently instead of
+        // silently returning "already done".
+        cancelFinalizedAt: { type: Date, default: null },
+        deliveryFinalizedAt: { type: Date, default: null },
+        deliveryHooksFiredAt: { type: Date, default: null },
         deliverySlot: { type: String, default: "Morning (8-11 AM)" },
         // Optional GPS coordinates captured at checkout (customer's current
         // location). Address remains the canonical destination; coordinates help
