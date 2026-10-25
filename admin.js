@@ -2256,7 +2256,7 @@ function previewBulkCsv() {
                     html += "<tr><td>" + r.row + "</td><td>" + escapeHtml(r.name || "") + "</td><td style='color:" + color + ";'>" + r.status + "</td><td>" + escapeHtml((r.reasons || []).join("; ")) + "</td></tr>";
                 });
                 html += "</tbody></table>";
-                html += "<div style='margin-top:12px;'><button class='add-product-btn' onclick='runBulkImport()'>Import Valid Rows</button> <button class='add-product-btn' onclick='cancelBulkImport()'>Cancel</button></div>";
+                html += "<div style='margin-top:12px;'><button type='button' class='add-product-btn' data-act='runBulkImport'>Import Valid Rows</button> <button type='button' class='add-product-btn' data-act='cancelBulkImport'>Cancel</button></div>";
                 preview.innerHTML = html;
                 window.__bulkCsvText = text;
             })
@@ -2289,7 +2289,7 @@ function runBulkImport() {
             html += "</tbody></table>";
             var failures = (d.results || []).filter(function (r) { return r.status === "failed" || r.status === "skipped"; });
             if (failures.length) {
-                html += "<div style='margin-top:8px;'><button class='add-product-btn' onclick='downloadFailureReport()'>Download Failure Report</button></div>";
+                html += "<div style='margin-top:8px;'><button type='button' class='add-product-btn' data-act='downloadFailureReport'>Download Failure Report</button></div>";
                 window.__failureReport = failures;
             }
             result.innerHTML = html;
@@ -2353,7 +2353,7 @@ function searchProductImages() {
                 html += "<div style='font-size:12px;margin-top:4px;'><strong>" + escapeHtml(c.title) + "</strong></div>";
                 html += "<div style='font-size:11px;color:#666;'>" + escapeHtml(c.license || "unknown license") + "</div>";
                 html += "<div style='font-size:11px;color:#666;'>" + escapeHtml(c.artist || "") + "</div>";
-                html += "<button class='add-product-btn' style='margin-top:6px;width:100%;' onclick='downloadSelectedImage(" + idx + ")'>Use this image</button>";
+                html += "<button type='button' class='add-product-btn' style='margin-top:6px;width:100%;' data-act='downloadSelectedImage' data-arg='[" + idx + "]'>Use this image</button>";
                 html += "</div>";
             });
             html += "</div>";
