@@ -3,7 +3,7 @@
 // Same-origin static assets are cached on successful fetches and used as an
 // offline fallback when the network is unavailable.
 
-var CACHE_NAME = "freshmart-v1";
+var CACHE_NAME = "freshmart-v2";
 
 self.addEventListener("install", function (event) {
     self.skipWaiting();

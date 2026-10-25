@@ -2223,7 +2223,12 @@ function apiAdminStockAlertsWaiting() {
         });
     }
 
-    ["click", "change", "input", "keydown", "submit", "blur", "focus"].forEach(delegate);
+    // NOTE: "focus" and "blur" are intentionally NOT delegated. Delegating them
+    // caused the navigation bug: any focusable element carrying a data-act plan
+    // (e.g. the cart button, product cards) would fire its click action
+    // (openCart, openProductDetail) merely by receiving focus - on page load,
+    // tab navigation or programmatic focus - repeatedly navigating the user.
+    ["click", "change", "input", "keydown", "submit"].forEach(delegate);
 
     // Resource errors (img onerror) do not bubble - listen in capture phase.
     document.addEventListener("error", function (ev) {
