@@ -22,12 +22,15 @@ describe("Cancel vs delivery race (C4)", function () {
     this.timeout(120000);
     let conn, Product, Order, DeliveryAssignment, controller, completeOrderDelivery;
     const userId = new mongoose.Types.ObjectId();
+    let originalCreate = null;
 
     before(async function () {
         if (!isSafeTestHost()) this.skip("No safe isolated MongoDB (localhost) available.");
         conn = await testDb.connectTestDb(mongoose, "cancelvsdelivery");
         Product = require("../../models/Product");
         Order = require("../../models/Order");
+        if (!originalCreate) originalCreate = Order.create.bind(Order);
+        Order.create = originalCreate;
         DeliveryAssignment = require("../../models/DeliveryAssignment");
         controller = require("../../controllers/orderController");
         completeOrderDelivery = require("../../utils/deliveryCompletion").completeOrderDelivery;
@@ -111,6 +114,7 @@ describe("Cancel vs delivery race (C4)", function () {
         const a = await DeliveryAssignment.create({
             order: o._id,
             deliveryUser: userId,
+            assignedBy: userId,
             status: "EN_ROUTE",
         });
 

@@ -19,10 +19,13 @@ describe("B2B credit limit (C3)", function () {
     this.timeout(120000);
     let conn, Order, b2bController;
     const buyerId = new mongoose.Types.ObjectId();
+    let originalCreate = null;
     before(async function () {
         if (!isSafeTestHost()) this.skip("No safe isolated MongoDB (localhost) available.");
         conn = await testDb.connectTestDb(mongoose, "b2bcreditlimit");
         Order = require("../../models/Order");
+        if (!originalCreate) originalCreate = Order.create.bind(Order);
+        Order.create = originalCreate;
         b2bController = require("../../controllers/b2bController");
     });
     after(async function () { if (conn) await conn.close(true); });

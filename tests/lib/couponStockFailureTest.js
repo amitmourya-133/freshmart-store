@@ -24,6 +24,7 @@ describe("Coupon compensation on stock failure (C2)", function () {
     this.timeout(120000);
     let conn, Product, Coupon, CouponUsage, Order, controller;
     let originalUpdateOne = null;
+    let originalCreate = null;
     const userId = new mongoose.Types.ObjectId();
 
     before(async function () {
@@ -33,6 +34,8 @@ describe("Coupon compensation on stock failure (C2)", function () {
         Coupon = require("../../models/Coupon");
         CouponUsage = require("../../models/CouponUsage");
         Order = require("../../models/Order");
+        if (!originalCreate) originalCreate = Order.create.bind(Order);
+        Order.create = originalCreate;
         controller = require("../../controllers/orderController");
         originalUpdateOne = Product.updateOne;
     });

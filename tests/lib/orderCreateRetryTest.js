@@ -47,7 +47,13 @@ describe("Order creation retry accounting (C1)", function () {
         controller = require("../../controllers/orderController");
         originalCreate = Order.create.bind(Order);
     });
-    after(async function () { if (conn) await conn.close(true); });
+    after(async function () {
+        if (originalCreate) Order.create = originalCreate;
+        if (conn) await conn.close(true);
+    });
+    afterEach(async function () {
+        if (originalCreate) Order.create = originalCreate;
+    });
 
     beforeEach(async function () {
         await Promise.all([Product.deleteMany({}), Coupon.deleteMany({}), CouponUsage.deleteMany({}), Order.deleteMany({})]);
