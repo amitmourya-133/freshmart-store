@@ -21,6 +21,12 @@ const {
     uploadImage
 } = require("../controllers/productController");
 const {
+    bulkImport,
+    searchImages,
+    downloadImage,
+    getAllowedValues
+} = require("../controllers/productImportController");
+const {
     getProductReviews,
     addProductReview,
     uploadReviewPhoto
@@ -45,6 +51,14 @@ const aiSearchLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 30 });
 // Admin routes (must be BEFORE /:id route)
 router.get("/admin/all", protect, admin, getAdminProducts);
 router.post("/upload", protect, admin, uploadLimiter, uploadImage);
+// Bulk import + image discovery (admin only). Rate-limited because they touch
+// the DB and (for image download) the network.
+const importLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 10 });
+const imageSearchLimiter = rateLimit({ windowMs: 60 * 1000, max: 20 });
+router.get("/import/template-values", protect, admin, getAllowedValues);
+router.post("/import/csv", protect, admin, importLimiter, bulkImport);
+router.post("/import/images/search", protect, admin, imageSearchLimiter, searchImages);
+router.post("/import/images/download", protect, admin, importLimiter, downloadImage);
 router.post("/", protect, admin, createProduct);
 router.put("/:id", protect, admin, updateProduct);
 router.patch("/:id/stock", protect, admin, updateStock);

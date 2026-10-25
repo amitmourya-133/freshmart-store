@@ -1552,6 +1552,18 @@ function initAdminPage() {
 
     // Backend-verified role check: a normal customer token cannot use the
     // admin panel even if they know the URL (APIs are also admin-protected).
+    verifyAdminSession();
+}
+
+// Verify the admin session before showing the panel. A genuine 401 / invalid
+// session sends the admin to the login screen. A transient network or 5xx
+// failure is NOT proof of logout: the local session is kept, a bounded retry
+// runs, and a manual "Retry" state is shown — never a redirect loop while the
+// backend is merely unreachable.
+var adminSessionMaxRetries = 3;
+var adminSessionRetryCount = 0;
+
+function verifyAdminSession() {
     apiGetMe()
         .then(function(user) {
             if (!(user && user.role === "admin")) {
@@ -1559,12 +1571,62 @@ function initAdminPage() {
                 setTimeout(function() { window.location.href = "index.html"; }, 800);
                 return;
             }
+            adminSessionRetryCount = 0;
+            clearAdminSessionError();
             switchTab("dashboard");
         })
-        .catch(function() {
-            showToast("Session expired. Please login again.", "error");
-            setTimeout(function() { window.location.href = "login.html"; }, 800);
+        .catch(function(err) {
+            var msg = err && err.message ? String(err.message) : "";
+            // Shared classifier (script.js). Inline fallback keeps this safe
+            // even if admin.js is ever loaded without script.js.
+            var invalid = (typeof isInvalidSessionError === "function")
+                ? isInvalidSessionError(msg)
+                : /not authorized|user not found|session expired|401/i.test(msg);
+            if (invalid) {
+                showToast("Session expired. Please login again.", "error");
+                setTimeout(function() { window.location.href = "login.html"; }, 800);
+                return;
+            }
+            if (adminSessionRetryCount < adminSessionMaxRetries) {
+                adminSessionRetryCount += 1;
+                showToast("Connection problem. Retrying (" + adminSessionRetryCount + "/" + adminSessionMaxRetries + ")…", "error");
+                setTimeout(verifyAdminSession, 1500 * adminSessionRetryCount);
+                return;
+            }
+            showAdminSessionError();
         });
+}
+
+// Persistent, non-redirecting error state for a temporarily unreachable
+// backend. Keeps the session intact and offers a single manual retry.
+function showAdminSessionError() {
+    var el = document.getElementById("adminSessionError");
+    if (!el) {
+        el = document.createElement("div");
+        el.id = "adminSessionError";
+        el.setAttribute("role", "alert");
+        el.style.cssText = "position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);z-index:9999;";
+        el.innerHTML =
+            '<div style="max-width:420px;margin:16px;padding:24px;border-radius:12px;background:#fff;color:#222;text-align:center;">' +
+            '<h2 style="margin:0 0 8px;font-size:18px;">Can\'t reach the server</h2>' +
+            '<p style="margin:0 0 16px;font-size:14px;line-height:1.5;">Your admin session is still saved, but the server could not be reached. Check your connection and try again.</p>' +
+            '<button type="button" id="adminSessionRetry" class="row-btn verify">Retry</button>' +
+            '</div>';
+        if (document.body) document.body.appendChild(el);
+    }
+    var btn = document.getElementById("adminSessionRetry");
+    if (btn) {
+        btn.onclick = function() {
+            adminSessionRetryCount = 0;
+            showToast("Reconnecting…", "success");
+            verifyAdminSession();
+        };
+    }
+}
+
+function clearAdminSessionError() {
+    var el = document.getElementById("adminSessionError");
+    if (el && el.parentNode) el.parentNode.removeChild(el);
 }
 
 // Ensure showToast exists even if script.js order differs
@@ -2121,3 +2183,206 @@ function loadAdminAnalytics() {
 }
 
 document.addEventListener("DOMContentLoaded", initAdminPage);
+
+// ===============================
+// BULK IMPORT + IMAGE DISCOVERY (admin)
+// ===============================
+
+function toggleBulkImport() {
+    var panel = document.getElementById("bulkImportPanel");
+    if (!panel) return;
+    panel.style.display = (panel.style.display === "none" || panel.style.display === "") ? "block" : "none";
+}
+
+function downloadImportTemplate() {
+    var header = "name,category,price,unit,stock,description,emoji,image";
+    var sample = [
+        'Potato,Vegetables,30,kg,50,Fresh potatoes,🥔,',
+        'Tomato,Vegetables,40,kg,30,Fresh tomatoes,🍅,',
+        'Apple,Fruits,120,kg,20,Fresh apples,🍎,'
+    ].join("\n");
+    var csv = header + "\n" + sample + "\n";
+    var blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "freshmart_product_template.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function downloadAllowedValues() {
+    fetch(API.base + "/products/import/template-values", { headers: getAuthHeaders(), credentials: "include" })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (!d.success) { alert(d.message || "Failed"); return; }
+            var v = d.data;
+            alert("Categories: " + v.categories.join(", ") + "\nUnits: " + v.units.join(", ") + "\nMax rows: " + v.maxRows);
+        })
+        .catch(function (e) { alert("Failed: " + e.message); });
+}
+
+function readCsvFile(file, cb) {
+    var reader = new FileReader();
+    reader.onload = function (e) { cb(null, e.target.result); };
+    reader.onerror = function (e) { cb(e, null); };
+    reader.readAsText(file, "UTF-8");
+}
+
+function previewBulkCsv() {
+    var input = document.getElementById("bulkCsvFile");
+    var file = input && input.files && input.files[0];
+    if (!file) { alert("Please select a CSV file first."); return; }
+    readCsvFile(file, function (err, text) {
+        if (err) { alert("Could not read file: " + (err.message || err)); return; }
+        var preview = document.getElementById("bulkPreview");
+        preview.innerHTML = "Validating...";
+        fetch(API.base + "/products/import/csv", {
+            method: "POST",
+            headers: getAuthHeaders(),
+            credentials: "include",
+            body: JSON.stringify({ csv: text, dryRun: true })
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d.success) { preview.innerHTML = "<div style='color:red;'>" + escapeHtml(d.message || "Failed") + "</div>"; return; }
+                var s = d.summary || {};
+                var html = "<div><strong>Preview:</strong> " + s.total + " rows - would insert " + s.inserted + ", skip " + s.skipped + ", fail " + s.failed + "</div>";
+                html += "<table style='width:100%;border-collapse:collapse;margin-top:8px;font-size:13px;'><thead><tr><th>Row</th><th>Name</th><th>Status</th><th>Reasons</th></tr></thead><tbody>";
+                (d.results || []).forEach(function (r) {
+                    var color = r.status === "valid" ? "green" : (r.status === "skipped" ? "orange" : "red");
+                    html += "<tr><td>" + r.row + "</td><td>" + escapeHtml(r.name || "") + "</td><td style='color:" + color + ";'>" + r.status + "</td><td>" + escapeHtml((r.reasons || []).join("; ")) + "</td></tr>";
+                });
+                html += "</tbody></table>";
+                html += "<div style='margin-top:12px;'><button class='add-product-btn' onclick='runBulkImport()'>Import Valid Rows</button> <button class='add-product-btn' onclick='cancelBulkImport()'>Cancel</button></div>";
+                preview.innerHTML = html;
+                window.__bulkCsvText = text;
+            })
+            .catch(function (e) { preview.innerHTML = "<div style='color:red;'>Error: " + escapeHtml(e.message) + "</div>"; });
+    });
+}
+
+function runBulkImport() {
+    var text = window.__bulkCsvText;
+    if (!text) { alert("No CSV loaded. Please preview first."); return; }
+    if (!confirm("Import valid rows now?")) return;
+    var result = document.getElementById("bulkResult");
+    result.innerHTML = "Importing...";
+    fetch(API.base + "/products/import/csv", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        credentials: "include",
+        body: JSON.stringify({ csv: text, dryRun: false })
+    })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (!d.success) { result.innerHTML = "<div style='color:red;'>" + escapeHtml(d.message || "Failed") + "</div>"; return; }
+            var s = d.summary || {};
+            var html = "<div><strong>Done:</strong> " + s.total + " rows - inserted " + s.inserted + ", skipped " + s.skipped + ", failed " + s.failed + "</div>";
+            html += "<table style='width:100%;border-collapse:collapse;margin-top:8px;font-size:13px;'><thead><tr><th>Row</th><th>Name</th><th>Status</th><th>Reasons</th></tr></thead><tbody>";
+            (d.results || []).forEach(function (r) {
+                var color = r.status === "inserted" ? "green" : (r.status === "skipped" ? "orange" : "red");
+                html += "<tr><td>" + r.row + "</td><td>" + escapeHtml(r.name || "") + "</td><td style='color:" + color + ";'>" + r.status + "</td><td>" + escapeHtml((r.reasons || []).join("; ")) + "</td></tr>";
+            });
+            html += "</tbody></table>";
+            var failures = (d.results || []).filter(function (r) { return r.status === "failed" || r.status === "skipped"; });
+            if (failures.length) {
+                html += "<div style='margin-top:8px;'><button class='add-product-btn' onclick='downloadFailureReport()'>Download Failure Report</button></div>";
+                window.__failureReport = failures;
+            }
+            result.innerHTML = html;
+            window.__bulkCsvText = null;
+            if (typeof loadAdminProducts === "function") loadAdminProducts();
+        })
+        .catch(function (e) { result.innerHTML = "<div style='color:red;'>Error: " + escapeHtml(e.message) + "</div>"; });
+}
+
+function cancelBulkImport() {
+    window.__bulkCsvText = null;
+    var preview = document.getElementById("bulkPreview");
+    var result = document.getElementById("bulkResult");
+    if (preview) preview.innerHTML = "";
+    if (result) result.innerHTML = "";
+    var input = document.getElementById("bulkCsvFile");
+    if (input) input.value = "";
+}
+
+function downloadFailureReport() {
+    var failures = window.__failureReport || [];
+    var lines = ["row,name,status,reasons"];
+    failures.forEach(function (r) {
+        lines.push([r.row, '"' + String(r.name || "").replace(/"/g, '""') + '"', r.status, '"' + String((r.reasons || []).join("; ")).replace(/"/g, '""') + '"'].join(","));
+    });
+    var blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "import_failures.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function escapeHtml(s) {
+    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function searchProductImages() {
+    var q = (document.getElementById("imgSearchQuery").value || "").trim();
+    if (!q) { alert("Enter a product name."); return; }
+    var out = document.getElementById("imgSearchResults");
+    out.innerHTML = "Searching...";
+    fetch(API.base + "/products/import/images/search", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        credentials: "include",
+        body: JSON.stringify({ query: q })
+    })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (!d.success) { out.innerHTML = "<div style='color:red;'>" + escapeHtml(d.message || "Failed") + "</div>"; return; }
+            var cands = (d.data && d.data.candidates) || [];
+            if (!cands.length) { out.innerHTML = "<div>No suitable image found.</div>"; return; }
+            var html = "<div style='display:flex;flex-wrap:wrap;gap:12px;'>";
+            cands.forEach(function (c, idx) {
+                html += "<div style='border:1px solid #ddd;border-radius:8px;padding:8px;width:180px;'>";
+                html += "<img src='" + escapeHtml(c.thumbUrl) + "' style='width:100%;height:120px;object-fit:cover;border-radius:4px;' />";
+                html += "<div style='font-size:12px;margin-top:4px;'><strong>" + escapeHtml(c.title) + "</strong></div>";
+                html += "<div style='font-size:11px;color:#666;'>" + escapeHtml(c.license || "unknown license") + "</div>";
+                html += "<div style='font-size:11px;color:#666;'>" + escapeHtml(c.artist || "") + "</div>";
+                html += "<button class='add-product-btn' style='margin-top:6px;width:100%;' onclick='downloadSelectedImage(" + idx + ")'>Use this image</button>";
+                html += "</div>";
+            });
+            html += "</div>";
+            out.innerHTML = html;
+            window.__imgCandidates = cands;
+        })
+        .catch(function (e) { out.innerHTML = "<div style='color:red;'>Error: " + escapeHtml(e.message) + "</div>"; });
+}
+
+function downloadSelectedImage(idx) {
+    var cands = window.__imgCandidates || [];
+    var cand = cands[idx];
+    if (!cand) { alert("Candidate not found."); return; }
+    var out = document.getElementById("imgSearchResults");
+    out.innerHTML = "Downloading and validating image...";
+    fetch(API.base + "/products/import/images/download", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        credentials: "include",
+        body: JSON.stringify({ candidate: cand })
+    })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (!d.success) { out.innerHTML = "<div style='color:red;'>" + escapeHtml(d.message || "Failed") + "</div>"; return; }
+            var info = d.data;
+            out.innerHTML = "<div style='color:green;'>Downloaded: <code>" + escapeHtml(info.imagePath) + "</code> (" + info.width + "x" + info.height + ", " + info.bytes + " bytes)</div>" +
+                "<div style='font-size:12px;color:#666;margin-top:4px;'>License: " + escapeHtml(info.metadata.license || "unknown") + " | Artist: " + escapeHtml(info.metadata.artist || "unknown") + "</div>" +
+                "<img src='" + escapeHtml(info.imagePath) + "' style='max-width:200px;margin-top:8px;border-radius:4px;' />";
+            window.__lastDownloadedImage = info.imagePath;
+        })
+        .catch(function (e) { out.innerHTML = "<div style='color:red;'>Error: " + escapeHtml(e.message) + "</div>"; });
+}

@@ -94,6 +94,31 @@
             <div class="admin-section-head">
                 <h2>Products & Stock</h2>
                 <button class="add-product-btn" data-act="[[&quot;openAddProduct&quot;,[]]]">+ Add Product</button>
+                <button class="add-product-btn" id="bulkImportToggleBtn" onclick="toggleBulkImport()">Bulk Import CSV</button>
+            </div>
+
+            <div id="bulkImportPanel" style="display:none;margin:16px 0;padding:16px;border:1px solid var(--border,#ddd);border-radius:8px;background:var(--card-bg,#fafafa);">
+                <h3>Bulk Product Import</h3>
+                <p style="font-size:13px;color:var(--text-secondary,#666);">Download the template, fill rows, then upload. Add-only: existing products are never overwritten.</p>
+                <div style="margin:8px 0;">
+                    <button class="add-product-btn" onclick="downloadImportTemplate()">Download CSV Template</button>
+                    <button class="add-product-btn" onclick="downloadAllowedValues()">Show Allowed Values</button>
+                </div>
+                <div style="margin:8px 0;">
+                    <input type="file" id="bulkCsvFile" accept=".csv,text/csv" />
+                    <button class="add-product-btn" onclick="previewBulkCsv()">Preview &amp; Validate</button>
+                </div>
+                <div id="bulkPreview" style="margin-top:12px;"></div>
+                <div id="bulkResult" style="margin-top:12px;"></div>
+
+                <hr style="margin:16px 0;"/>
+                <h3>Automatic Image Discovery</h3>
+                <p style="font-size:13px;color:var(--text-secondary,#666);">Search approved image sources (Wikimedia Commons) by product name. Select a candidate to download safely into the project image folder.</p>
+                <div style="margin:8px 0;display:flex;gap:8px;flex-wrap:wrap;">
+                    <input type="text" id="imgSearchQuery" placeholder="Product name (e.g. Potato / आलू)" style="flex:1;min-width:200px;padding:6px;" />
+                    <button class="add-product-btn" onclick="searchProductImages()">Search Images</button>
+                </div>
+                <div id="imgSearchResults" style="margin-top:12px;"></div>
             </div>
 
             <div class="admin-stats" id="adminStats"></div>
