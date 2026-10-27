@@ -2228,15 +2228,20 @@ function apiAdminStockAlertsWaiting() {
     // (e.g. the cart button, product cards) would fire its click action
     // (openCart, openProductDetail) merely by receiving focus - on page load,
     // tab navigation or programmatic focus - repeatedly navigating the user.
-    ["click", "change", "input", "keydown", "submit"].forEach(delegate);
+    // (Delegation array is below, after all event-type comments.)
 
-    // Resource errors (img onerror) do not bubble - listen in capture phase.
-    document.addEventListener("error", function (ev) {
-        var t = ev.target;
-        if (!t || t.nodeType !== 1) return;
-        var el = owner(t, "error");
-        if (el) runPlan(el, ev, "error");
-    }, true);
+    // Resource errors (img onerror) are intentionally NOT delegated. Delegating
+    // them caused the navigation bug: any element carrying a data-act plan
+    // (e.g. product cards with openProductDetail, category cards with
+    // filterCategory) that contained a resource that failed to load (broken
+    // image, missing script) would fire its click/navigation action merely
+    // because the resource errored - during page load or catalog rendering -
+    // repeatedly navigating the user without any click. There are no
+    // data-act-error attributes anywhere in the codebase, so this delegation
+    // served no purpose and was actively harmful.
+    // (No error-event delegation. See above.)
+
+    ["click", "change", "input", "keydown", "submit"].forEach(delegate);
 
     // Exposed so innerHTML templates can emit escaped plans safely.
     global.fmActionAttr = function (name, args) {
