@@ -48,6 +48,14 @@
       "use": "@vercel/static"
     },
     {
+      "src": "local-seo.js",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "local-seo.json",
+      "use": "@vercel/static"
+    },
+    {
       "src": "subscription.js",
       "use": "@vercel/static"
     },
