@@ -1537,6 +1537,13 @@ function initAdminPage() {
 
     initDarkMode();
 
+    // Initialize Chrome desktop notifications for admins
+    if (typeof ChromeNotifications !== "undefined" && ChromeNotifications.init) {
+        ChromeNotifications.init().catch(function(err) {
+            console.warn("[admin] Chrome notifications init failed:", err);
+        });
+    }
+
     // Auto-subscribe admin to push notifications (for new order alerts).
     if (typeof PushNotifications !== "undefined" && PushNotifications.autoSubscribeIfPossible) {
         PushNotifications.autoSubscribeIfPossible();
@@ -1634,6 +1641,155 @@ if (typeof showToast === "undefined") {
     function showToast(msg, type) {
         alert(msg);
     }
+}
+
+// ===============================
+// CHROME DESKTOP NOTIFICATIONS UI
+// ===============================
+
+// Chrome notification handlers
+if (typeof ChromeNotifications !== "undefined") {
+    // Initialize notification status indicator
+    function initNotificationStatus() {
+        const indicator = document.getElementById("notificationStatusIndicator");
+        const btn = document.getElementById("notificationBtn");
+        
+        if (!indicator || !btn) return;
+        if (typeof ChromeNotifications === "undefined" || !ChromeNotifications.getNotificationStatus) return;
+        
+        // Get current notification status
+        const status = ChromeNotifications.getNotificationStatus();
+        
+        // Update indicator
+        indicator.className = "notification-status-indicator";
+        if (status.enabled) {
+            indicator.classList.add("active");
+            btn.classList.add("active");
+        } else if (status.permission === "denied") {
+            indicator.classList.add("denied");
+        } else {
+            indicator.classList.add("default");
+        }
+        
+        // Update button text
+        const icon = btn.querySelector(".notification-icon");
+        if (icon) {
+            if (status.enabled) {
+                icon.textContent = "🔔";
+            } else if (status.permission === "denied") {
+                icon.textContent = "🚫";
+            } else {
+                icon.textContent = "🔕";
+            }
+        }
+    }
+    
+    // Toggle Chrome notifications dropdown
+    function toggleNotificationDropdown() {
+        const dropdown = document.getElementById("notificationDropdown");
+        if (dropdown) {
+            if (dropdown.style.display === "none" || dropdown.style.display === "") {
+                dropdown.style.display = "block";
+            } else {
+                dropdown.style.display = "none";
+            }
+        }
+    }
+    
+    // Handle Chrome notification toggle clicks
+    document.addEventListener("click", function(e) {
+        if (e.target.closest("#notificationBtn")) {
+            e.preventDefault();
+            toggleNotificationDropdown();
+            return false;
+        }
+        
+        if (e.target.closest(".notification-option")) {
+            e.preventDefault();
+            const option = e.target.closest(".notification-option");
+            const action = option.dataset.act;
+            if (action) {
+                handleNotificationAction(action);
+            }
+            toggleNotificationDropdown();
+            return false;
+        }
+        
+        // Close dropdown when clicking outside
+        if (!e.target.closest(".notification-toggle-container")) {
+            const dropdown = document.getElementById("notificationDropdown");
+            if (dropdown && dropdown.style.display === "block") {
+                dropdown.style.display = "none";
+            }
+        }
+    });
+    
+    // Handle notification actions
+    function handleNotificationAction(action) {
+        if (typeof ChromeNotifications === "undefined") return;
+        
+        // The data-act attribute is a serialized JSON array like [["cmd",[args]]].
+        let cmd = null;
+        let args = [];
+        try {
+            const parsed = JSON.parse(action);
+            if (Array.isArray(parsed) && parsed.length && Array.isArray(parsed[0])) {
+                cmd = parsed[0][0];
+                args = parsed[0][1] || [];
+            } else if (typeof parsed === "string") {
+                cmd = parsed;
+            }
+        } catch (e) {
+            cmd = String(action).trim();
+        }
+        if (!cmd) return;
+        
+        if (cmd === "toggleChromeNotifications") {
+            // Show permission dialog if needed
+            ChromeNotifications.requestNotificationPermission().then(function(allowed) {
+                if (allowed) {
+                    // Toggle enabled state
+                    const currentStatus = ChromeNotifications.getNotificationStatus();
+                    const newEnabled = !currentStatus.enabled;
+                    const newSoundEnabled = currentStatus.soundEnabled; // Keep current sound setting
+                    
+                    ChromeNotifications.updateAdminPrefs(newEnabled, newSoundEnabled).then(function() {
+                        initNotificationStatus();
+                        showToast(newEnabled ? "Chrome notifications enabled" : "Chrome notifications disabled", "success");
+                    });
+                }
+            });
+        } else if (cmd === "setChromeNotifications") {
+            const enabled = (args[0] === true || args[0] === "true");
+            const soundEnabled = (args[1] === true || args[1] === "true");
+            
+            ChromeNotifications.updateAdminPrefs(enabled, soundEnabled).then(function() {
+                initNotificationStatus();
+                if (enabled) {
+                    showToast("Chrome notifications updated", "success");
+                }
+            });
+        } else if (cmd === "requestChromeNotificationPermission") {
+            ChromeNotifications.requestNotificationPermission().then(function(allowed) {
+                initNotificationStatus();
+                if (allowed) {
+                    showToast("Permission granted for Chrome notifications", "success");
+                } else {
+                    showToast("Permission denied. Enable in Chrome: Settings → Privacy and security → Site Settings → Notifications → allow this site", "error");
+                }
+            });
+        }
+    }
+    
+    // Watch for admin preferences changes
+    setInterval(function() {
+        if (typeof ChromeNotifications !== "undefined") {
+            initNotificationStatus();
+        }
+    }, 5000);
+    
+    // Initialize notification status on page load
+    setTimeout(initNotificationStatus, 1000);
 }
 
 // ===============================

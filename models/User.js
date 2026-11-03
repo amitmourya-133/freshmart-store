@@ -116,6 +116,11 @@ const userSchema = new mongoose.Schema(
             deliveryInstructions: { type: String, trim: true },
             isDefault: { type: Boolean, default: false }
         }],
+        // Chrome desktop notifications preferences (Phase 8)
+        chromeNotificationsEnabled: { type: Boolean, default: false },
+        chromeNotificationSound: { type: Boolean, default: true },
+        // Track when admin last checked for new orders (for polling deduplication)
+        lastOrderCheck: { type: Date, default: null },
     },
     { timestamps: true }
 );

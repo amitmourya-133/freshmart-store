@@ -40,6 +40,7 @@ const groupOrderRoutes = require("./routes/groupOrderRoutes");
 const b2bRoutes = require("./routes/b2bRoutes");
 const forecastRoutes = require("./routes/forecastRoutes");
 const autopayRoutes = require("./routes/autopayRoutes");
+const chromeNotificationRoutes = require("./routes/chromeNotificationRoutes");
 
 const app = express();
 
@@ -236,6 +237,7 @@ app.use("/api/admin", b2bRoutes.adminRouter);
 app.use("/api/admin", forecastRoutes);
 app.use("/api/autopay", autopayRoutes.router);
 app.use("/api/admin", autopayRoutes.adminRouter);
+app.use("/api/admin/chrome-notifications", chromeNotificationRoutes);
 
 // Scheduled maintenance hook for delivery offers. Serverless has no in-process
 // timer, so an external scheduler (Vercel Cron on a paid plan, or any cron
