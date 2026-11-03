@@ -5520,6 +5520,122 @@ if (!window.matchMedia("(display-mode: standalone)").matches && /iPad|iPhone|iPo
     schedulePwaBanner();
 }
 
+// ===============================
+// DATA-ACT CLICK EVENT DELEGATION
+// ===============================
+// Processes data-act attributes on click, supporting various patterns:
+// - openProductDetail(index) - open product detail page
+// - $nav navigation patterns [[ "$nav", "page.html" ]] - admin/store nav
+// - functionName(args) - call global function
+// - event.stopPropagation(); function() - stop prop + call function
+// - window.location.href='...' - direct navigation
+// - addToCart, toggleWishlist, handleLogout, etc.
+// NOTE: This must be placed BEFORE the data-act-key keydown handler below.
+document.addEventListener("click", function (e) {
+    var el = e.target.closest("[data-act]");
+    if (!el) return;
+
+    var act = el.getAttribute("data-act");
+    if (!act) return;
+
+    e.preventDefault();
+
+    // Handle serialized JSON pattern: [["$nav", "orders.html"]]
+    // or [["switchTab", ["dashboard"]]] used in admin panel
+    var jsonMatch = act.match(/^\[\[\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\]\]$/);
+    if (jsonMatch) {
+        var fnName = jsonMatch[1];
+        var argStr = jsonMatch[2];
+        var args = [];
+        // Parse inner array args (space-separated or comma-separated)
+        var inner = argStr.match(/\[(.*?)\]/);
+        if (inner) {
+            var items = inner[1].split(/},\s*\{/).join(",").split(",");
+            items.forEach(function(item) {
+                var trimmed = item.trim().replace(/^"|"$/g, "");
+                if (/^\d+$/.test(trimmed)) args.push(Number(trimmed));
+                else args.push(trimmed);
+            });
+        }
+        if (typeof window[fnName] === "function") {
+            window[fnName].apply(el, args);
+        } else {
+            // Store nav: navigate to page
+            if (fnName === "$nav") {
+                window.location.href = String(args[0] || "");
+            } else {
+                showToast("Unknown data-act function: " + fnName, "error");
+            }
+        }
+        return;
+    }
+
+    // Handle plain function call: openProductDetail(index) or addToCart(name, price, unit)
+    // or window.location.href='...' or handleLogout()
+    var simpleMatch = act.match(/^([a-zA-Z_$][a-zA-Z0-9_$]*)\((.*)\)$/);
+    if (simpleMatch) {
+        var fnName = simpleMatch[1];
+        var argText = simpleMatch[2];
+
+        // Extract arguments, handling quoted strings and numbers
+        var args = [];
+        var argArray = argText.split(",");
+        argArray.forEach(function(arg) {
+            arg = arg.trim();
+            // Remove event.stopPropagation; prefix if present
+            if (arg.indexOf("event.stopPropagation") === 0) {
+                // Continue without the stopPropagation prefix
+                arg = arg.substring(arg.indexOf(";") + 1).trim();
+                if (arg.startsWith(":")) arg = arg.substring(1).trim();
+            }
+            // Try number
+            if (/^-?\d+$/.test(arg)) {
+                args.push(Number(arg));
+            }
+            // Try unquoted string (no surrounding quotes)
+            else if (!arg.startsWith("'") && !arg.startsWith('"')) {
+                // Check if it looks like a variable/reference
+                if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(arg)) {
+                    args.push(arg);
+                } else {
+                    // Try to remove surrounding quotes that might be mismatched
+                    arg = arg.replace(/^'([^']*)'$/, "$1").replace(/^"([^"]*)"$/, "$1");
+                    if (arg) args.push(arg);
+                }
+            }
+            // It's a quoted string
+            else {
+                arg = arg.replace(/^['"](.*)['"]$/, "$1");
+                if (arg) args.push(arg);
+            }
+        });
+
+        if (typeof window[fnName] === "function") {
+            window[fnName].apply(el, args);
+        } else {
+            showToast("Unknown data-act function: " + fnName, "error");
+        }
+        return;
+    }
+
+    // Handle window.location.href='...' or just a URL
+    if (act.indexOf("window.location.href") === 0) {
+        var urlMatch = act.match(/"([^"]+)"|'([^']+)'/);
+        if (urlMatch) {
+            window.location.href = urlMatch[1] || urlMatch[2];
+        }
+        return;
+    }
+
+    // Handle bare URL (no parentheses)
+    if (act.indexOf("http") === 0 || act.indexOf("/") === 0) {
+        window.location.href = act;
+        return;
+    }
+
+    showToast("Unsupported data-act format: " + act, "error");
+});
+
 // Keyboard activation for role="button" controls that carry data-act-key
 // (Enter / Space), mirroring the behaviour the old inline onkeydown had.
 document.addEventListener("keydown", function (e) {
