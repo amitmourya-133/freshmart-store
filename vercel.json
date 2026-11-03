@@ -104,6 +104,10 @@
       "use": "@vercel/static"
     },
     {
+      "src": "chromeNotifications.js",
+      "use": "@vercel/static"
+    },
+    {
       "src": "*.svg",
       "use": "@vercel/static"
     },
