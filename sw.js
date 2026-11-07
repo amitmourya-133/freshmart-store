@@ -83,10 +83,11 @@ self.addEventListener("fetch", function (event) {
         fetch(request)
             .then(function (response) {
                 if (response && response.ok) {
-                    var copy = response.clone();
-                    caches.open(CACHE_NAME).then(function (cache) {
-                        cache.put(request, copy);
-                    });
+                    event.waitUntil(
+                        caches.open(CACHE_NAME).then(function (cache) {
+                            return cache.put(request, response.clone());
+                        })
+                    );
                 }
                 return response;
             })
