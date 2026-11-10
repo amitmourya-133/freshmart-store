@@ -427,7 +427,8 @@ function changeOrderStatus(orderId, status) {
             .then(function() {
                 showToast("Order marked as " + status, "success");
                 loadAdminOrders();
-                if (document.getElementById("orderDetailModal").style.display === "flex") openOrderDetail(orderId, true);
+                var orderDetailModal = document.getElementById("orderDetailModal");
+                if (orderDetailModal && orderDetailModal.style.display === "flex") openOrderDetail(orderId, true);
             })
             .catch(function(err) {
                 showToast(err.message || "Failed to update status", "error");
@@ -439,7 +440,8 @@ function changeOrderStatus(orderId, status) {
         .then(function() {
             showToast("Order marked as " + status, "success");
             loadAdminOrders();
-            if (document.getElementById("orderDetailModal").style.display === "flex") openOrderDetail(orderId, true);
+            var orderDetailModal = document.getElementById("orderDetailModal");
+            if (orderDetailModal && orderDetailModal.style.display === "flex") openOrderDetail(orderId, true);
         })
         .catch(function(err) {
             showToast(err.message || "Failed to update status", "error");
