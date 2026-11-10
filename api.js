@@ -2146,7 +2146,7 @@ function apiAdminStockAlertsWaiting() {
                 var t = scan(src, i, ",)");
                 if (!t) return null;
                 i = t.end;
-                var key = t.word ? t.word : null;
+                var key = t.word ? t.value : null;
                 if (key && Object.prototype.hasOwnProperty.call(SIMPLE, key)) {
                     args.push(SIMPLE[key]);
                 } else if (key && key.indexOf("this.") === 0) {
