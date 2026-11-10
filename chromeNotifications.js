@@ -53,6 +53,7 @@ const ChromeNotifications = (function () {
         try {
             const response = await fetch("/api/admin/chrome-notifications/prefs", {
                 method: "GET",
+                credentials: "same-origin",
                 headers: { "Content-Type": "application/json" }
             });
             
@@ -64,15 +65,10 @@ const ChromeNotifications = (function () {
             const data = await response.json();
             if (data.success) {
                 adminPrefs = {
-                    enabled: data.enabled || false,
-                    soundEnabled: data.soundEnabled || true,
-                    isAdmin: data.isAdmin || false
+                    enabled: Boolean(data.enabled),
+                    soundEnabled: Boolean(data.soundEnabled),
+                    isAdmin: Boolean(data.isAdmin)
                 };
-                
-                // Update notification permission based on admin prefs
-                if (adminPrefs.enabled && Notification.permission === "default") {
-                    await requestNotificationPermission();
-                }
             }
         } catch (error) {
             console.warn("[chrome-notifications] failed to load admin prefs:", error.message);
@@ -83,6 +79,7 @@ const ChromeNotifications = (function () {
         try {
             const response = await fetch("/api/admin/chrome-notifications/prefs", {
                 method: "PUT",
+                credentials: "same-origin",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     enabled: enabled,
@@ -112,20 +109,16 @@ const ChromeNotifications = (function () {
     
     async function requestNotificationPermission() {
         if (!("Notification" in window)) return false;
+        if (typeof Notification.requestPermission !== "function") return false;
         
         try {
             const permission = await Notification.requestPermission();
             notificationPermission = permission;
             
             if (permission === "granted") {
-                // Enable notifications for admin
-                if (!adminPrefs.enabled) {
-                    await updateAdminPrefs(true, adminPrefs.soundEnabled);
-                }
                 return true;
             } else if (permission === "denied") {
                 console.warn("[chrome-notifications] notification permission denied");
-                await updateAdminPrefs(false, adminPrefs.soundEnabled);
                 return false;
             }
             
@@ -137,10 +130,15 @@ const ChromeNotifications = (function () {
     }
     
     function getNotificationStatus() {
+        if ("Notification" in window) {
+            notificationPermission = Notification.permission;
+        }
+        const supported = "Notification" in window;
         return {
-            supported: "Notification" in window,
+            supported: supported,
             permission: notificationPermission,
-            enabled: adminPrefs.enabled && notificationPermission === "granted",
+            enabled: supported && adminPrefs.enabled && notificationPermission === "granted",
+            preferenceEnabled: adminPrefs.enabled,
             soundEnabled: adminPrefs.soundEnabled,
             isAdmin: adminPrefs.isAdmin
         };
@@ -151,16 +149,11 @@ const ChromeNotifications = (function () {
     // ===============================
     
     function setupPolling() {
-        if (!adminPrefs.isAdmin) {
-            return;
-        }
-        
-        // Start polling every 15 seconds (matching existing push notification patterns)
+        // Always install the 15s loop; pollForNewOrders guards on isAdmin/enabled.
+        if (pollingInterval) return;
         pollingInterval = setInterval(async () => {
             await pollForNewOrders();
         }, 15000);
-        
-        // Initial poll
         setTimeout(async () => {
             await pollForNewOrders();
         }, 1000);
@@ -177,6 +170,7 @@ const ChromeNotifications = (function () {
         try {
             const response = await fetch("/api/admin/chrome-notifications/check", {
                 method: "POST",
+                credentials: "same-origin",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({})
             });
@@ -215,22 +209,54 @@ const ChromeNotifications = (function () {
         const title = "🔔 FreshMart — New Order Received!";
         const body = "Order: #" + order.orderNumber + "\nAmount: ₹" + order.total + "\nStatus: " + order.status;
         
-        // Show Chrome desktop notification
-        const notification = new Notification(title, {
-            body: body,
-            icon: "/jacfruit.png",
-            badge: "/jacfruit.png",
-            tag: "freshmart-order-" + order._id,
-            requireInteraction: true,
-            silent: !adminPrefs.soundEnabled
-        });
+        if (!("Notification" in window) || Notification.permission !== "granted") return;
         
-        // Handle notification click
-        notification.onclick = () => {
-            window.location.href = "/admin.html";
+        const icon = "/images/Jackfruit.png";
+        
+        const showViaSW = async function () {
+            if ("serviceWorker" in navigator) {
+                try {
+                    const readyPromise = navigator.serviceWorker.ready;
+                    const timeoutPromise = new Promise(function (resolve) { setTimeout(function () { resolve(null); }, 1500); });
+                    const reg = await Promise.race([readyPromise, timeoutPromise]);
+                    if (reg && typeof reg.showNotification === "function") {
+                        await reg.showNotification(title, {
+                            body: body,
+                            icon: icon,
+                            badge: icon,
+                            tag: "freshmart-order-" + order._id,
+                            requireInteraction: true,
+                            silent: !adminPrefs.soundEnabled,
+                            data: { url: "/admin.html" }
+                        });
+                        return true;
+                    }
+                } catch (e) {
+                    console.warn("[chrome-notifications] SW showNotification failed:", e && e.message);
+                }
+            }
+            return false;
         };
         
-        // Show browser notification for testing
+        const shown = await showViaSW();
+        if (!shown) {
+            try {
+                const notification = new Notification(title, {
+                    body: body,
+                    icon: icon,
+                    badge: icon,
+                    tag: "freshmart-order-" + order._id,
+                    requireInteraction: true,
+                    silent: !adminPrefs.soundEnabled
+                });
+                notification.onclick = function () {
+                    window.location.href = "/admin.html";
+                };
+            } catch (e) {
+                console.warn("[chrome-notifications] Notification constructor failed:", e && e.message);
+            }
+        }
+        
         console.log("[chrome-notifications] new order notification:", title, body);
     }
     
@@ -239,28 +265,13 @@ const ChromeNotifications = (function () {
     // ===============================
     
     function setupNotificationClickHandler() {
-        // Handle clicks on Chrome notifications
-        if (window.AddEventListener) {
-            window.addEventListener("focus", () => {
-                // Admin tab is active, update last checked
-                if (adminPrefs.isAdmin) {
-                    updateLastChecked();
-                }
-            });
-        }
+        // Click handling is done via the service worker notificationclick
+        // event for SW-based notifications and via notification.onclick for
+        // the direct Notification constructor. Nothing to register here.
     }
     
-    async function updateLastChecked() {
-        try {
-            await fetch("/api/admin/chrome-notifications/check", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({})
-            });
-        } catch (error) {
-            console.warn("[chrome-notifications] failed to update last checked:", error.message);
-        }
-    }
+    // (updateLastChecked removed: it advanced the polling baseline on focus
+    //  without surfacing orders, causing missed notifications.)
     
     // ===============================
     // PUBLIC API
@@ -290,8 +301,8 @@ const ChromeNotifications = (function () {
         
         const notification = new Notification(title, {
             body: body,
-            icon: "/jacfruit.png",
-            badge: "/jacfruit.png",
+            icon: "/images/Jackfruit.png",
+            badge: "/images/Jackfruit.png",
             tag: "freshmart-test-" + Date.now(),
             requireInteraction: true,
             silent: !adminPrefs.soundEnabled

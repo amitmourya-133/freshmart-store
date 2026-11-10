@@ -496,7 +496,7 @@ function fetchAdminOverview() {
         })
         .then(function(data) {
             if (!data.success) throw new Error(data.message || "Failed");
-            return data;
+            return data.data;
         });
 }
 

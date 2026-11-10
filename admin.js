@@ -141,24 +141,28 @@ function loadAdminOrders() {
 function loadAdminOverview() {
     var box = document.getElementById("adminOverview");
     if (!box) return;
+    box.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:20px;">Loading overview...</p>';
     fetchAdminOverview().then(function(m) {
+        m = m || {};
+        var num = function(v) { return (v == null || isNaN(v)) ? 0 : v; };
         var cards = [
-            { label: "Total Orders", value: m.totalOrders },
-            { label: "Pending Orders", value: m.pendingOrders },
-            { label: "Processing", value: m.preparingOrders },
-            { label: "Delivered", value: m.deliveredOrders },
-            { label: "Cancelled", value: m.cancelledOrders },
-            { label: "Paid (Payment)", value: m.paidOrders },
-            { label: "Total Sales", value: "&#8377;" + m.totalSales },
-            { label: "Low Stock (&le;" + m.lowStockThreshold + ")", value: m.lowStockProducts, warn: m.lowStockProducts > 0 },
-            { label: "Products", value: m.totalProducts },
-            { label: "Customers", value: m.totalCustomers }
+            { label: "Total Orders", value: num(m.totalOrders) },
+            { label: "Pending Orders", value: num(m.pendingOrders) },
+            { label: "Processing", value: num(m.preparingOrders) },
+            { label: "Delivered", value: num(m.deliveredOrders) },
+            { label: "Cancelled", value: num(m.cancelledOrders) },
+            { label: "Paid (Payment)", value: num(m.paidOrders) },
+            { label: "Total Sales", value: "&#8377;" + num(m.totalSales) },
+            { label: "Low Stock (&le;" + num(m.lowStockThreshold || 20) + ")", value: num(m.lowStockProducts), warn: num(m.lowStockProducts) > 0 },
+            { label: "Products", value: num(m.totalProducts) },
+            { label: "Customers", value: num(m.totalCustomers) }
         ];
         box.innerHTML = cards.map(function(c) {
             return '<div class="admin-stat' + (c.warn ? " stat-warn" : "") + '"><strong>' + c.value + '</strong><span>' + c.label + '</span></div>';
         }).join("");
-    }).catch(function() {
-        box.innerHTML = "";
+    }).catch(function(err) {
+        box.innerHTML = '<p style="text-align:center;color:#e74c3c;padding:20px;">' +
+            esc((err && err.message) || "Failed to load overview") + '</p>';
     });
 }
 
@@ -178,6 +182,7 @@ function loadAdminDashboard() {
     Promise.all([overviewP, dashP]).then(function(results) {
         var m = results[0] || {};
         var d = results[1] || {};
+        var num = function(v) { return (v == null || isNaN(v)) ? 0 : v; };
 
         var cards = [];
         function card(label, value, warn) {
@@ -185,28 +190,28 @@ function loadAdminDashboard() {
         }
 
         if (d && d.today && typeof d.today === "object") {
-            card("Today's Sales", "₹" + (d.today.sales || 0).toLocaleString("en-IN"));
-            card("Today's Orders", d.today.orders || 0);
-            card("Pending Orders", d.pendingOrders, (d.pendingOrders || 0) > 0);
-            card("Delivered Orders", d.deliveredOrders);
-            card("Total Sales", "₹" + (d.totalSales || 0).toLocaleString("en-IN"));
-            card("Total Orders", d.totalOrders);
-            card("Total Products", m.totalProducts != null ? m.totalProducts : (d.totalOrders !== undefined ? "" : ""));
-            card("Total Customers", m.totalCustomers != null ? m.totalCustomers : "");
-            card("Cancelled Orders", d.cancelledOrders);
+            card("Today's Sales", "₹" + num(d.today.sales).toLocaleString("en-IN"));
+            card("Today's Orders", num(d.today.orders));
+            card("Pending Orders", num(d.pendingOrders), num(d.pendingOrders) > 0);
+            card("Delivered Orders", num(d.deliveredOrders));
+            card("Total Sales", "₹" + num(d.totalSales).toLocaleString("en-IN"));
+            card("Total Orders", num(d.totalOrders));
+            card("Total Products", m.totalProducts != null ? m.totalProducts : num(d.totalProducts));
+            card("Total Customers", m.totalCustomers != null ? m.totalCustomers : num(d.totalCustomers));
+            card("Cancelled Orders", num(d.cancelledOrders));
         } else {
             // Backwards-compatible overview grid (old endpoint only).
-            card("Total Products", m.totalProducts);
-            card("Total Customers", m.totalCustomers);
-            card("Total Orders", m.totalOrders);
-            card("Pending Orders", m.pendingOrders);
-            card("Processing Orders", m.preparingOrders);
-            card("Delivered Orders", m.deliveredOrders);
-            card("Total Sales", "₹" + (m.totalSales || 0));
-            card("Cancelled", m.cancelledOrders);
-            card("Paid (Payment)", m.paidOrders);
-            card("Low Stock (≤" + m.lowStockThreshold + ")", m.lowStockProducts, m.lowStockProducts > 0);
-            card("Out of Stock", m.outOfStockProducts, m.outOfStockProducts > 0);
+            card("Total Products", num(m.totalProducts));
+            card("Total Customers", num(m.totalCustomers));
+            card("Total Orders", num(m.totalOrders));
+            card("Pending Orders", num(m.pendingOrders));
+            card("Processing Orders", num(m.preparingOrders));
+            card("Delivered Orders", num(m.deliveredOrders));
+            card("Total Sales", "₹" + num(m.totalSales));
+            card("Cancelled", num(m.cancelledOrders));
+            card("Paid (Payment)", num(m.paidOrders));
+            card("Low Stock (≤" + num(m.lowStockThreshold || 20) + ")", num(m.lowStockProducts), num(m.lowStockProducts) > 0);
+            card("Out of Stock", num(m.outOfStockProducts), num(m.outOfStockProducts) > 0);
         }
 
         var statsHtml = cards.map(function(c) {
@@ -222,7 +227,7 @@ function loadAdminDashboard() {
         }
     }).catch(function(err) {
         box.innerHTML = '<p style="text-align:center;color:#e74c3c;padding:20px;">' +
-            esc(err.message || "Failed to load dashboard") + '</p>';
+            esc((err && err.message) || "Failed to load dashboard") + '</p>';
     });
 }
 
@@ -256,8 +261,8 @@ function renderDashboardDetails(d) {
                 '<div class="dash-today-nums">' +
                     '<div class="dash-num"><strong>₹' + (d.today ? (d.today.sales || 0).toLocaleString("en-IN") : 0) + '</strong><span>Sales</span></div>' +
                     '<div class="dash-num"><strong>' + (d.today ? d.today.orders : 0) + '</strong><span>Orders</span></div>' +
-                    '<div class="dash-num"><strong>' + d.pendingOrders + '</strong><span>Pending</span></div>' +
-                    '<div class="dash-num"><strong>' + d.deliveredOrders + '</strong><span>Delivered</span></div>' +
+                    '<div class="dash-num"><strong>' + (d.pendingOrders || 0) + '</strong><span>Pending</span></div>' +
+                    '<div class="dash-num"><strong>' + (d.deliveredOrders || 0) + '</strong><span>Delivered</span></div>' +
                 '</div>' +
             '</div>' +
             '<div class="dash-block">' +
@@ -1537,12 +1542,10 @@ function initAdminPage() {
 
     initDarkMode();
 
-    // Initialize Chrome desktop notifications for admins
-    if (typeof ChromeNotifications !== "undefined" && ChromeNotifications.init) {
-        ChromeNotifications.init().catch(function(err) {
-            console.warn("[admin] Chrome notifications init failed:", err);
-        });
-    }
+    // ChromeNotifications self-initializes from chromeNotifications.js on
+    // DOMContentLoaded. Calling init() again here raced that call: both passed
+    // the `initialized` check before either finished, registering duplicate
+    // prefs fetches and polling timers. Initialize it in exactly one place.
 
     // Auto-subscribe admin to push notifications (for new order alerts).
     if (typeof PushNotifications !== "undefined" && PushNotifications.autoSubscribeIfPossible) {
@@ -1662,6 +1665,7 @@ if (typeof ChromeNotifications !== "undefined") {
         
         // Update indicator
         indicator.className = "notification-status-indicator";
+        btn.classList.remove("active");
         if (status.enabled) {
             indicator.classList.add("active");
             btn.classList.add("active");
@@ -1678,10 +1682,17 @@ if (typeof ChromeNotifications !== "undefined") {
                 icon.textContent = "🔔";
             } else if (status.permission === "denied") {
                 icon.textContent = "🚫";
+            } else if (!status.supported) {
+                icon.textContent = "⛔";
             } else {
                 icon.textContent = "🔕";
             }
         }
+        btn.title = status.enabled
+            ? "Order notifications enabled"
+            : (status.permission === "denied"
+                ? "Notifications blocked by browser. Enable in Chrome site settings."
+                : (status.supported ? "Notifications not enabled. Click to enable." : "Notifications not supported in this browser."));
     }
     
     // Toggle Chrome notifications dropdown
@@ -1696,31 +1707,17 @@ if (typeof ChromeNotifications !== "undefined") {
         }
     }
     
-    // Handle Chrome notification toggle clicks
+    function closeNotificationDropdown() {
+        const dropdown = document.getElementById("notificationDropdown");
+        if (dropdown) dropdown.style.display = "none";
+    }
+    
+    // Close dropdown when clicking outside. The bell and the preference rows
+    // carry data-act plans that api.js executes, so they are not re-bound here
+    // (doing so ran every action twice).
     document.addEventListener("click", function(e) {
-        if (e.target.closest("#notificationBtn")) {
-            e.preventDefault();
-            toggleNotificationDropdown();
-            return false;
-        }
-        
-        if (e.target.closest(".notification-option")) {
-            e.preventDefault();
-            const option = e.target.closest(".notification-option");
-            const action = option.dataset.act;
-            if (action) {
-                handleNotificationAction(action);
-            }
-            toggleNotificationDropdown();
-            return false;
-        }
-        
-        // Close dropdown when clicking outside
         if (!e.target.closest(".notification-toggle-container")) {
-            const dropdown = document.getElementById("notificationDropdown");
-            if (dropdown && dropdown.style.display === "block") {
-                dropdown.style.display = "none";
-            }
+            closeNotificationDropdown();
         }
     });
     
@@ -1745,41 +1742,74 @@ if (typeof ChromeNotifications !== "undefined") {
         if (!cmd) return;
         
         if (cmd === "toggleChromeNotifications") {
-            // Show permission dialog if needed
-            ChromeNotifications.requestNotificationPermission().then(function(allowed) {
-                if (allowed) {
-                    // Toggle enabled state
-                    const currentStatus = ChromeNotifications.getNotificationStatus();
-                    const newEnabled = !currentStatus.enabled;
-                    const newSoundEnabled = currentStatus.soundEnabled; // Keep current sound setting
-                    
-                    ChromeNotifications.updateAdminPrefs(newEnabled, newSoundEnabled).then(function() {
-                        initNotificationStatus();
-                        showToast(newEnabled ? "Chrome notifications enabled" : "Chrome notifications disabled", "success");
-                    });
-                }
-            });
+            toggleNotificationDropdown();
+            initNotificationStatus();
         } else if (cmd === "setChromeNotifications") {
             const enabled = (args[0] === true || args[0] === "true");
             const soundEnabled = (args[1] === true || args[1] === "true");
             
-            ChromeNotifications.updateAdminPrefs(enabled, soundEnabled).then(function() {
-                initNotificationStatus();
-                if (enabled) {
-                    showToast("Chrome notifications updated", "success");
+            var applyPrefs = function (finalEnabled) {
+                ChromeNotifications.updateAdminPrefs(finalEnabled, soundEnabled).then(function(ok) {
+                    initNotificationStatus();
+                    if (finalEnabled) {
+                        showToast(ok ? "Chrome notifications enabled" : "Chrome notifications could not be saved", ok ? "success" : "error");
+                    } else {
+                        if (ok) showToast("Chrome notifications disabled", "success");
+                    }
+                });
+            };
+            
+            if (enabled) {
+                const st = ChromeNotifications.getNotificationStatus();
+                if (st.permission === "granted") {
+                    applyPrefs(true);
+                } else if (st.permission === "default") {
+                    ChromeNotifications.requestNotificationPermission().then(function(allowed) {
+                        applyPrefs(!!allowed);
+                        if (!allowed) {
+                            showToast("Permission denied. Enable in Chrome: Settings → Privacy and security → Site Settings → Notifications → allow this site", "error");
+                        }
+                    });
+                } else {
+                    applyPrefs(false);
+                    showToast("Notifications blocked by browser. Enable in Chrome site settings.", "error");
                 }
-            });
+            } else {
+                applyPrefs(false);
+            }
         } else if (cmd === "requestChromeNotificationPermission") {
             ChromeNotifications.requestNotificationPermission().then(function(allowed) {
                 initNotificationStatus();
                 if (allowed) {
-                    showToast("Permission granted for Chrome notifications", "success");
+                    ChromeNotifications.updateAdminPrefs(true, ChromeNotifications.getNotificationStatus().soundEnabled || true).then(function() {
+                        initNotificationStatus();
+                        showToast("Permission granted. Chrome notifications enabled.", "success");
+                    });
                 } else {
+                    ChromeNotifications.updateAdminPrefs(false, ChromeNotifications.getNotificationStatus().soundEnabled || true);
+                    initNotificationStatus();
                     showToast("Permission denied. Enable in Chrome: Settings → Privacy and security → Site Settings → Notifications → allow this site", "error");
                 }
             });
         }
     }
+    
+    // api.js resolves every data-act step by global name. Expose the three
+    // notification commands exactly once so the plan is the only dispatcher;
+    // there is no second click binding and no duplicate execution.
+    window.toggleChromeNotifications = function() {
+        toggleNotificationDropdown();
+    };
+    
+    window.setChromeNotifications = function(enabled, soundEnabled) {
+        handleNotificationAction(JSON.stringify([["setChromeNotifications", [enabled, soundEnabled]]]));
+        closeNotificationDropdown();
+    };
+    
+    window.requestChromeNotificationPermission = function() {
+        handleNotificationAction(JSON.stringify([["requestChromeNotificationPermission", []]]));
+        closeNotificationDropdown();
+    };
     
     // Watch for admin preferences changes
     setInterval(function() {

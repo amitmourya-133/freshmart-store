@@ -29,8 +29,8 @@ async function sendChromeNotification(userId, title, body, data = {}) {
         // Create the notification
         const notificationOptions = {
             body: body,
-            icon: "/jacfruit.png", // Use existing FreshMart logo
-            badge: "/jacfruit.png",
+            icon: "/images/Jackfruit.png", // Use existing FreshMart logo
+            badge: "/images/Jackfruit.png",
             tag: `freshmart-order-${data.orderId || Date.now()}`, // Prevent duplicates
             data: {
                 orderId: data.orderId,
