@@ -5538,6 +5538,23 @@ document.addEventListener("click", function (e) {
     var act = el.getAttribute("data-act");
     if (!act) return;
 
+    // api.js owns serialized JSON action plans and the declared-spec forms it
+    // tokenizes: fn(...), event.stopPropagation(); fn(...), window.location.href
+    // and bare names. Its delegated click listener is registered before this
+    // one on every page, so those plans have already run by now. Skip them here
+    // to avoid duplicate execution and a false "Unsupported data-act format"
+    // toast (for example Add To Cart). Bare URLs keep the legacy fallback below.
+    var plan = act.trim();
+    var apiOwnsPlans = typeof window.fmActionAttr === "function";
+    if (plan.charAt(0) === "[") return;
+    if (apiOwnsPlans &&
+        (/^[A-Za-z_$][\w$]*\s*\(/.test(plan) ||
+         /^event\.(preventDefault|stopPropagation)\s*\(/.test(plan) ||
+         plan.indexOf("window.location.href") === 0 ||
+         /^[A-Za-z_$][\w$]*$/.test(plan))) {
+        return;
+    }
+
     e.preventDefault();
 
     // Handle serialized JSON pattern: [["$nav", "orders.html"]]
