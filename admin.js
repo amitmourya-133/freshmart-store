@@ -535,6 +535,27 @@ function closeOrderDetail() {
     document.getElementById("orderDetailModal").style.display = "none";
 }
 
+// Close the new-order popup (safe: no-op if the element is missing).
+function closeNewOrderPopup() {
+    var popup = document.getElementById("newOrderPopup");
+    if (popup) popup.style.display = "none";
+}
+
+// View Order from the new-order popup. Reads the order ID shown in the popup,
+// validates it, and delegates to the existing openOrderDetail() handler.
+// Does not duplicate any order-detail logic.
+function openOrderDetails() {
+    var idEl = document.getElementById("popupOrderId");
+    var orderId = idEl ? String(idEl.textContent || "").trim() : "";
+    // Reject empty, placeholder or obviously invalid IDs.
+    if (!orderId || orderId === "—" || orderId === "-" || orderId === "N/A") {
+        showToast("No valid order ID available", "error");
+        return;
+    }
+    // Delegate to the existing handler which fetches and renders the order.
+    openOrderDetail(orderId);
+}
+
 // Status select change handler – process data-act attribute
 document.addEventListener("change", function(e) {
     var el = e.target.closest(".status-select");
