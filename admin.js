@@ -535,6 +535,21 @@ function closeOrderDetail() {
     document.getElementById("orderDetailModal").style.display = "none";
 }
 
+// Status select change handler – process data-act attribute
+document.addEventListener("change", function(e) {
+    var el = e.target.closest(".status-select");
+    if (!el) return;
+    var act = el.getAttribute("data-act");
+    if (!act) return;
+    // Handle function call format: changeOrderStatus('orderId', thisValue)
+    var simpleMatch = act.match(/^changeOrderStatus\((['\"])([^'\"]+)\1,\s*this\.value\)$/);
+    if (simpleMatch) {
+        var orderId = simpleMatch[2];
+        var status = el.value;
+        changeOrderStatus(orderId, status);
+    }
+});
+
 // ===============================
 // DELIVERY / LOCATION VIEW (admin)
 // ===============================
