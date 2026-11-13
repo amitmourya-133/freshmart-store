@@ -20,51 +20,51 @@
         </div>
 
         <div class="admin-tabs">
-            <button class="admin-tab" data-act="[["switchTab",["dashboard"]]]">Dashboard</button>
-            <button class="admin-tab" data-act="[["switchTab",["orders"]]]">📦 Orders</button>
-            <button class="admin-tab" data-act="[["switchTab",["analytics"]]]">📊 Analytics</button>
-            <button class="admin-tab" data-act="[["switchTab",["products"]]]">🥬 Products</button>
-            <button class="admin-tab" data-act="[["switchTab",["customers"]]]">👥 Customers</button>
-            <button class="admin-tab" data-act="[["switchTab",["reviews"]]]">⭐ Reviews</button>
-            <button class="admin-tab" data-act="[["switchTab",["coupons"]]]">🎟️ Coupons</button>
-            <button class="admin-tab" data-act="[["switchTab",["returns"]]]">📦 Returns</button>
-            <button class="admin-tab" data-act="[["switchTab",["delivery"]]]">🚚 Delivery</button>
-            <button class="admin-tab" data-act="[["switchTab",["settings"]]]">⚙️ Settings</button>
+            <button class="admin-tab" data-act="[[&quot;switchTab&quot;,[&quot;dashboard&quot;]]]">Dashboard</button>
+            <button class="admin-tab" data-act="[[&quot;switchTab&quot;,[&quot;orders&quot;]]]">📦 Orders</button>
+            <button class="admin-tab" data-act="[[&quot;switchTab&quot;,[&quot;analytics&quot;]]]">📊 Analytics</button>
+            <button class="admin-tab" data-act="[[&quot;switchTab&quot;,[&quot;products&quot;]]]">🥬 Products</button>
+            <button class="admin-tab" data-act="[[&quot;switchTab&quot;,[&quot;customers&quot;]]]">👥 Customers</button>
+            <button class="admin-tab" data-act="[[&quot;switchTab&quot;,[&quot;reviews&quot;]]]">⭐ Reviews</button>
+            <button class="admin-tab" data-act="[[&quot;switchTab&quot;,[&quot;coupons&quot;]]]">🎟️ Coupons</button>
+            <button class="admin-tab" data-act="[[&quot;switchTab&quot;,[&quot;returns&quot;]]]">📦 Returns</button>
+            <button class="admin-tab" data-act="[[&quot;switchTab&quot;,[&quot;delivery&quot;]]]">🚚 Delivery</button>
+            <button class="admin-tab" data-act="[[&quot;switchTab&quot;,[&quot;settings&quot;]]]">⚙️ Settings</button>
         </div>
 
         <div class="admin-tabs-actions">
-            <button type="button" class="secondary-btn" data-act="[["$nav","index.html"]]" title="Back to Store">← Store</button>
-            <button type="button" class="dark-mode-toggle" id="darkModeToggle" data-act="[["toggleDarkMode",[]]]]">🌙</button>
+            <button type="button" class="secondary-btn" data-act="[[&quot;$nav&quot;,&quot;index.html&quot;]]" title="Back to Store">← Store</button>
+            <button type="button" class="dark-mode-toggle" id="darkModeToggle" data-act="[[&quot;toggleDarkMode&quot;,[]]]">🌙</button>
             <!-- Chrome Desktop Notifications Control -->
             <div id="chromeNotificationToggle" class="notification-toggle-container" title="Chrome Desktop Notifications">
                 <div class="notification-status-indicator" id="notificationStatusIndicator"></div>
                 <div class="notification-controls">
-                    <button type="button" class="notification-btn" id="notificationBtn" data-act="[["toggleChromeNotifications",[]]]]">
+                    <button type="button" class="notification-btn" id="notificationBtn" data-act="[[&quot;toggleChromeNotifications&quot;,[]]]">
                         <span class="notification-icon">🔔</span>
                         <span class="notification-label">Order Notifications</span>
                     </button>
                     <div class="notification-dropdown" id="notificationDropdown" style="display:none;">
-                        <div class="notification-option" data-act="[["setChromeNotifications",[true,true]]]">
+                        <div class="notification-option" data-act="[[&quot;setChromeNotifications&quot;,[true,true]]]">
                             <span class="notification-radio"></span>
                             <span>Enabled with sound</span>
                         </div>
-                        <div class="notification-option" data-act="[["setChromeNotifications",[true,false]]]">
+                        <div class="notification-option" data-act="[[&quot;setChromeNotifications&quot;,[true,false]]]">
                             <span class="notification-radio"></span>
                             <span>Enabled without sound</span>
                         </div>
-                        <div class="notification-option" data-act="[["setChromeNotifications",[false,false]]]">
+                        <div class="notification-option" data-act="[[&quot;setChromeNotifications&quot;,[false,false]]]">
                             <span class="notification-radio"></span>
                             <span>Disabled</span>
                         </div>
                         <div class="notification-separator"></div>
-                        <div class="notification-option" data-act="[["requestChromeNotificationPermission",[]]]]">
+                        <div class="notification-option" data-act="[[&quot;requestChromeNotificationPermission&quot;,[]]]">
                             <span class="notification-icon">🔓</span>
                             <span>Request Permission</span>
                         </div>
                     </div>
                 </div>
             </div>
-            <button type="button" class="cart-btn logout-btn" data-act="[["adminLogout",[]]]" title="Log Out">Logout</button>
+            <button type="button" class="cart-btn logout-btn" data-act="[[&quot;adminLogout&quot;,[]]]" title="Log Out">Logout</button>
         </div>
 
         <div id="adminDashboardSection" class="admin-section">
@@ -90,8 +90,8 @@
             </div>
 
             <div class="admin-filters">
-                <input type="text" id="adminOrderSearch" class="admin-search" placeholder="Search order no / tracking / customer / phone..." data-act="[["loadAdminOrders",[]]]">
-                <select id="adminOrderStatus" class="status-select" data-act="[["loadAdminOrders",[]]]">
+                <input type="text" id="adminOrderSearch" class="admin-search" placeholder="Search order no / tracking / customer / phone..." data-act="[[&quot;loadAdminOrders&quot;,[]]]">
+                <select id="adminOrderStatus" class="status-select" data-act="[[&quot;loadAdminOrders&quot;,[]]]">
                     <option value="">All statuses</option>
                     <option>Placed</option>
                     <option>Confirmed</option>
@@ -100,7 +100,7 @@
                     <option>Delivered</option>
                     <option>Cancelled</option>
                 </select>
-                <select id="adminOrderPayment" class="status-select" data-act="[["loadAdminOrders",[]]]">
+                <select id="adminOrderPayment" class="status-select" data-act="[[&quot;loadAdminOrders&quot;,[]]]">
                     <option value="">All payments</option>
                     <option value="PENDING">Payment Pending</option>
                     <option value="PAID">Paid</option>
@@ -121,19 +121,20 @@
 
             <div class="admin-section-head">
                 <h2>Products & Stock</h2>
-                <button class="add-product-btn" data-act="[["openAddProduct",[]]]">+ Add Product</button>
-                <button type="button" class="add-product-btn" id="bulkImportToggleBtn" data-act="[["toggleBulkImport",[]]]">Bulk Import CSV</button>
+                <button class="add-product-btn" data-act="[[&quot;openAddProduct&quot;,[]]]">+ Add Product</button>
+                <button type="button" class="add-product-btn" id="bulkImportToggleBtn" data-act="[[&quot;toggleBulkImport&quot;,[]]]">Bulk Import CSV</button>
             </div>
 
             <div id="bulkImportPanel" style="display:none;margin:16px 0;padding:16px;border:1px solid var(--border,#ddd);border-radius:8px;background:var(--card-bg,#fafafa);">
                 <h3>Bulk Product Import</h3>
                 <p style="font-size:13px;color:var(--text-secondary,#666);">Download the template, fill rows, then upload. Add-only: existing products are never overwritten.</p>
                 <div style="margin:8px 0;">
-                    <button type="button" class="add-product-btn" data-act="[["downloadImportTemplate",[]]]">Download CSV Template</button>
-                    <button type="button" class="add-product-btn" data-act="[["downloadAllowedVariants",[]]]">Download Allowed Variants</button>
+                    <button type="button" class="add-product-btn" data-act="[[&quot;downloadImportTemplate&quot;,[]]]">Download CSV Template</button>
+                    <button type="button" class="add-product-btn" data-act="[[&quot;downloadAllowedValues&quot;,[]]]">Download Allowed Variants</button>
                 </div>
                 <div style="margin:8px 0;">
-                    <button type="button" class="add-product-btn" data-act="[["previewBulkCsv",[]]]">Preview & Validate</button>
+                    <input type="file" id="bulkCsvFile" accept=".csv,text/csv" />
+                    <button type="button" class="add-product-btn" data-act="[[&quot;previewBulkCsv&quot;,[]]]">Preview & Validate</button>
                 </div>
                 <div id="bulkPreview" style="margin-top:12px;"></div>
                 <div id="bulkResult" style="margin-top:12px;"></div>
@@ -144,23 +145,23 @@
                 <p style="font-size:13px;color:var(--text-secondary,#666);">Search approved image sources (Wikimedia Commons) by product name. Select a candidate to download safely into the project image folder.</p>
                 <div style="margin:8px 0;display:flex;gap:8px;flex-wrap:wrap;">
                     <input type="text" id="imgSearchQuery" placeholder="Product name (e.g. Potato / आलू)" style="flex:1;min-width:200px;padding:6px;" />
-                    <button type="button" class="add-product-btn" data-act="[["searchProductImages",[]]]">Search Images</button>
+                    <button type="button" class="add-product-btn" data-act="[[&quot;searchProductImages&quot;,[]]]">Search Images</button>
                 </div>
                 <div id="imgSearchResults" style="margin-top:12px;"></div>
             </div>
 
             <div class="admin-stats" id="adminStats"></div>
 
-            <input type="text" id="adminProductSearch" class="admin-search" placeholder="Search products..." data-act="[["renderProducts",[]]]">
+            <input type="text" id="adminProductSearch" class="admin-search" placeholder="Search products..." data-act="[[&quot;renderProducts&quot;,[]]]">
 
             <div class="admin-filters">
-                <select id="adminProductCategory" class="status-select" data-act="[["renderProducts",[]]]">
+                <select id="adminProductCategory" class="status-select" data-act="[[&quot;renderProducts&quot;,[]]]">
                     <option value="">All categories</option>
                     <option>Vegetables</option>
                     <option>Fruits</option>
                     <option>Grocery</option>
                 </select>
-                <select id="adminProductSort" class="status-select" data-act="[["renderProducts",[]]]">
+                <select id="adminProductSort" class="status-select" data-act="[[&quot;renderProducts&quot;,[]]]">
                     <option value="default">Default</option>
                     <option value="price-asc">Price: Low to High</option>
                     <option value="price-desc">Price: High to High</option>
@@ -182,7 +183,7 @@
                 <h2>Registered Customers</h2>
             </div>
 
-            <input type="text" id="adminCustomerSearch" class="admin-search" placeholder="Search customers (name / email / phone)..." data-act="[["loadAdminCustomers",[]]]">
+            <input type="text" id="adminCustomerSearch" class="admin-search" placeholder="Search customers (name / email / phone)..." data-act="[[&quot;loadAdminCustomers&quot;,[]]]">
 
             <div id="adminCustomersList" class="admin-list">
                 <p style="text-align:center;color:var(--text-secondary);padding:40px;">Loading customers...</p>
@@ -195,19 +196,57 @@
             <div class="admin-section-head">
                 <h2>Growth & Analytics</h2>
                 <div class="admin-filters" style="justify-content:flex-end;">
-                    <select id="analyticsRange" class="status-select" data-act="[["loadAdminAnalytics",[]]]">
+                    <select id="analyticsRange" class="status-select" data-act="[[&quot;loadAdminAnalytics&quot;,[]]]">
                         <option value="today">Today</option>
                         <option value="7d" selected>Last 7 days</option>
                         <option value="30d">Last 30 days</option>
                         <option value="90d">Last 90 days</option>
                     </select>
-                    <button type="button" class="secondary-btn" data-act="[["loadAdminAnalytics",[]]]">Refresh</button>
+                    <button type="button" class="secondary-btn" data-act="[[&quot;loadAdminAnalytics&quot;,[]]]">Refresh</button>
                 </div>
             </div>
 
             <div class="admin-stats" id="analyticsKpis">
                 <p style="text-align:center;color:var(--text-secondary);padding:20px;">Loading analytics...</p>
             </div>
+
+            <div class="admin-section-head" style="margin-top:28px;">
+                <h3 style="margin:0;">Customer actions</h3>
+            </div>
+            <div class="ops-table-wrap" style="margin-top:12px;">
+                <table class="ops-table">
+                    <thead><tr><th>Event</th><th>Count</th></tr></thead>
+                    <tbody id="analyticsEventRows">
+                        <tr><td colspan="2" style="text-align:center;color:var(--text-secondary);">No data yet.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="admin-section-head" style="margin-top:28px;">
+                <h3 style="margin:0;">Top products by units ordered</h3>
+            </div>
+            <div class="ops-table-wrap" style="margin-top:12px;">
+                <table class="ops-table">
+                    <thead><tr><th>#</th><th>Product</th><th>Units</th><th>Revenue</th></tr></thead>
+                    <tbody id="analyticsTopProducts">
+                        <tr><td colspan="4" style="text-align:center;color:var(--text-secondary);">No delivered orders in this range.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="admin-section-head" style="margin-top:28px;">
+                <h3 style="margin:0;">Most viewed products</h3>
+            </div>
+            <div class="ops-table-wrap" style="margin-top:12px;">
+                <table class="ops-table">
+                    <thead><tr><th>#</th><th>Product</th><th>Views</th></tr></thead>
+                    <tbody id="analyticsTopViews">
+                        <tr><td colspan="3" style="text-align:center;color:var(--text-secondary);">No product views in this range.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="admin-stats" id="analyticsExtra" style="margin-top:28px;"></div>
 
         </div>
 
@@ -216,7 +255,7 @@
             <div class="new-order-popup-content">
                 <div class="new-order-popup-header">
                     <span class="new-order-popup-title">🔔 New Order Received</span>
-                    <button class="new-order-popup-close" data-act="[["closeNewOrderPopup",[]]]">✕</button>
+                    <button class="new-order-popup-close" data-act="[[&quot;closeNewOrderPopup&quot;,[]]]">✕</button>
                 </div>
                 <div class="new-order-popup-body">
                     <p class="new-order-popup-order-id">Order ID: <span id="popupOrderId">—</span></p>
@@ -230,22 +269,246 @@
                     <p class="new-order-popup-timestamp" id="popupTimestamp">—</p>
                 </div>
                 <div class="new-order-popup-actions">
-                    <button class="primary-btn" data-act="[["openOrderDetails",[]]]">View Order</button>
-                    <button class="secondary-btn" data-act="[["closeNewOrderPopup",[]]]">Dismiss</button>
+                    <button class="primary-btn" data-act="[[&quot;openOrderDetails&quot;,[]]]">View Order</button>
+                    <button class="secondary-btn" data-act="[[&quot;closeNewOrderPopup&quot;,[]]]">Dismiss</button>
                 </div>
             </div>
         </div>
         <!-- END NEW-ORDER POPUP -->
 
+    <!-- Order Detail Modal -->
+    <div id="orderDetailModal" class="admin-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="orderDetailTitle">
+        <div class="admin-modal-box admin-modal-wide">
+            <div class="admin-modal-head">
+                <h3 id="orderDetailTitle">Order Details</h3>
+                <button class="modal-close" data-act="[[&quot;closeOrderDetail&quot;,[]]]">✕</button>
+            </div>
+            <div id="orderDetailBody"></div>
+        </div>
+    </div>
+
+
+    <!-- Add/Edit Product Modal -->
+    <div id="productModal" class="admin-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="productModalTitle">
+        <div class="admin-modal-box">
+            <div class="admin-modal-head">
+                <h3 id="productModalTitle">Add Product</h3>
+                <button class="modal-close" data-act="[[&quot;closeProductModal&quot;,[]]]">✕</button>
+            </div>
+
+            <form id="productForm" data-act="[[&quot;saveProduct&quot;,[&quot;$e&quot;]]]">
+
+                <input type="hidden" id="pfId">
+
+                <label>Product Name</label>
+                <input type="text" id="pfName" required>
+
+                <label>Category</label>
+                <select id="pfCategory">
+                    <option>Vegetables</option>
+                    <option>Fruits</option>
+                    <option>Grocery</option>
+                </select>
+
+                <label>Price (₹)</label>
+                <input type="number" id="pfPrice" min="0" step="0.01" required>
+
+                <label>Unit</label>
+                <input type="text" id="pfUnit" placeholder="kg / piece / dozen / pack">
+
+                <label>Emoji</label>
+                <input type="text" id="pfEmoji" placeholder="🥕">
+
+                <label>Gradient CSS</label>
+                <input type="text" id="pfGradient" placeholder="linear-gradient(135deg, #ff6b6b, #ee5a24)">
+
+                <label>Origin</label>
+                <input type="text" id="pfOrigin">
+
+                <label>Stock</label>
+                <input type="number" id="pfStock" min="0" required>
+
+                <label>Variants (optional — e.g. 250g / 500g / 1kg)</label>
+                <div id="pfVariantsList" class="admin-variants-list"></div>
+                <button type="button" class="modal-cancel admin-variant-add" data-act="[[&quot;addVariantRow&quot;,[]]]" style="margin:6px 0 0 0;border:1px dashed var(--border-color);background:transparent;color:var(--green-primary);width:100%;">+ Add Variant</button>
+
+                <label>Rating (0–5)</label>
+                <input type="number" id="pfRating" min="0" max="5" step="0.1" placeholder="e.g. 4.5">
+
+                <label>Rating Count</label>
+                <input type="number" id="pfRatingCount" min="0" step="1" placeholder="e.g. 42">
+
+                <label>Image URL or file name (optional)</label>
+                <input type="text" id="pfImage" placeholder="e.g. https://example.com/apple.png">
+                <input type="hidden" id="pfImageData">
+
+                <div class="admin-img-row">
+                    <label class="admin-choose-img" id="pfChooseImgBtn" for="pfImageFile">📷 Upload Image / Take Photo</label>
+                    <input type="file" id="pfImageFile" accept="image/jpeg,image/png,image/webp" data-act="[[&quot;onProductImageSelected&quot;,[&quot;$e&quot;]]]" class="admin-file-input">
+                    <span class="admin-img-hint">JPG, PNG or WEBP · max 1.5 MB · stored securely online · mobile: choose gallery or camera</span>
+                </div>
+                <div id="pfImagePreview" class="admin-img-preview-wrap"></div>
+
+                <label>Description</label>
+                <textarea id="pfDescription" rows="2"></textarea>
+
+                <div class="modal-actions">
+                    <button type="button" class="modal-cancel" data-act="[[&quot;closeProductModal&quot;,[]]]">Cancel</button>
+                    <button type="submit" class="modal-save">Save Product</button>
+                </div>
+
+            </form>
+
+        </div>
+    </div>
+
+
+    <!-- Coupon Add/Edit Modal -->
+    <div id="couponModal" class="admin-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="couponModalTitle">
+        <div class="admin-modal-box">
+            <div class="admin-modal-head">
+                <h3 id="couponModalTitle">New Coupon</h3>
+                <button class="modal-close" data-act="[[&quot;closeCouponModal&quot;,[]]]">✕</button>
+            </div>
+
+            <form id="couponForm" data-act="[[&quot;saveCoupon&quot;,[&quot;$e&quot;]]]">
+
+                <input type="hidden" id="cfId">
+
+                <label>Coupon Code</label>
+                <input type="text" id="cfCode" placeholder="e.g. WELCOME50" maxlength="20" required>
+
+                <label>Discount Type</label>
+                <select id="cfType">
+                    <option value="percentage">Percentage (%)</option>
+                    <option value="fixed">Fixed (₹)</option>
+                </select>
+
+                <label>Discount Value</label>
+                <input type="number" id="cfValue" min="0.01" step="0.01" placeholder="e.g. 10 (percentage) or 100 (fixed)" required>
+
+                <label>Minimum Order Value (₹) — 0 = no minimum</label>
+                <input type="number" id="cfMinOrder" min="0" step="0.01" value="0" required>
+
+                <label>Expiry Date</label>
+                <input type="date" id="cfExpiry" required>
+
+                <label>Usage Limit (blank = unlimited)</label>
+                <input type="number" id="cfUsageLimit" min="1" step="1" placeholder="e.g. 100">
+
+                <label>Per-User Limit (blank = unlimited)</label>
+                <input type="number" id="cfPerUserLimit" min="1" step="1" placeholder="e.g. 1">
+
+                <label><input type="checkbox" id="cfActive" checked> Active</label>
+
+                <div class="modal-actions">
+                    <button type="button" class="modal-cancel" data-act="[[&quot;closeCouponModal&quot;,[]]]">Cancel</button>
+                    <button type="submit" class="modal-save">Save Coupon</button>
+                </div>
+
+            </form>
+
+        </div>
+    </div>
+
+        <div id="adminReviewsSection" class="admin-section" style="display:none;">
+
+            <div class="admin-section-head">
+                <h2>Ratings & Reviews</h2>
+            </div>
+
+            <input type="text" id="adminReviewSearch" class="admin-search" placeholder="Search reviews (product / user)..." data-act="[[&quot;loadAdminReviews&quot;,[]]]">
+
+            <div id="adminReviewsList" class="admin-list">
+                <p style="text-align:center;color:var(--text-secondary);padding:40px;">Loading reviews...</p>
+            </div>
+
+        </div>
+
+        <div id="adminReturnsSection" class="admin-section" style="display:none;">
+
+            <div class="admin-section-head">
+                <h2>Return Requests</h2>
+            </div>
+
+            <input type="text" id="adminReturnSearch" class="admin-search" placeholder="Search returns (status / order / user)..." data-act="[[&quot;loadAdminReturns&quot;,[]]]">
+
+            <div id="adminReturnsList" class="admin-list">
+                <p style="text-align:center;color:var(--text-secondary);padding:40px;">Loading returns...</p>
+            </div>
+
+        </div>
+
+        <div id="adminSettingsSection" class="admin-section" style="display:none;">
+
+            <div class="admin-section-head">
+                <h2>Store Settings</h2>
+            </div>
+
+            <div id="adminSettingsBody">
+                <p style="text-align:center;color:var(--text-secondary);padding:40px;">Loading settings...</p>
+            </div>
+
+        </div>
+
+        <div id="adminCouponsSection" class="admin-section" style="display:none;">
+
+            <div class="admin-section-head">
+                <h2>Coupons & Discounts</h2>
+                <button type="button" class="secondary-btn" data-act="[[&quot;openCouponModal&quot;,[]]]">+ New Coupon</button>
+            </div>
+
+            <div id="adminCouponsBody">
+                <p style="text-align:center;color:var(--text-secondary);padding:40px;">Loading coupons...</p>
+            </div>
+
+        </div>
+
+    <!-- Delivery Management Section -->
+    <div id="adminDeliverySection" class="admin-section" style="display:none;">
+        <div class="admin-section-head">
+            <h2>Delivery Management</h2>
+        </div>
+        <div class="admin-stats" id="adminDeliveryStats">
+            <p style="text-align:center;color:var(--text-secondary);padding:20px;">Loading delivery data...</p>
+        </div>
+        <div class="admin-section" style="margin-top:24px;">
+            <h3>Delivery Partners</h3>
+            <div id="deliveryPartnersList" style="margin-top:16px;">
+                <p style="text-align:center;color:var(--text-secondary);padding:20px;">Loading delivery partners...</p>
+            </div>
+        </div>
+        <div class="admin-section" style="margin-top:24px;">
+            <h3>Today's Assignments</h3>
+            <div id="todayAssignmentsList" style="margin-top:16px;">
+                <p style="text-align:center;color:var(--text-secondary);padding:20px;">Loading today's assignments...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Customer Order History Modal -->
+    <div id="customerOrdersModal" class="admin-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="customerOrdersTitle">
+        <div class="admin-modal-box admin-modal-wide">
+            <div class="admin-modal-head">
+                <h3 id="customerOrdersTitle">Customer Orders</h3>
+                <button class="modal-close" data-act="[[&quot;closeCustomerOrders&quot;,[]]]">&times;</button>
+            </div>
+            <div id="customerOrdersBody"></div>
+        </div>
+    </div>
+
         <script src="api.js"></script>
 
         <script src="script.js" defer></script>
 
-        <script src="admin.js"></script>
+        <!-- chromeNotifications.js must load before admin.js: the notification
+             control UI is bound inside `if (typeof ChromeNotifications)`, which
+             admin.js evaluates at parse time. -->
+        <script src="chromeNotifications.js"></script>
 
         <script src="notifications.js"></script>
 
-        <script src="chromeNotifications.js"></script>
+        <script src="admin.js"></script>
 
         <script src="admin-partners.js"></script>
 
