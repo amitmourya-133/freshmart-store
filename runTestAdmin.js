@@ -25,6 +25,17 @@ const { spawn, spawnSync } = require("child_process");
 const dbGuard = require("./utils/dbGuard");
 const { startSmtpSink } = require("./smtpSink");
 
+// Static wiring guard first (no DB, no server): catches duplicate globals
+// across the admin page's script bundles and dead data-act handlers before the
+// expensive database/server setup. Regression for deferred script.js silently
+// overwriting admin.js's product renderer.
+try {
+    require("./verify_admin_wiring")();
+} catch (e) {
+    console.error("FATAL: " + e.message);
+    process.exit(1);
+}
+
 const TEST_DB = "fm_testadmin_e2e_" + process.pid;
 const BASE_URI = process.env.MONGODB_URI || "";
 const ADMIN_EMAIL = "testadmin-" + process.pid + "@freshmart.invalid";

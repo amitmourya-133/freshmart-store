@@ -58,10 +58,14 @@ const settingsSchema = new mongoose.Schema(
 // Fetch the singleton settings document, creating it with defaults on first use.
 // Never deletes or resets an existing document.
 settingsSchema.statics.getSettings = async function () {
-    let doc = await this.findOne({ key: "global" });
-    if (!doc) {
-        doc = await this.create({ key: "global" });
-    }
+    // Atomic upsert: the admin page fires several settings-dependent requests
+    // concurrently on first load. A findOne()-then-create() raced here and the
+    // losers hit the unique `key` index (E11000) and returned 500.
+    let doc = await this.findOneAndUpdate(
+        { key: "global" },
+        { $setOnInsert: { key: "global" } },
+        { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
     let changed = false;
     // Backfill new fields for documents created before this schema change.
     if (doc.minimumOrderValue === undefined || doc.minimumOrderValue === null) {

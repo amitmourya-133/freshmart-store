@@ -497,7 +497,7 @@ var timeline = (order.statusHistory || []).map(function(h) {
 '<div class="order-detail-block">' +
             '<h4>Customer</h4>' +
             '<p>' + esc(customer.name || order.name || "&#8212;") + '</p>' +
-            '<p><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-telephone"><path d="M1.878 1.013a.945.945 0 1 1 1.654 1.297l-7.857 9.82c-.54.655-1.263.232-1.263-.395l7.53-6.878L1.878 1.013zm1.157 6.059L1.223.76c.331.455.606.77 1.04.893l6.315 3.06c.434.21.703.43.703.633 0 .206-.06.397-.175.557l-5.863 8.575L11.038 5.53c-.161-.455-.375-.77-1.04-.893l-6.282-3.05a.95.95 0 0 1-.052-.311zM3.835 1.808c.187-.35.375-.648.423-.883l.308-.75c.048-.124.073-.253.073-.386 0-.131-.025-.255-.073-.379l-.315.75c-.048.123-.073.252-.073.386 0 .134.025.258.073.381l.312.75c.001.136.01.266.01.395v.025l-.008-.002M5.335 1.575c-.287.08- .534.23.73.437l-.695.655c-.184.173-.353.322-.496.437l-.59 1.47c-.12.31-.189.596-.189.831s.069.52.189.83l.59 1.47c.107.283.266.432.496.437l.695.655c.196-.207.443-.358.73-.437l.695-.655c.287.08.534.23.73.437l.59-1.47c.12-.31.189-.52.189-.831s-.069-.52-.189-.83l-.59-1.47z"/></svg> ' + esc(customer.phone || order.phone || "") + '</p>' +
+            '<p><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-telephone"><path d="M3.654 1.328a.678.678 0 0 0-1.015-.063L1.605 2.3c-.483.484-.661 1.169-.45 1.77a17.568 17.568 0 0 0 4.168 6.608 17.569 17.569 0 0 0 6.608 4.168c.601.211 1.286.033 1.77-.45l1.034-1.034a.678.678 0 0 0-.063-1.015l-2.307-1.794a.678.678 0 0 0-.58-.122l-2.19.547a1.745 1.745 0 0 1-1.657-.459L5.482 8.062a1.745 1.745 0 0 1-.46-1.657l.548-2.19a.678.678 0 0 0-.122-.58L3.654 1.328zM1.884.511a1.745 1.745 0 0 1 2.612.163L6.29 2.98c.329.423.445.974.315 1.494l-.547 2.19a.678.678 0 0 0 .178.643l2.457 2.457a.678.678 0 0 0 .644.178l2.189-.547a1.745 1.745 0 0 1 1.494.315l2.306 1.794c.829.645.905 1.87.163 2.611l-1.034 1.034c-.74.74-1.846 1.065-2.877.702a18.634 18.634 0 0 1-7.01-4.42 18.634 18.634 0 0 1-4.42-7.009c-.362-1.03-.037-2.137.703-2.877L1.885.511z"/></svg> ' + esc(customer.phone || order.phone || "") + '</p>' +
             '<p><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-envelope"><path d="M0 4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2V4zM1 3a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h2v1H1V4a1 1 0 0 0-1-1V3z"/></svg> ' + esc(customer.email || order.email || (order.user && order.user.email) || "") + '</p>' +
             '<p>' + (esc(customer.address || order.address || "") + (customer.city ? ", " + esc(customer.city) : "") + (customer.state ? ", " + esc(customer.state) : "") + (customer.pincode ? " - " + esc(customer.pincode) : "")) + '</p>' +
             adminLocationBlock(order) +
@@ -732,7 +732,7 @@ function loadAdminProducts() {
     })
         .then(function(products) {
             adminProducts = products;
-            renderProducts();
+            renderAdminProducts();
         })
         .catch(function(err) {
             // If the session expired (401), redirect to login cleanly
@@ -746,7 +746,11 @@ function loadAdminProducts() {
         });
 }
 
-function renderProducts() {
+// NOTE: must NOT be named renderProducts(). script.js (deferred) defines a
+// storefront renderProducts() and, because deferred scripts run after the
+// non-deferred admin.js, it would overwrite this function and the admin grid
+// would never render. Keep this name unique to the admin panel.
+function renderAdminProducts() {
     var search = document.getElementById("adminProductSearch");
     var term = search ? search.value.trim().toLowerCase() : "";
     var catEl = document.getElementById("adminProductCategory");
@@ -798,7 +802,7 @@ function renderProducts() {
         var img = adminProductImage(p);
         var safeGradient = String(p.gradient || "linear-gradient(135deg,#56ab2f,#a8e063)").replace(/[;"{}<>]|url\(|expression|javascript:/gi, "").slice(0, 200);
         var imgHtml = img
-            ? '<img class="admin-product-img" src="' + esc(img) + '" alt="' + esc(p.name || "") + '" data-act="[[&quot;$hideSelf&quot;,[]]]">'
+            ? '<img class="admin-product-img" src="' + esc(img) + '" alt="' + esc(p.name || "") + '">'
             : '';
         var stockTag = out ? '<span class="stock-tag out">Out of Stock</span>'
             : low ? '<span class="stock-tag low" title="Below configured threshold (' + lowThreshold + ')">Low Stock</span>'
@@ -841,6 +845,14 @@ function renderProducts() {
     });
 
     list.innerHTML = html;
+
+    // Broken remote/local image files must not leave a broken-image icon:
+    // hide the <img> so the emoji tile underneath shows instead. Bound here
+    // (not via inline onerror) to keep the strict CSP.
+    var imgs = list.querySelectorAll(".admin-product-img");
+    for (var k = 0; k < imgs.length; k++) {
+        imgs[k].addEventListener("error", function() { this.style.display = "none"; });
+    }
 }
 
 // Inline price edit: show the editor row

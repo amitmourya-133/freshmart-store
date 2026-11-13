@@ -152,19 +152,19 @@
 
             <div class="admin-stats" id="adminStats"></div>
 
-            <input type="text" id="adminProductSearch" class="admin-search" placeholder="Search products..." data-act="[[&quot;renderProducts&quot;,[]]]">
+            <input type="text" id="adminProductSearch" class="admin-search" placeholder="Search products..." data-act="[[&quot;renderAdminProducts&quot;,[]]]">
 
             <div class="admin-filters">
-                <select id="adminProductCategory" class="status-select" data-act="[[&quot;renderProducts&quot;,[]]]">
+                <select id="adminProductCategory" class="status-select" data-act="[[&quot;renderAdminProducts&quot;,[]]]">
                     <option value="">All categories</option>
                     <option>Vegetables</option>
                     <option>Fruits</option>
                     <option>Grocery</option>
                 </select>
-                <select id="adminProductSort" class="status-select" data-act="[[&quot;renderProducts&quot;,[]]]">
+                <select id="adminProductSort" class="status-select" data-act="[[&quot;renderAdminProducts&quot;,[]]]">
                     <option value="default">Default</option>
                     <option value="price-asc">Price: Low to High</option>
-                    <option value="price-desc">Price: High to High</option>
+                    <option value="price-desc">Price: High to Low</option>
                     <option value="stock-asc">Stock: Low to High</option>
                     <option value="stock-desc">Stock: High to Low</option>
                     <option value="name-asc">Name: A-Z</option>
