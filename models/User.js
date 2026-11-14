@@ -41,6 +41,12 @@ const userSchema = new mongoose.Schema(
         // created signup accounts start as emailVerified: false until their
         // signup OTP is confirmed.
         emailVerified: { type: Boolean, default: true },
+        // Pending email-change state (OTP-verified before activation).
+        pendingEmail: { type: String, default: null, lowercase: true, trim: true },
+        emailChangeOtpHash: { type: String, default: null },
+        emailChangeOtpExpiry: { type: Date, default: null },
+        emailChangeOtpAttempts: { type: Number, default: 0 },
+        emailChangeOtpResendAt: { type: Date, default: null },
         isAdmin: { type: Boolean, default: false },
         // Delivery-partner availability + last known location (opt-in sharing)
         isAvailable: { type: Boolean, default: false },

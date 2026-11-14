@@ -15,6 +15,8 @@ const {
     forgotPasswordReset,
     getMe,
     updateMe,
+    requestEmailChange,
+    verifyEmailChange,
     googleConfigStatus,
     googleAuthStart,
     googleLogin,
@@ -56,6 +58,10 @@ router.post("/google-login", authLimiter, googleLogin);
 // Protected
 router.get("/me", protect, getMe);
 router.put("/me", protect, updateMe);
+
+// Admin email change (OTP-verified, in place). Admin-only.
+router.post("/me/request-email-change", protect, admin, requestEmailChange);
+router.post("/me/verify-email-change", protect, admin, verifyEmailChange);
 
 // Admin only
 router.get("/admin/list", protect, admin, listUsers);

@@ -461,6 +461,17 @@ router.put("/status", protect, delivery, otpGuessBudget, partnerWriteLimiter, as
         // through to the idempotent completion below instead of being rejected
         // as an illegal transition, which would leave the finalize unfinished.
         const isDeliveryResume = status === "DELIVERED" && assignment.status === "DELIVERED";
+        // A fully completed delivery must not accept an OTP replay: the OTP is
+        // single-use and completion (incl. earnings credit) is already finalized.
+        // Only an interrupted completion (earnings not yet credited) may resume
+        // without re-verifying the OTP. This blocks replay of a consumed OTP
+        // while preserving crash-recovery for genuinely unfinished deliveries.
+        if (isDeliveryResume && assignment.earningsCreditedAt) {
+            return res.status(400).json({
+                success: false,
+                message: "Delivery already completed.",
+            });
+        }
         if (allowed.indexOf(status) === -1 && !isDeliveryResume) {
             return res.status(400).json({
                 success: false,

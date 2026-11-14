@@ -43,7 +43,7 @@ exports.protect = async (req, res, next) => {
 
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        req.user = await User.findById(decoded.id).select("-password -otpHash -otpExpiry -otpAttempts -otpResendAt -resetOtpHash -resetOtpExpiry -resetOtpAttempts -resetOtpResendAt -resetTokenHash -resetTokenExpiry");
+        req.user = await User.findById(decoded.id).select("-password -otpHash -otpExpiry -otpAttempts -otpResendAt -resetOtpHash -resetOtpExpiry -resetOtpAttempts -resetOtpResendAt -resetTokenHash -resetTokenExpiry -emailChangeOtpHash -emailChangeOtpExpiry -emailChangeOtpAttempts -emailChangeOtpResendAt");
         if (!req.user) {
             return res.status(401).json({
                 success: false,

@@ -88,7 +88,7 @@ function switchTab(tab) {
     else if (tab === "returns") loadAdminReturns();
     else if (tab === "coupons") loadAdminCoupons();
     else if (tab === "delivery") loadAdminDelivery();
-    else if (tab === "settings") renderSettingsTab();
+    else if (tab === "settings") { renderSettingsTab(); loadAccountEmail(); }
 }
 
 // Helper: resolve the image file for a product (override `image` field wins)
@@ -109,40 +109,23 @@ function adminProductImage(p) {
 // ORDERS TAB
 // ===============================
 
-function loadAdminOrders() {
-    var container = document.getElementById("adminOrdersList");
-    if (!container) return;
+// Request coordination for the Orders tab: prevents overlapping refreshes and
+// stale responses from overwriting newer results. A generation counter (not a
+// boolean lock) so a failed/timed-out refresh never permanently blocks later
+// ones.
+var adminOrdersReqId = 0;
+var adminOrdersAbort = null;
 
-    loadAdminOverview();
-
-    var searchEl = document.getElementById("adminOrderSearch");
-    var statusEl = document.getElementById("adminOrderStatus");
-    var paymentEl = document.getElementById("adminOrderPayment");
-    var filters = {
-        search: searchEl ? searchEl.value.trim() : "",
-        status: statusEl ? statusEl.value : "",
-        paymentStatus: paymentEl ? paymentEl.value : ""
-    };
-
-    container.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:40px;">Loading orders...</p>';
-
-    fetchAdminOrders(filters)
-        .then(function(orders) {
-            adminOrders = orders;
-            renderOrders();
-        })
-        .catch(function(err) {
-            container.innerHTML = '<p style="text-align:center;color:#e74c3c;padding:40px;">' +
-                esc(err.message || "Failed to load orders. Make sure you are logged in as admin.") + '</p>';
-        });
+function isAdminOrdersAbortError(err) {
+    return !!(err && (err.name === "AbortError" || /abort/i.test(String(err && err.message || ""))));
 }
 
 // Dashboard metrics for the Orders tab
-function loadAdminOverview() {
+function loadAdminOverview(signal) {
     var box = document.getElementById("adminOverview");
     if (!box) return;
     box.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:20px;">Loading overview...</p>';
-    fetchAdminOverview().then(function(m) {
+    fetchAdminOverview(signal).then(function(m) {
         m = m || {};
         var num = function(v) { return (v == null || isNaN(v)) ? 0 : v; };
         var cards = [
@@ -161,9 +144,64 @@ function loadAdminOverview() {
             return '<div class="admin-stat' + (c.warn ? " stat-warn" : "") + '"><strong>' + c.value + '</strong><span>' + c.label + '</span></div>';
         }).join("");
     }).catch(function(err) {
+        if (isAdminOrdersAbortError(err)) return;
         box.innerHTML = '<p style="text-align:center;color:#e74c3c;padding:20px;">' +
-            esc((err && err.message) || "Failed to load overview") + '</p>';
+            esc((err && err.message) || "Failed to load overview") + ' <button class="row-btn" data-act="loadAdminOverview()">Retry</button></p>';
     });
+}
+
+function loadAdminOrders() {
+    var container = document.getElementById("adminOrdersList");
+    if (!container) return;
+
+    if (adminOrdersAbort) { try { adminOrdersAbort.abort(); } catch (e) {} }
+    var abort = new AbortController();
+    adminOrdersAbort = abort;
+    var reqId = ++adminOrdersReqId;
+    var timedOut = false;
+    var timer = setTimeout(function() {
+        timedOut = true;
+        try { abort.abort(); } catch (e) {}
+    }, 15000);
+
+    container.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:40px;">Loading orders...</p>';
+    loadAdminOverview(abort.signal);
+
+    var searchEl = document.getElementById("adminOrderSearch");
+    var statusEl = document.getElementById("adminOrderStatus");
+    var paymentEl = document.getElementById("adminOrderPayment");
+    var filters = {
+        search: searchEl ? searchEl.value.trim() : "",
+        status: statusEl ? statusEl.value : "",
+        paymentStatus: paymentEl ? paymentEl.value : ""
+    };
+
+    fetchAdminOrders(filters, abort.signal)
+        .then(function(orders) {
+            if (reqId !== adminOrdersReqId) return;
+            adminOrders = orders;
+            try { renderOrders(); } catch (e) {
+                container.innerHTML = '<p style="text-align:center;color:#e74c3c;padding:40px;">' +
+                    esc((e && e.message) || "Failed to render orders.") + ' <button class="row-btn" data-act="loadAdminOrders()">Retry</button></p>';
+            }
+        })
+        .catch(function(err) {
+            if (reqId !== adminOrdersReqId) return;
+            if (isAdminOrdersAbortError(err)) {
+                if (timedOut) {
+                    container.innerHTML = '<p style="text-align:center;color:#e74c3c;padding:40px;">' +
+                        "Request timed out. Please retry." + ' <button class="row-btn" data-act="loadAdminOrders()">Retry</button></p>';
+                }
+                return;
+            }
+            container.innerHTML = '<p style="text-align:center;color:#e74c3c;padding:40px;">' +
+                esc((err && err.message) || "Failed to load orders. Make sure you are logged in as admin.") +
+                ' <button class="row-btn" data-act="loadAdminOrders()">Retry</button></p>';
+        })
+        .finally(function() {
+            clearTimeout(timer);
+            if (reqId === adminOrdersReqId) adminOrdersAbort = null;
+        });
 }
 
 // Dashboard tab: real DB-backed store metrics + sales analytics
@@ -1929,6 +1967,28 @@ function renderSettingsTab() {
                 (badRange ? '<p class="settings-hint warn">⚠️ The free-delivery threshold is below the minimum order value. With this combination every order becomes eligible for free delivery — make sure that is intentional.</p>' : '') +
                 '<p class="settings-hint">Customers automatically get FREE delivery on orders at or above the threshold. Setting the charge to 0 disables delivery fees; setting the threshold to 0 always charges. The minimum order value blocks below-threshold checkouts entirely (0 keeps the store fully open).</p>' +
                 '<p class="settings-hint">When the delivery radius is above 0, orders without a captured GPS location and destinations outside the radius are rejected with a clear message. Keep the radius at 0 until you have entered the store coordinates.</p>' +
+                '<div class="settings-card" style="margin-top:16px;">' +
+                '<div class="settings-head"><h3>🔐 Account Email</h3><p>Change the login email for this admin account. A 6-digit code is sent to the new address and must be verified before the change takes effect. The password, role and permissions are preserved.</p></div>' +
+                '<div class="settings-row">' +
+                    '<label for="acctCurrentEmail">Current Email</label>' +
+                    '<input type="email" id="acctCurrentEmail" class="stock-input" readonly>' +
+                '</div>' +
+                '<div class="settings-row">' +
+                    '<label for="acctNewEmail">New Email</label>' +
+                    '<input type="email" id="acctNewEmail" class="stock-input" placeholder="new@example.com">' +
+                '</div>' +
+                '<div class="settings-row">' +
+                    '<button class="row-btn verify" data-act="requestAdminEmailChange()">Send Verification Code</button>' +
+                '</div>' +
+                '<div class="settings-row" id="acctOtpRow" style="display:none;">' +
+                    '<label for="acctOtp">Verification Code (6 digits)</label>' +
+                    '<input type="text" id="acctOtp" class="stock-input" maxlength="6" placeholder="123456">' +
+                '</div>' +
+                '<div class="settings-row" id="acctVerifyRow" style="display:none;">' +
+                    '<button class="row-btn verify" data-act="verifyAdminEmailChange()">Verify & Update Email</button>' +
+                '</div>' +
+                '<div class="settings-status" id="acctEmailStatus" style="display:none;"></div>' +
+            '</div>' +
                 '<button class="row-btn verify settings-save" data-act="saveAdminSettings()">💾 Save Settings</button>' +
                 '<div class="settings-status" id="settingsStatus" style="display:none;"></div>' +
             '</div>';
@@ -2621,4 +2681,66 @@ function downloadSelectedImage(idx) {
             window.__lastDownloadedImage = info.imagePath;
         })
         .catch(function (e) { out.innerHTML = "<div style='color:red;'>Error: " + escapeHtml(e.message) + "</div>"; });
+}
+
+
+// ---------- Account email change (admin) ----------
+function loadAccountEmail() {
+    var el = document.getElementById("acctCurrentEmail");
+    if (!el) return;
+    apiGetMe().then(function(u) {
+        if (u && u.email) el.value = u.email;
+    }).catch(function() { /* non-fatal */ });
+}
+
+function requestAdminEmailChange() {
+    var newEmail = document.getElementById("acctNewEmail");
+    var status = document.getElementById("acctEmailStatus");
+    if (!newEmail || !status) return;
+    var val = newEmail.value.trim();
+    if (!val) { showToast("Please enter a new email.", "error"); return; }
+    status.style.display = "none";
+    apiRequestEmailChange(val).then(function(data) {
+        showToast("Verification code sent to " + val + ".", "success");
+        var otpRow = document.getElementById("acctOtpRow");
+        var verifyRow = document.getElementById("acctVerifyRow");
+        if (otpRow) otpRow.style.display = "flex";
+        if (verifyRow) verifyRow.style.display = "flex";
+        status.style.display = "block";
+        status.textContent = (data && data.message) ? data.message : "Code sent. Enter it below.";
+        status.className = "settings-status ok";
+    }).catch(function(err) {
+        showToast((err && err.message) || "Request failed.", "error");
+        status.style.display = "block";
+        status.textContent = (err && err.message) || "Request failed.";
+        status.className = "settings-status warn";
+    });
+}
+
+function verifyAdminEmailChange() {
+    var otp = document.getElementById("acctOtp");
+    var status = document.getElementById("acctEmailStatus");
+    var current = document.getElementById("acctCurrentEmail");
+    if (!otp || !status) return;
+    var code = otp.value.trim();
+    if (!/^[0-9]{6}$/.test(code)) { showToast("Enter the 6-digit code.", "error"); return; }
+    apiVerifyEmailChange(code).then(function(data) {
+        showToast("Login email updated successfully.", "success");
+        if (current && data && data.email) current.value = data.email;
+        var otpRow = document.getElementById("acctOtpRow");
+        var verifyRow = document.getElementById("acctVerifyRow");
+        var newEmail = document.getElementById("acctNewEmail");
+        if (otpRow) otpRow.style.display = "none";
+        if (verifyRow) verifyRow.style.display = "none";
+        if (newEmail) newEmail.value = "";
+        if (otp) otp.value = "";
+        status.style.display = "block";
+        status.textContent = "Email updated to " + (data && data.email ? data.email : "new address") + ".";
+        status.className = "settings-status ok";
+    }).catch(function(err) {
+        showToast((err && err.message) || "Verification failed.", "error");
+        status.style.display = "block";
+        status.textContent = (err && err.message) || "Verification failed.";
+        status.className = "settings-status warn";
+    });
 }

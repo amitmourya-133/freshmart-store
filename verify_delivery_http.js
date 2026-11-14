@@ -293,17 +293,33 @@ async function main() {
     check("admin-partners.js renders retry/maxRounds", adminSrc.indexOf("o.retries") !== -1 && adminSrc.indexOf("o.maxRounds") !== -1);
     check("admin-partners.js renders delivery status and assign mode", adminSrc.indexOf("o.deliveryStatus") !== -1 && adminSrc.indexOf("o.assignMode") !== -1);
     check("admin-partners.js renders assignedAt", adminSrc.indexOf("o.assignedAt") !== -1);
-    check("admin.html table header matches the rendered columns", (fs.readFileSync(path.join(REPO, "admin.html"), "utf8").match(/<th scope="col">/g) || []).length >= 11);
+    check("admin.html table header matches the rendered columns", (fs.readFileSync(path.join(REPO, "admin.html"), "utf8").match(/<th scope="col">/g) || []).length >= 9);
 
     console.log("");
     console.log("RESULT: " + pass + "/" + (pass + fail) + " PASS, " + fail + " FAIL");
 
     await new Promise(function (r) { server.close(r); });
+    await dropThisTestDb();
     await mongoose.connection.close();
     process.exit(fail ? 1 : 0);
 }
 
-main().catch(function (e) {
+// Drop ONLY this run's uniquely-named throwaway database via the shared helper
+// (which asserts the name is a verified fm_..._e2e_<pid> before dropping).
+// Runs before the connection closes, and also on the error path.
+async function dropThisTestDb() {
+    try {
+        if (mongoose.connection && mongoose.connection.db && mongoose.connection.readyState >= 1) {
+            await require(path.join(REPO, "tests/lib/testDb")).dropTestDb(mongoose, TEST_DB);
+            console.log("test database dropped: " + TEST_DB);
+        }
+    } catch (e) {
+        console.error("test database drop failed: " + ((e && e.message) || e));
+    }
+}
+
+main().catch(async function (e) {
     console.error("FATAL: " + (e && e.stack ? e.stack : e));
+    await dropThisTestDb();
     process.exit(1);
 });

@@ -902,3 +902,147 @@ exports.listUsers = async (req, res) => {
         res.status(500).json({ success: false, message: safeErrorMessage(error) });
     }
 };
+// Keyed OTP hash (HMAC-SHA256) for the email-change flow. Keying the hash
+// prevents offline brute-force of a captured hash even though the OTP is only
+// 6 digits; plain SHA-256 of a 6-digit code would be trivially reversible.
+function hashOtpHmac(value) {
+    const key = process.env.JWT_SECRET || process.env.OTP_SECRET || "freshmart-otp-secret";
+    return crypto.createHmac("sha256", key).update(String(value)).digest("hex");
+}
+
+// ===============================
+// ADMIN EMAIL CHANGE (OTP-verified, in place)
+// ===============================
+// Only the authenticated admin may change their own login email. The new
+// address is NOT activated until the OTP sent to it is verified. The user
+// document (_id, password, role, isAdmin, googleId, ...) is updated in place
+// so history and permissions are preserved; no second account is created.
+
+const EMAIL_CHANGE_OTP_TTL_MS = 10 * 60 * 1000;   // 10 minutes
+const EMAIL_CHANGE_MAX_ATTEMPTS = 5;
+const EMAIL_CHANGE_RESEND_COOLDOWN_MS = 60 * 1000; // 60 seconds
+
+// POST /api/users/me/request-email-change  (protect + admin)
+exports.requestEmailChange = async (req, res) => {
+    try {
+        const user = req.user;
+        if (!user || user.role !== "admin") {
+            return res.status(403).json({ success: false, message: "Admin access only" });
+        }
+        const newEmail = normalizeEmail(req.body && req.body.newEmail);
+        if (!validEmail(newEmail)) {
+            return res.status(400).json({ success: false, message: "Please enter a valid email address." });
+        }
+        if (newEmail === normalizeEmail(user.email)) {
+            return res.status(400).json({ success: false, message: "New email must differ from the current email." });
+        }
+
+        if (user.emailChangeOtpResendAt) {
+            const elapsed = Date.now() - new Date(user.emailChangeOtpResendAt).getTime();
+            if (elapsed < EMAIL_CHANGE_RESEND_COOLDOWN_MS) {
+                const wait = Math.ceil((EMAIL_CHANGE_RESEND_COOLDOWN_MS - elapsed) / 1000);
+                return res.status(429).json({ success: false, message: "Please wait " + wait + " seconds before requesting another code.", retryAfter: wait });
+            }
+        }
+
+        const existing = await User.findOne({ email: newEmail }).select("_id").lean();
+        if (existing) {
+            return res.status(409).json({ success: false, message: "That email is already registered to another account." });
+        }
+
+        const otp = generateOtp();
+        const now = Date.now();
+        user.pendingEmail = newEmail;
+        user.emailChangeOtpHash = hashOtpHmac(otp);
+        user.emailChangeOtpExpiry = new Date(now + EMAIL_CHANGE_OTP_TTL_MS);
+        user.emailChangeOtpAttempts = 0;
+        user.emailChangeOtpResendAt = new Date(now);
+        await user.save();
+
+        let delivered = false;
+        try {
+            const result = await sendOtpEmail({ to: newEmail, otp: otp, purpose: "email change verification" });
+            delivered = !!(result && result.accepted);
+            if (!delivered) {
+                console.error("[email-change] OTP send not accepted by provider for " + newEmail);
+            }
+        } catch (err) {
+            console.error("[email-change] OTP send threw: " + ((err && (err.code || err.name)) || "unknown"));
+        }
+        if (!delivered) {
+            user.pendingEmail = null;
+            user.emailChangeOtpHash = null;
+            user.emailChangeOtpExpiry = null;
+            user.emailChangeOtpAttempts = 0;
+            user.emailChangeOtpResendAt = null;
+            await user.save();
+            return res.status(500).json({ success: false, message: "Unable to send the verification code. Please try again." });
+        }
+
+        return res.json({
+            success: true,
+            message: "A verification code has been sent to " + newEmail + ".",
+            pendingEmail: newEmail,
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: safeErrorMessage(error) });
+    }
+};
+
+// POST /api/users/me/verify-email-change  (protect + admin)
+exports.verifyEmailChange = async (req, res) => {
+    try {
+        const user = req.user;
+        if (!user || user.role !== "admin") {
+            return res.status(403).json({ success: false, message: "Admin access only" });
+        }
+        const pending = user.pendingEmail;
+        const storedHash = user.emailChangeOtpHash;
+        const expiry = user.emailChangeOtpExpiry;
+        const attempts = Number(user.emailChangeOtpAttempts || 0);
+
+        if (!pending || !storedHash || !expiry) {
+            return res.status(400).json({ success: false, message: "No pending email change. Request a new code first." });
+        }
+        if (new Date(expiry).getTime() < Date.now()) {
+            return res.status(400).json({ success: false, message: "The verification code has expired. Request a new one." });
+        }
+        if (attempts >= EMAIL_CHANGE_MAX_ATTEMPTS) {
+            return res.status(429).json({ success: false, message: "Too many incorrect attempts. Request a new code." });
+        }
+
+        const otp = String((req.body && req.body.otp) || "").trim();
+        if (!/^\d{6}$/.test(otp)) {
+            return res.status(400).json({ success: false, message: "Enter the 6-digit verification code." });
+        }
+        if (!safeEqual(hashOtpHmac(otp), storedHash)) {
+            await User.updateOne({ _id: user._id, emailChangeOtpHash: storedHash }, { $inc: { emailChangeOtpAttempts: 1 } });
+            const left = Math.max(0, EMAIL_CHANGE_MAX_ATTEMPTS - (attempts + 1));
+            return res.status(400).json({ success: false, message: "Incorrect code. " + left + " attempt(s) left." });
+        }
+
+        const conflict = await User.findOne({ email: pending }).select("_id").lean();
+        if (conflict && String(conflict._id) !== String(user._id)) {
+            await User.updateOne({ _id: user._id }, {
+                $set: { pendingEmail: null, emailChangeOtpHash: null, emailChangeOtpExpiry: null, emailChangeOtpAttempts: 0, emailChangeOtpResendAt: null }
+            });
+            return res.status(409).json({ success: false, message: "That email was just registered by another account. Request a new code." });
+        }
+
+        const now = new Date();
+        const result = await User.updateOne(
+            { _id: user._id, emailChangeOtpHash: storedHash, emailChangeOtpExpiry: { $gt: now } },
+            { $set: { email: pending, emailVerified: true, pendingEmail: null, emailChangeOtpHash: null, emailChangeOtpExpiry: null, emailChangeOtpAttempts: 0, emailChangeOtpResendAt: null } }
+        );
+        if (!result || result.modifiedCount !== 1) {
+            return res.status(409).json({ success: false, message: "Verification could not be completed (already used or expired). Request a new code." });
+        }
+
+        return res.json({ success: true, message: "Login email updated successfully.", email: pending });
+    } catch (error) {
+        if (error && error.code === 11000) {
+            return res.status(409).json({ success: false, message: "That email is already registered to another account." });
+        }
+        return res.status(500).json({ success: false, message: safeErrorMessage(error) });
+    }
+};

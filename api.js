@@ -464,16 +464,16 @@ function refreshAuthProfile() {
 
 // ---------- ADMIN ----------
 // Fetch all orders (admin) with optional filters: status, paymentStatus, search
-function fetchAdminOrders(filter) {
+function fetchAdminOrders(filter, signal) {
     var url = API.base + "/orders";
     var query = [];
     if (filter && filter.status) query.push("status=" + encodeURIComponent(filter.status));
     if (filter && filter.paymentStatus) query.push("paymentStatus=" + encodeURIComponent(filter.paymentStatus));
     if (filter && filter.search) query.push("search=" + encodeURIComponent(filter.search));
     if (query.length) url += "?" + query.join("&");
-    return fetch(url, {
-        headers: getAuthHeaders()
-    })
+    var opts = { headers: getAuthHeaders() };
+    if (signal) opts.signal = signal;
+    return fetch(url, opts)
         .then(function(res) { return res.json(); })
         .then(function(data) {
             if (!data.success) throw new Error(data.message || "Failed");
@@ -482,10 +482,10 @@ function fetchAdminOrders(filter) {
 }
 
 // Admin dashboard metrics (orders, customers, low stock, sales)
-function fetchAdminOverview() {
-    return fetch(API.base + "/orders/admin/overview", {
-        headers: getAuthHeaders()
-    })
+function fetchAdminOverview(signal) {
+    var opts = { headers: getAuthHeaders() };
+    if (signal) opts.signal = signal;
+    return fetch(API.base + "/orders/admin/overview", opts)
         .then(function(res) {
             if (res.status === 401) {
                 return res.json().then(function(json) {
@@ -730,6 +730,34 @@ function apiGetMe() {
         .then(function(data) {
             if (!data.success) throw new Error(data.message || "Not authorized");
             return data.data;
+        });
+}
+
+// Request an OTP to change the logged-in admin's email (sent to the NEW address).
+function apiRequestEmailChange(newEmail) {
+    return fetch(API.base + "/users/me/request-email-change", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ newEmail: newEmail })
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Request failed");
+            return data;
+        });
+}
+
+// Verify the OTP and activate the new email for the logged-in admin.
+function apiVerifyEmailChange(otp) {
+    return fetch(API.base + "/users/me/verify-email-change", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ otp: otp })
+    })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.success) throw new Error(data.message || "Verification failed");
+            return data;
         });
 }
 
