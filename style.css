@@ -185,12 +185,16 @@ header {
     color: var(--green-primary);
     cursor: pointer;
     white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .header-actions {
     display: flex;
     align-items: center;
     gap: 10px;
+    flex-wrap: wrap;
+    min-width: 0;
+    flex-shrink: 1;
 }
 
 .auth-area {
@@ -198,6 +202,7 @@ header {
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
+    min-width: 0;
 }
 
 .auth-name-btn {
@@ -263,6 +268,7 @@ header {
     flex: 1 1 0%;
     min-width: 200px;
     max-width: 460px;
+    flex-shrink: 1;
 }
 
 .search-box input {
@@ -432,6 +438,8 @@ body.dark-mode .search-suggest { background: var(--bg-tertiary); border-color: v
     display: flex;
     align-items: center;
     gap: 12px;
+    min-width: 0;
+    flex-shrink: 0;
 }
 
 .hamburger {
@@ -467,13 +475,15 @@ body.dark-mode .search-suggest { background: var(--bg-tertiary); border-color: v
     justify-content: center;
     gap: 16px;
     flex: 1 1 0%;
-    min-width: 240px;
+    min-width: 0;
 }
 
 .nav-links {
     display: flex;
     align-items: center;
     gap: 4px;
+    min-width: 0;
+    flex-shrink: 0;
 }
 
 .nav-link {
